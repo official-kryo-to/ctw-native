@@ -32,11 +32,10 @@ mods/
   Trumpify/        mod.ini, textures/*.png
 ```
 
-Start the game and press **F4**. Click a mod to see its options; the switch on the right turns it on or off (remembered in
-`mods/enabled.ini`).
+Start the game and press **F4** for the mod menu.
 
-`ModMenu.dll` and the two example mods come from building this kit (see [section 4](#4-your-first-code-mod)), or
-from `python scripts/export_pc.py --with-modkit`.
+The game folder the Porter makes already has `ModMenu.dll` and the two example mods. They also come from building
+this kit (see [section 4](#4-your-first-code-mod)).
 
 ## 2. Your first texture mod
 
@@ -89,7 +88,6 @@ that each put one picture on the adverts of an atlas.
 Tips:
 
 - Keep the exported texture's width and height for layers; for replacements, keep its aspect ratio.
-- Switching a texture mod on or off in the menu takes effect right away.
 - Two mods that change the same texture: the one loaded last (alphabetical folder order) wins.
 
 ## 4. Your first code mod
@@ -130,8 +128,8 @@ ctw_code_mod(hello Hello)      # builds examples/hello/hello.c into build/mods/H
 ```
 
 Build again and copy `build/mods/Hello/` into the game's `mods/` folder. A mod may also export
-`ctw_mod_shutdown()`, called before the game exits. Switching a code mod off stops its callbacks at once; the DLL
-itself is unloaded at the next start.
+`ctw_mod_shutdown()`, called before the game exits. A code mod switched off in the menu gets no more callbacks; it
+is unloaded at the next start.
 
 ## 5. The mod API
 
@@ -163,9 +161,16 @@ for an older version keeps working; if your mod needs a newer function, check `a
 
 ## 6. Windows and menus with ctw_ui.h
 
-`include/ctw_ui.h` is optional, plain C and header-only: windows, buttons, switches, sliders, scrolling lists and
-text fields, drawn with the mod API and used with the mouse. The mod menu and the Cheat Example's vehicle spawner
-are built with it.
+`include/ctw_ui.h` is optional, plain C and header-only: windows, buttons, switches, sliders, scrolling lists, text
+fields and wrapped text, drawn with the mod API. The mod menu and the Cheat Example's vehicle spawner are built with
+it.
+
+Two things keep windows tidy:
+
+- **Sizes follow the game font.** Use `ctw_ui_row_h`, `ctw_ui_slider_h`, `ctw_ui_title_h` and `ctw_ui_footer_h`
+  for heights and `ctw_ui_lh` for lines of text, not fixed pixel numbers.
+- **Windows have a place.** `ctw_ui_side_area` gives a window a rectangle on the right that stays clear of the
+  game's clock, its help line and the open mod menu.
 
 ```c
 #include "ctw_ui.h"
@@ -176,11 +181,15 @@ static CtwUiScroll list;
 
 static void hud(void* user) {
     ctw_ui_begin(&ui, api);
-    if (ctw_ui_panel(&ui, 20, 20, 300, 400, "MY WINDOW", NULL)) { /* close clicked */ }
-    if (ctw_ui_button(&ui, 34, 70, 120, 30, "Click me")) api->log(self, "clicked");
-    ctw_ui_scroll_begin(&ui, 1, &list, 34, 110, 272, 290, content_height);
+    CtwUiRect r = ctw_ui_side_area(api, 420.f);                      /* at most 420 pixels wide */
+    if (ctw_ui_panel(&ui, r.x, r.y, r.w, r.h, "MY WINDOW", NULL)) { /* close clicked */ }
+    float y = r.y + ctw_ui_title_h(&ui) + 10.f;
+    if (ctw_ui_button(&ui, r.x + 14.f, y, 160.f, ctw_ui_row_h(&ui), "Click me")) api->log(self, "clicked");
+    y += ctw_ui_row_h(&ui) + 10.f;
+    ctw_ui_scroll_begin(&ui, 1, &list, r.x + 14.f, y, r.w - 28.f, r.y + r.h - ctw_ui_footer_h(&ui) - y, content_height);
     /* draw rows at y - list.pos */
     ctw_ui_scroll_end(&ui);
+    ctw_ui_footer(&ui, r.x, r.y, r.w, r.h, CTW_UI_DIM, "F9: close");
 }
 ```
 

@@ -35,7 +35,7 @@ target_link_libraries(ctw_showcase PRIVATE ctw_engine SDL2::SDL2main)
 # (data/gtactw.ico). Standalone exports (scripts/export_pc.py) put the icon into the exe themselves.
 # -DCTW_RELEASE=ON: no console window (scripts/export_pc.py wants a release build).
 option(CTW_RELEASE "release build: windowed, no console" OFF)
-set(CTW_VERSION 0.1.0)
+set(CTW_VERSION 0.1.0 CACHE STRING "Version written into GTACTW.exe (releases pass the Porter's version)")
 set(CTW_ICON_LINE "")
 if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/data/gtactw.ico)
     configure_file(${CMAKE_CURRENT_LIST_DIR}/data/gtactw.ico ${CMAKE_BINARY_DIR}/gtactw.ico COPYONLY)

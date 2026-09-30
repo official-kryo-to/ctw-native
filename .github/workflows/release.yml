@@ -1,0 +1,124 @@
+name: Release
+
+# Fires on a VERSION BUMP, not on every push - the same ritual as Kryoto Forge and Kryoto Desktop.
+#
+# The first job reads `version` out of porter/src-tauri/tauri.conf.json and stops unless that version has no tag
+# yet. So a release is: `pnpm version:set 0.2.0` in porter/ (sets package.json, Cargo.toml and tauri.conf.json
+# together), write the porter/CHANGELOG.md entry, push to main. No tagging by hand, and no release from an
+# unrelated commit.
+#
+# What it publishes, as release v<version>:
+#   CTW-Native-Porter.exe   the Porter, with GTACTW.exe, the mod menu and the example mods inside
+# plus GitHub's source archives of the tagged commit, which are the corresponding source for the GPL.
+# There is no auto-update: the Porter shows its version, and people download a new one from Releases.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'porter/src-tauri/tauri.conf.json'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      needed: ${{ steps.v.outputs.needed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        shell: bash
+        working-directory: porter
+        run: |
+          node scripts/check-version.mjs
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$version" >/dev/null 2>&1; then
+            echo "v$version already tagged; nothing to release."
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.needed == 'true'
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The game and the mod kit, exactly as scripts/export_pc.py builds them (MinGW; MSVC is not supported).
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja git
+      - name: Build the game and the mod kit
+        shell: msys2 {0}
+        run: |
+          cmake -S . -B port/build-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCTW_RELEASE=ON \
+            -DCTW_BUILD_MODKIT=ON -DBUILD_TESTING=OFF -DCTW_VERSION="$VERSION"
+          cmake --build port/build-release
+          ls -la port/build-release/GTACTW.exe port/build-release/mods
+
+      # The Porter, with that build packed inside (porter/src-tauri/build.rs).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: porter
+      - name: Build the Porter
+        working-directory: porter
+        shell: bash
+        env:
+          CTW_GAME_BUILD: ${{ github.workspace }}/port/build-release
+        run: |
+          pnpm install --frozen-lockfile
+          cargo test -p ctw-porter-core
+          pnpm app:build
+          cp target/release/ctw-native-porter.exe ../CTW-Native-Porter.exe
+
+      - name: Release notes from the changelog
+        shell: bash
+        run: |
+          awk -v v="$VERSION" '
+            /^## / { if (found) exit; heading = $0; sub(/^## +\[?/, "", heading); if (index(heading, v) == 1) { found = 1; next } }
+            found { print }
+          ' porter/CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "See porter/CHANGELOG.md for what changed." > notes.md
+          cat >> notes.md <<'NOTES'
+
+          ### How to use it
+
+          1. Download **CTW-Native-Porter.exe** below and start it (Windows 10 or 11).
+          2. Drop your own GTA: Chinatown Wars APK (Android **4.4.243**) on it and press **Port it**.
+          3. Press **Play**, or use the shortcut on your desktop.
+
+          Windows may warn about an unknown publisher the first time: choose *More info*, then *Run anyway*.
+          The Porter contains no game files; it reads them from your APK.
+          NOTES
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v$VERSION" CTW-Native-Porter.exe \
+            --target "$GITHUB_SHA" --title "CTW-Native v$VERSION" --notes-file notes.md

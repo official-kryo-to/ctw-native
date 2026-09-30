@@ -3,10 +3,9 @@
 // See LICENSE in the repository root.
 /*
  * Cheat Example - a code mod showing most of the mod API:
- *   - vehicle spawner (F7): every vehicle with its picture, name and ID; search, scroll, click to spawn
- *   - free camera (F8): mouse to look, WASD to fly, Space / Ctrl up and down, Shift faster, wheel sets the speed,
- *     Page Up / Page Down the render distance
- *   - speed multiplier, time speed multiplier and render distance (in the F4 menu)
+ *   - vehicle spawner (F7)
+ *   - free camera (F8)
+ *   - speed, time speed and render distance (in the F4 menu)
  * Uses ctw_ui.h for the window, the search field and the scrolling list.
  */
 #include "ctw_mod.h"
@@ -182,27 +181,28 @@ static void apply_render_distance(void) {   /* also while the game is paused: ca
 
 /* ---- the spawner window ---------------------------------------------------------------------------------- */
 static void draw_spawner(void) {
-    const float W = (float)api->screen_width(), H = (float)api->screen_height();
-    float pw = W - 480.f;
-    if (pw > 640.f) pw = 640.f;
-    if (pw < 360.f) pw = W - 40.f < 360.f ? W - 40.f : 360.f;
-    const float px = W - pw - 20.f, py = 20.f, ph = H - 40.f;
+    /* On the right, below the game's clock; beside the F4 menu while that is open. */
+    const CtwUiRect r = ctw_ui_side_area(api, 640.f);
+    const float px = r.x, py = r.y, pw = r.w, ph = r.h, row = ctw_ui_row_h(&ui);
     char line[64];
     snprintf(line, sizeof line, "%d", shown_count);
     if (ctw_ui_panel(&ui, px, py, pw, ph, "VEHICLES", line)) { set_spawner(0); return; }
 
+    const float top = py + ctw_ui_title_h(&ui) + 12.f;
     int was_focused = search_focused;
-    if (ctw_ui_textbox(&ui, px + 14.f, py + 48.f, pw - 28.f, 34.f, filter, sizeof filter, &search_focused,
+    if (ctw_ui_textbox(&ui, px + 14.f, top, pw - 28.f, row, filter, sizeof filter, &search_focused,
                        "Search by name or ID...")) {
         refilter();
         scroll.target = 0.f;
     }
     if (was_focused != search_focused) update_game_input();
 
-    /* grid of cards */
-    const float gx = px + 14.f, gy = py + 94.f, gw = pw - 28.f, gh = ph - 94.f - 36.f;
-    const int cols = gw >= 520.f ? 3 : 2;
-    const float gap = 10.f, cw = (gw - 14.f - gap * (cols - 1)) / cols, ch = cw * 0.62f + 44.f;
+    /* grid of cards: the picture, then the name and the ID under it */
+    const float gx = px + 14.f, gy = top + row + 12.f, gw = pw - 28.f, gh = py + ph - ctw_ui_footer_h(&ui) - 10.f - gy;
+    const int cols = gw >= 520.f ? 3 : gw >= 300.f ? 2 : 1;
+    const float gap = 10.f, cw = (gw - 14.f - gap * (cols - 1)) / cols;
+    const float name_h = ctw_ui_lh(&ui, 1.05f), id_h = ctw_ui_lh(&ui, 0.85f), text_h = 8.f + name_h + 2.f + id_h + 8.f;
+    const float pic_h = cw * 0.55f, ch = 4.f + pic_h + text_h;
     const int rows = (shown_count + cols - 1) / cols;
     ctw_ui_scroll_begin(&ui, 2, &scroll, gx, gy, gw, gh, rows * (ch + gap));
     const int in_grid = ctw_ui_in(&ui, gx, gy, gw - 14.f, gh);
@@ -211,24 +211,43 @@ static void draw_spawner(void) {
         if (cy + ch < gy || cy > gy + gh) continue;       /* only what is on screen */
         const int id = shown[i];
         const int hot = in_grid && ctw_ui_in(&ui, cx, cy, cw, ch);
-        api->draw_rect(cx, cy, cw, ch, hot ? 0xE0B02040u : 0xFFFFFF10u);
+        api->draw_rect(cx, cy, cw, ch, hot ? 0xE0B02040u : CTW_UI_ROW);
         if (hot) api->draw_rect(cx, cy + ch - 3.f, cw, 3.f, CTW_UI_ACCENT);
-        api->draw_vehicle(id, cx + 4.f, cy + 4.f, cw - 8.f, ch - 48.f, hot ? spin : 35.f);
+        api->draw_vehicle(id, cx + 4.f, cy + 4.f, cw - 8.f, pic_h, hot ? spin : 35.f);
         api->set_clip(gx, gy, gw, gh);                   /* the picture changes the drawing state */
         const char* name = api->vehicle_name(id);
-        ctw_ui_text_fit(&ui, cx + 10.f, cy + ch - 40.f, 1.05f, CTW_UI_TEXT, name ? name : "?", cw - 20.f);
+        const float ty = cy + 4.f + pic_h + 8.f;
+        ctw_ui_text_fit(&ui, cx + 10.f, ty, 1.05f, CTW_UI_TEXT, name ? name : "?", cw - 20.f);
         snprintf(line, sizeof line, "ID %d", id);
-        api->draw_text(cx + 10.f, cy + ch - 20.f, 0.85f, CTW_UI_DIM, line);
+        api->draw_text(cx + 10.f, ty + name_h + 2.f, 0.85f, CTW_UI_DIM, line);
         if (hot && ui.clicked) spawn(id);
     }
     if (!shown_count) ctw_ui_text(&ui, gx + 6.f, gy + 10.f, 1.f, CTW_UI_DIM, "No vehicle matches.");
     ctw_ui_scroll_end(&ui);
-    api->draw_text(px + 14.f, py + ph - 26.f, 0.9f, CTW_UI_DIM, "Click to spawn.  Enter: first match.  F7: close");
+    /* what just happened, else how it works */
+    if (message[0] && api->frame_count() < message_until) ctw_ui_footer(&ui, px, py, pw, ph, CTW_UI_ACCENT, message);
+    else ctw_ui_footer(&ui, px, py, pw, ph, CTW_UI_DIM, "Click to spawn.   Enter: first match.   F7 or Esc: close");
+}
+
+/* The free camera's keys, at the bottom above the game's help line. Only while nothing else is open: with a
+ * window open the camera does not move anyway. */
+static void draw_camera_help(void) {
+    const float W = (float)api->screen_width(), bottom = ctw_ui_screen_bottom(api), w = W - 2.f * CTW_UI_GAP - 28.f;
+    char speeds[128];
+    snprintf(speeds, sizeof speeds, "Wheel: speed %.0f      Page Up / Page Down: render distance %.0f", cam_speed, render_distance);
+    const char* keys = "Mouse: look      WASD: fly      Space / Ctrl: up and down      Shift: faster      F8: back";
+    const float h1 = ctw_ui_lh(&ui, 1.1f), h2 = ctw_ui_text_wrap(&ui, 0, 0, 0.9f, 0, keys, w, 0);
+    const float h3 = ctw_ui_text_wrap(&ui, 0, 0, 0.9f, 0, speeds, w, 0), h = 12.f + h1 + 6.f + h2 + h3 + 12.f;
+    const float y = bottom - h;
+    api->draw_rect(CTW_UI_GAP, y, W - 2.f * CTW_UI_GAP, h, 0x0E0E12D0u);
+    api->draw_rect(CTW_UI_GAP, y, 3.f, h, CTW_UI_ACCENT);
+    api->draw_text(CTW_UI_GAP + 14.f, y + 12.f, 1.1f, CTW_UI_ACCENT, "FREE CAMERA");
+    ctw_ui_text_wrap(&ui, CTW_UI_GAP + 14.f, y + 18.f + h1, 0.9f, CTW_UI_TEXT, keys, w, 1);
+    ctw_ui_text_wrap(&ui, CTW_UI_GAP + 14.f, y + 18.f + h1 + h2, 0.9f, CTW_UI_DIM, speeds, w, 1);
 }
 
 static void hud(void* user) {
     (void)user;
-    const float W = (float)api->screen_width(), H = (float)api->screen_height();
     const double now = api->time_seconds();
     float dt = (float)(now - last_time);
     last_time = now;
@@ -238,16 +257,8 @@ static void hud(void* user) {
     apply_render_distance();
     camera_move(dt);
     camera_frame();
-    if (cam_on) {
-        char t[160];
-        api->draw_rect(0.f, H - 80.f, W, 48.f, 0x00000090u);
-        api->draw_text(16.f, H - 77.f, 1.f, 0xFFE070FFu, "FREE CAMERA   mouse: look   WASD: fly   Space / Ctrl: up / down   Shift: fast   F8: back");
-        snprintf(t, sizeof t, "wheel: speed %.0f      Page Up / Page Down: render distance %.0f", cam_speed, render_distance);
-        api->draw_text(16.f, H - 55.f, 1.f, 0xFFE070FFu, t);
-    }
+    if (cam_on && !spawner_open && !api->menu_is_open()) draw_camera_help();
     if (spawner_open) draw_spawner();
-    if (message[0] && api->frame_count() < message_until)
-        api->draw_text(W / 2 - api->text_width(1.25f, message) / 2, 70.f, 1.25f, 0xFFFFFFFFu, message);
 }
 
 CTW_MOD_EXPORT int ctw_mod_init(CtwMod* mod, const CtwApi* a) {

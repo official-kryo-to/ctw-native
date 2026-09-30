@@ -6,11 +6,11 @@
 // A plugin (ctw_plugin.h): the game loads it from its mods folder. It finds mods in
 // mods/<ModName>/ folders (mod.ini), applies texture mods (textures/<resource id>.png), loads code
 // mods (DLLs using ctw_mod.h) and gives them the mod API, which it implements on top of the plugin interface.
-// The menu is used with the mouse; the game keeps its keyboard, so the player can walk while it is open.
 #include "ctw_mod.h"
 #include "ctw_plugin.h"
 #include "ctw_ui.h"
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstddef>
 #include <cstdlib>
@@ -255,86 +255,112 @@ void onTick(void*) {
         if (h.mod->enabled) h.fn(h.user);
 }
 
-const float kRow = 36.f, kSlider = 48.f, kHeader = 52.f;
+// Every size follows the game font (ctw_ui.h), so rows never run into each other at any font size.
+float headerHeight(const CtwUi& ui) { return 24.f + ctw_ui_lh(&ui, 1.1f) + 4.f + ctw_ui_lh(&ui, 0.85f); }
+float switchWidth(const CtwUi& ui) { return (ctw_ui_lh(&ui, 1.f) + 4.f) * 2.f + 20.f; }
 
-float modHeight(const CtwMod& m) {
-    float h = kHeader;
-    if (!m.expanded) return h;
-    h += 26.f;                                                      // description
-    if (!m.error.empty() || (!m.enabled && m.codeLoaded)) h += 24.f;
-    for (auto& it : m.items) h += it.kind == CtwMod::Item::Slider ? kSlider : kRow;
-    return h + 10.f;
+std::string subtitle(const CtwMod& m) {
+    std::string s = !m.error.empty() ? "error" : m.dllName.empty() ? "texture mod" : "code mod";
+    if (!m.version.empty()) s += "   " + std::string(isdigit((unsigned char)m.version[0]) ? "v" : "") + m.version;
+    if (!m.author.empty()) s += "   by " + m.author;
+    return s;
+}
+
+std::string note(const CtwMod& m) {
+    if (!m.error.empty()) return m.error;
+    if (!m.enabled && m.codeLoaded) return "Switched off. It stops completely after a restart.";
+    return "";
+}
+
+// The expanded part: description, a note, then the mod's options.
+float bodyHeight(const CtwUi& ui, const CtwMod& m, float width) {
+    float h = 8.f;
+    if (!m.description.empty()) h += ctw_ui_text_wrap(&ui, 0, 0, 0.9f, 0, m.description.c_str(), width, 0) + 8.f;
+    if (!note(m).empty()) h += ctw_ui_text_wrap(&ui, 0, 0, 0.9f, 0, note(m).c_str(), width, 0) + 8.f;
+    for (auto& it : m.items) h += it.kind == CtwMod::Item::Slider ? ctw_ui_slider_h(&ui) : ctw_ui_row_h(&ui);
+    return h + 8.f;
+}
+
+float modHeight(const CtwUi& ui, const CtwMod& m, float width) {
+    return headerHeight(ui) + (m.expanded ? bodyHeight(ui, m, width - 28.f) : 0.f);
 }
 
 void drawMenu() {
     CtwUi& ui = g_ui;
     ctw_ui_begin(&ui, &g_api);
-    const float W = (float)H->screen_width(), Hh = (float)H->screen_height();
-    const float pw = std::min(420.f, W - 40.f), px = 20.f, py = 20.f, ph = Hh - 40.f;
+    const CtwUiRect area = ctw_ui_menu_area(&g_api);
+    const float px = area.x, py = area.y, pw = area.w, ph = area.h;
     char count[48];
     snprintf(count, sizeof count, "%d installed", (int)g_mods.size());
     if (ctw_ui_panel(&ui, px, py, pw, ph, "MODS", count)) { setOpen(false); return; }
 
-    const float lx = px + 10.f, ly = py + 50.f, lw = pw - 20.f, lh = ph - 50.f - 34.f;
-    float content = 0.f;
-    for (auto& m : g_mods) content += modHeight(*m) + 8.f;
-    if (g_mods.empty()) content = 0.f;
-    ctw_ui_scroll_begin(&ui, 1, &g_scroll, lx, ly, lw, lh, content);
+    const float gap = 8.f, lx = px + 12.f, ly = py + ctw_ui_title_h(&ui) + 10.f, lw = pw - 24.f;
+    const float lh = py + ph - ctw_ui_footer_h(&ui) - 8.f - ly;
     const float cw = lw - 14.f;   // room for the scrollbar
+    float content = 0.f;
+    for (auto& m : g_mods) content += modHeight(ui, *m, cw) + gap;
+    ctw_ui_scroll_begin(&ui, 1, &g_scroll, lx, ly, lw, lh, content);
     float y = ly - g_scroll.pos;
-    if (g_mods.empty()) {
-        ctw_ui_text(&ui, lx + 10.f, ly + 10.f, 1.f, CTW_UI_DIM, "No mods installed.");
-        ctw_ui_text(&ui, lx + 10.f, ly + 34.f, 1.f, CTW_UI_DIM, "Put each mod in its own folder");
-        ctw_ui_text(&ui, lx + 10.f, ly + 56.f, 1.f, CTW_UI_DIM, "inside the game's mods folder.");
-    }
+    if (g_mods.empty())
+        ctw_ui_text_wrap(&ui, lx + 4.f, ly + 6.f, 1.f, CTW_UI_DIM,
+                         "No mods installed.\n\nPut each mod in its own folder inside the game's mods folder, then start "
+                         "the game again.", cw - 8.f, 1);
     int index = 0;
     const bool inList = ctw_ui_in(&ui, lx, ly, lw, lh);
     CtwUi clickless = ui;   // rows scrolled out of view must not react
     clickless.clicked = 0;
+    const float hh = headerHeight(ui), sw = switchWidth(ui);
     for (auto& mp : g_mods) {
         CtwMod& m = *mp;
-        const float mh = modHeight(m);
+        const float mh = modHeight(ui, m, cw);
         int id = 1000 + 64 * index++;   // slider ids, stable while scrolling
-        if (y + mh < ly || y > ly + lh) { y += mh + 8.f; continue; }
+        if (y + mh < ly || y > ly + lh) { y += mh + gap; continue; }
         CtwUi& u = inList ? ui : clickless;
-        H->draw_rect(lx, y, cw, mh, 0xFFFFFF0Cu);
+        H->draw_rect(lx, y, cw, mh, CTW_UI_ROW);
         // header: expand on click, switch on the right
-        const bool hot = ctw_ui_in(&u, lx, y, cw - 70.f, kHeader);
-        if (hot) H->draw_rect(lx, y, cw, kHeader, CTW_UI_HOVER);
+        const bool hot = ctw_ui_in(&u, lx, y, cw - sw, hh);
+        if (hot) H->draw_rect(lx, y, cw - sw, hh, CTW_UI_HOVER);
         if (hot && u.clicked) m.expanded = !m.expanded;
-        H->draw_text(lx + 12.f, ctw_ui_text_y(&u, y, kHeader, 1.1f), 1.1f, CTW_UI_DIM, m.expanded ? "-" : "+");
-        std::string title = m.name + (m.version.empty() ? "" : "  " + m.version);
-        ctw_ui_text_fit(&u, lx + 32.f, y + 9.f, 1.15f, CTW_UI_TEXT, title.c_str(), cw - 120.f);
-        const char* kind = !m.error.empty() ? "error" : m.dllName.empty() ? "asset mod" : "code mod";
-        ctw_ui_text(&u, lx + 32.f, y + 31.f, 0.85f, !m.error.empty() ? 0xE05050FFu : CTW_UI_DIM, kind);
+        if (m.expanded) H->draw_rect(lx, y, 3.f, mh, CTW_UI_ACCENT);
+        const char* sign = m.expanded ? "-" : "+";
+        H->draw_text(lx + 17.f - H->text_width(1.1f, sign) * 0.5f, ctw_ui_text_y(&u, y, hh, 1.1f), 1.1f, CTW_UI_DIM, sign);
+        const float tx = lx + 34.f, tw = cw - sw - 44.f;
+        ctw_ui_text_fit(&u, tx, y + 12.f, 1.1f, CTW_UI_TEXT, m.name.c_str(), tw);
+        ctw_ui_text_fit(&u, tx, y + 12.f + ctw_ui_lh(&u, 1.1f) + 4.f, 0.85f, m.error.empty() ? CTW_UI_DIM : CTW_UI_ERROR,
+                        subtitle(m).c_str(), tw);
         int on = m.enabled ? 1 : 0;
-        if (ctw_ui_switch(&u, lx + cw - 70.f, y, 70.f, kHeader, "", &on)) setEnabled(m, on != 0);
-        float ry = y + kHeader;
+        if (ctw_ui_switch(&u, lx + cw - sw, y, sw, hh, "", &on)) setEnabled(m, on != 0);
+        float ry = y + hh;
         if (m.expanded) {
-            std::string about = (m.author.empty() ? "" : "by " + m.author + " - ") + m.description;
-            ctw_ui_text_fit(&u, lx + 12.f, ry + 4.f, 0.9f, CTW_UI_DIM, about.c_str(), cw - 24.f);
-            ry += 26.f;
-            if (!m.error.empty()) { ctw_ui_text(&u, lx + 12.f, ry + 2.f, 0.9f, 0xE05050FFu, m.error.c_str()); ry += 24.f; }
-            else if (!m.enabled && m.codeLoaded) { ctw_ui_text(&u, lx + 12.f, ry + 2.f, 0.9f, CTW_UI_DIM, "Fully off after a restart."); ry += 24.f; }
+            H->draw_rect(lx + 14.f, ry, cw - 28.f, 1.f, CTW_UI_LINE);
+            ry += 8.f;
+            if (!m.description.empty())
+                ry += ctw_ui_text_wrap(&u, lx + 14.f, ry, 0.9f, CTW_UI_DIM, m.description.c_str(), cw - 28.f, 1) + 8.f;
+            const std::string n = note(m);
+            if (!n.empty())
+                ry += ctw_ui_text_wrap(&u, lx + 14.f, ry, 0.9f, m.error.empty() ? CTW_UI_ACCENT : CTW_UI_ERROR, n.c_str(),
+                                       cw - 28.f, 1) + 8.f;
             CtwUi& iu = m.enabled && m.codeLoaded ? u : clickless;
             for (auto& it : m.items) {
                 if (it.kind == CtwMod::Item::Toggle) {
-                    ctw_ui_switch(&iu, lx + 6.f, ry, cw - 12.f, kRow, it.label.c_str(), it.ival);
-                    ry += kRow;
+                    ctw_ui_switch(&iu, lx + 6.f, ry, cw - 12.f, ctw_ui_row_h(&iu), it.label.c_str(), it.ival);
+                    ry += ctw_ui_row_h(&iu);
                 } else if (it.kind == CtwMod::Item::Slider) {
-                    ctw_ui_slider(&iu, id++, lx + 6.f, ry, cw - 12.f, kSlider - 4.f, it.label.c_str(), it.fval, it.mn, it.mx, it.step);
-                    ry += kSlider;
+                    ctw_ui_slider(&iu, id++, lx + 6.f, ry, cw - 12.f, ctw_ui_slider_h(&iu), it.label.c_str(), it.fval, it.mn,
+                                  it.mx, it.step);
+                    ry += ctw_ui_slider_h(&iu);
                 } else {
-                    if (ctw_ui_button(&iu, lx + 16.f, ry + 3.f, cw - 32.f, kRow - 6.f, it.label.c_str())) it.fn(it.user);
-                    ry += kRow;
+                    if (ctw_ui_button(&iu, lx + 14.f, ry + 3.f, cw - 28.f, ctw_ui_row_h(&iu) - 6.f, it.label.c_str()))
+                        it.fn(it.user);
+                    ry += ctw_ui_row_h(&iu);
                 }
             }
         }
         ui.drag = u.drag;   // keep a slider drag that started in this frame
-        y += mh + 8.f;
+        y += mh + gap;
     }
     ctw_ui_scroll_end(&ui);
-    ctw_ui_text(&ui, px + 14.f, py + ph - 26.f, 0.9f, CTW_UI_DIM, "Click a mod for its options.  F4: close");
+    ctw_ui_footer(&ui, px, py, pw, ph, CTW_UI_DIM, "Click a mod for its options.   F4 or Esc: close");
 }
 
 void onHud(void*) {

@@ -18,8 +18,9 @@ Small, understood changes are welcome. For a larger feature, open an issue first
 | `port/src/` | Shared rendering, asset readers, audio and world code (the engine) |
 | `port/game/` | Player, vehicles, traffic, cameras and the plugin host |
 | `port/showcase/` | Separate asset and world viewer |
-| `ctw-modkit/` | Public mod interfaces, the mod menu (built into the game) and example mods |
+| `ctw-modkit/` | Public mod interfaces, the mod menu and example mods |
 | `scripts/` | APK setup and the standalone export |
+| `porter/` | The Porter: the downloadable exe that makes the game from an APK |
 | `tests/` | Tests using synthetic data |
 
 `input/`, `port/data/`, `analysis/`, `tools/`, `dist/` and `portlogs/` are local and ignored. Do not force-add them.
@@ -39,6 +40,12 @@ For visual changes, test the game and the showcase and save screenshots locally:
 port/build/GTACTW.exe --data port/data --shot port/build/check.bmp --frames 60
 port/build/ctw_showcase.exe --data port/data --world -1000 -1590 80 --pitch -55 --shot port/build/showcase.bmp
 ```
+
+## The Porter
+
+`porter/core` is the Rust port of `scripts/setup_game.py`, `apk_manifest.py`, `extract_tables.py` and
+`export_pc.py`. A change to one side needs the same change on the other; `porter/core/tests/parity.sh` checks that
+both read the same tables from a synthetic game binary. See [porter/README.md](porter/README.md).
 
 ## Plugin and mod interfaces
 

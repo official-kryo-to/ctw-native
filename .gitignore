@@ -49,3 +49,6 @@ Thumbs.db
 *.log
 *.tmp
 *.bak
+
+# The Porter's Windows icon (the rule above is for icons made from game files).
+!/porter/src-tauri/icons/icon.ico
