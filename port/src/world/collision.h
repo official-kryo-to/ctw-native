@@ -73,8 +73,8 @@ public:
     struct Tri { int32_t p[3]; uint8_t v[3]; uint8_t radius; int16_t n[3]; int16_t en[3][3]; };   // SCollisionTriangle
     struct TriRef { const Tri* tri; const int32_t* verts; };                         // sTriangleWithVerts
 
-    // CCollision::Generate{Box,Cylinder,Mesh}CandidateList: the shapes of the collision cell containing `p` that
-    // come within `radius` of it (at most 63 boxes, 32 cylinders, 64 triangles). groundSlab adds CCollision::mBox:
+    // Shapes within radius, including neighbouring placement cells. Dynamic props are not duplicated across
+    // cells and must not be dropped by the original fixed-size candidate buffers. groundSlab adds CCollision::mBox:
     // a 200 x 200 x 1 box whose top is the ground under p (GetGround), used while the ped moves vertically.
     struct Candidates { std::vector<const Box*> boxes; std::vector<const Cyl*> cyls; std::vector<TriRef> tris; Box slab; };
     void candidates(const int32_t p[3], int32_t radius, bool groundSlab, Candidates& out);
@@ -104,8 +104,9 @@ public:
     // CCollision::GetSphereCollision against boxes (flags 0x40000200): the first box a sphere moving a -> b hits.
     bool sweptSphereHitsBoxes(const int32_t a[3], const int32_t b[3], int32_t r, int32_t contact[3], int32_t n[3]);
 
-private:
     struct Mesh { int32_t minX, minY, maxX, maxY; std::vector<int32_t> verts; std::vector<Tri> tris; };
+    static void finishTriangle(Tri& t, const std::vector<int32_t>& verts);
+private:
     struct Cell {
         std::vector<Box> boxes;
         std::vector<Cyl> cyls;
@@ -113,16 +114,17 @@ private:
         std::vector<uint8_t> groundMap;   // 400 bytes or empty
         std::vector<CarGen> carGens;
         std::vector<Prop> props;
-        struct PropShapes { uint32_t box0 = 0, boxes = 0, cyl0 = 0, cyls = 0; std::vector<Box> savedBoxes; std::vector<Cyl> savedCyls; };
+        struct PropShapes { uint32_t box0 = 0, boxes = 0, cyl0 = 0, cyls = 0, mesh0 = 0, meshes = 0;
+                            std::vector<Box> savedBoxes; std::vector<Cyl> savedCyls; bool solid = true; };
         std::vector<PropShapes> propShapes;   // per prop: its shapes in boxes / cyls
         std::vector<CityEmitter> emitters;
         bool loaded = false;              // false = no data (off-map)
     };
     const Cell* cell(int cx, int cy);
     Cell* mutableCell(int cx, int cy) { return const_cast<Cell*>(cell(cx, cy)); }
-    static void finishTriangle(Tri& t, const std::vector<int32_t>& verts);
 
     std::vector<uint8_t> world_;
     std::map<int, std::unique_ptr<Cell>> cells_;
     const class PropLibrary* propLibrary_ = nullptr;
+    friend struct CollisionTestAccess;
 };

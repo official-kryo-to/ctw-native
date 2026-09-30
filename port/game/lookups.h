@@ -50,3 +50,17 @@ struct GameplayTables {
 };
 const GameplayTables& TheGameplayTables();
 bool LoadGameplayTables(const std::string& dataDir);
+
+struct RadioTables {
+    struct Station { int32_t icon, stream, label, name; };
+    std::vector<Station> stations;
+    std::vector<std::string> streams;
+    uint8_t volumeSprites[10]{};
+    bool load(const std::string& path);
+};
+
+struct RestartTables {
+    struct Point { int32_t pos[3], heading; };
+    std::vector<Point> hospitals;
+    bool load(const std::string& path);
+};

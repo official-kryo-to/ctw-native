@@ -15,6 +15,78 @@ Particles& TheParticles() { return g_particles; }
 
 static uint32_t randNC(uint32_t n) { return Rand32Critical(n); }   // Rand32NonCritical
 
+ExplosionFlash::ExplosionFlash(const int32_t at[3]) : Emitter(at, 2, 0x4000, 5, true) {
+    Particle p{};
+    p.colour = 0x37F; p.alpha = 15; p.alphaStep = -2; p.life = 24;
+    p.size = 0x333 / 4; p.grow = 0x5000 / 4;
+    p.angle = (uint16_t)randNC(0xFFFF); p.spin = 0x1000;
+    p.p[2] = 0x800 / 4; p.v[0] = 0x1000;
+    addFromData(p);
+    p.p[2] = 0; p.v[0] = 0; p.grow = -p.grow;
+    addFromData(p);
+    dying = true;
+}
+
+void ExplosionFlash::updateParticle(Particle& p) {
+    p.angle = (uint16_t)(p.angle + p.spin);
+    p.size = (int16_t)(p.size + p.grow);
+    p.alpha = (uint8_t)std::clamp((int)p.alpha + p.alphaStep, 1, 31);
+    p.life = p.alpha > 1 && p.size > 0 ? 4 : 0;
+    if (p.v[0] == 0x1000 && p.grow > 0) p.grow = (int16_t)((p.grow * 0xE66) >> 12);
+}
+
+ExplosionCloud::ExplosionCloud(const int32_t at[3]) : Emitter(at, 16, 0x4000, 7, true) {
+    Particle p{};
+    p.colour = 0x7FFF; p.alpha = 28; p.life = 60; p.alphaStep = -1;
+    p.size = 0x6000 / 4; p.grow = 0x400 / 4; p.v[2] = 0x1000 / 4;
+    addFromData(p);
+    for (int i = 0; i < 7; ++i) {
+        float a = i * 6.2831853f / 7;
+        p.v[0] = (int16_t)(std::sin(a) * 0x800 / 4);
+        p.v[1] = (int16_t)(std::cos(a) * 0x800 / 4);
+        p.v[2] = 0xA66 / 4;
+        p.size = (int16_t)((0x3800 + randNC(0x800)) / 4);
+        p.angle = (uint16_t)randNC(0xFFFF);
+        addFromData(p);
+    }
+    dying = true;
+}
+
+void ExplosionCloud::updateParticle(Particle& p) {
+    for (int k = 0; k < 3; ++k) {
+        p.p[k] = (int16_t)(p.p[k] + p.v[k]);
+        p.v[k] = (int16_t)((p.v[k] * 0xE66) >> 12);
+    }
+    p.life = (uint16_t)(p.life - 2); p.size = (int16_t)(p.size + p.grow);
+    if (p.life < 5) { p.alpha = (uint8_t)std::max(1, (int)p.alpha - 5); p.life = p.alpha > 1 ? 4 : 0; }
+    uint16_t colour = 0;
+    for (int shift = 0; shift <= 10; shift += 5) colour |= std::max(1, ((p.colour >> shift) & 31) - 1) << shift;
+    p.colour = colour;
+}
+
+ExplosionDebris::ExplosionDebris(const int32_t at[3]) : Emitter(at, 5, 0x4000, 19, true) {
+    for (int i = 0; i < 5; ++i) {
+        Particle p{};
+        int shade = (int)randNC(25);
+        p.colour = (uint16_t)((shade + randNC(5)) | ((shade + randNC(5)) << 5) | ((shade + randNC(5)) << 10));
+        float a = randNC(0xFFFF) * 9.587378e-05f;
+        p.v[0] = (int16_t)((std::sin(a) - std::cos(a)) * 0x2000 / 4);
+        p.v[1] = (int16_t)((std::cos(a) + std::sin(a)) * 0x2000 / 4);
+        p.v[2] = 0x2000 / 4; p.p[2] = 0x1000 / 4;
+        p.size = (int16_t)((0x800 + randNC(0x800)) / 4);
+        p.spin = (int16_t)randNC(0x1000); p.life = 31; p.alpha = 31;
+        addFromData(p);
+    }
+    dying = true;
+}
+
+void ExplosionDebris::updateParticle(Particle& p) {
+    if (p.p[2] > 0) p.v[2] -= 0x199;
+    Emitter::updateParticle(p);
+    for (int k = 0; k < 3; ++k) p.v[k] = (int16_t)((p.v[k] * 0xE66) >> 12);
+    if (p.size < 1 || p.life <= 10) p.life = 0;
+}
+
 Emitter::Emitter(const int32_t p[3], int count, int32_t range, uint8_t sprite, bool billboard)
     : range_(range), inv_(range ? (int32_t)((0x100000000000LL / range) >> 20) : 0), sprite_(sprite), billboard_(billboard) {
     pos[0] = p[0]; pos[1] = p[1]; pos[2] = p[2];
@@ -188,6 +260,30 @@ void SteamEmitter::updateParticle(Particle& q) {   // base update, then fade by 
     if ((int8_t)q.alpha >= 2 && (q.life & 7) == 0) q.alpha = (uint8_t)(q.alpha - 1);
 }
 
+void FireEmitter::addParticle() {
+    Particle p{};
+    auto scaled = [&](int32_t v) { return (int16_t)(((int64_t)v * inv_) >> 12); };
+    p.life = 0x1F; p.colour = 0x7FFF; p.alpha = 22; p.alphaStep = -1;
+    p.p[0] = scaled((int32_t)randNC(0x2000) - 0x1000);
+    p.p[1] = scaled((int32_t)randNC(0x2000) - 0x1000);
+    p.p[2] = scaled(0x1800);
+    p.v[2] = scaled((int32_t)randNC(0xC00) + 0xC00);
+    p.size = scaled((int32_t)randNC(0x1800) + 0x1800);
+    p.grow = (int16_t)(-p.size / 10);
+    p.spin = randNC(2) ? 0xE39 : -0xE39;
+    p.flags = randNC(2) ? 2 : 0;
+    addFromData(p);
+}
+
+void FireEmitter::updateParticle(Particle& p) {
+    Emitter::updateParticle(p);
+    if ((p.colour & 0x1F) > 2) p.colour -= 2;
+    if ((p.colour & 0x3E0) > 0x80) p.colour -= 0x80;
+    if ((p.colour & 0x7C00) > 0x1400) p.colour -= 0x1400;
+    p.v[0] = (int16_t)(((int32_t)p.v[0] * 0xF33) >> 12);
+    p.v[1] = (int16_t)(((int32_t)p.v[1] * 0xF33) >> 12);
+}
+
 // ============================================================================================== all emitters
 void Particles::remove(const Emitter* e) {
     for (auto& p : emitters_)
@@ -196,7 +292,8 @@ void Particles::remove(const Emitter* e) {
 
 void Particles::update(uint32_t frame) {
     for (auto& e : emitters_) {
-        if (auto* steam = dynamic_cast<SteamEmitter*>(e.get())) steam->tick(frame);
+        if (!e->dying)
+            if (auto* steam = dynamic_cast<SteamEmitter*>(e.get())) steam->tick(frame);
         e->process();
     }
     emitters_.erase(std::remove_if(emitters_.begin(), emitters_.end(), [](const std::unique_ptr<Emitter>& e) { return e->finished(); }),

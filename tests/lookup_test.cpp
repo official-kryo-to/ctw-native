@@ -104,6 +104,28 @@ int main() {
     bytes[8 + sizeof renderFixture.renderList] = 16;
     save(path, bytes);
     check(!render.load(path.string()), "out-of-range palette slot rejected");
+    bytes.clear();
+    append(bytes, "CTWRAD2", 8);
+    append(bytes, counts, sizeof counts);
+    const uint8_t volumeSprites[10] = {1,2,3,4,5,6,7,8,9,10};
+    append(bytes, volumeSprites, sizeof volumeSprites);
+    const RadioTables::Station station{3, 0, 6, 7};
+    append(bytes, &station, sizeof station);
+    char stream[40] = "synthetic.mp3";
+    append(bytes, stream, sizeof stream);
+    save(path, bytes);
+    RadioTables radio;
+    check(radio.load(path.string()) && radio.stations[0].icon == 3 && radio.streams[0] == "synthetic.mp3",
+          "radio mappings and stream names decode");
+    bytes[26 + 4] = 1;
+    save(path, bytes);
+    check(!radio.load(path.string()) && radio.stations.empty(), "invalid radio stream index rejected");
+    bytes[26 + 4] = 0; bytes[42] = '/';
+    save(path, bytes);
+    check(!radio.load(path.string()), "radio paths cannot escape asset directory");
+    bytes[42] = 's'; bytes.pop_back();
+    save(path, bytes);
+    check(!radio.load(path.string()), "truncated radio mappings rejected");
     std::filesystem::remove(path);
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }

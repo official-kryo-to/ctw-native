@@ -13,6 +13,29 @@
 static int fastsin(int a) { return (int)(sinf((float)a * 9.587378e-05f) * 4096.f); }
 static inline int32_t mulq(int64_t a, int64_t b) { return (int32_t)((a * b) >> 12); }
 
+void Player::collideMovingCar(const int32_t previous[3], const Collision::Box& before, const Collision::Box& after) {
+    if (attached || hidden) return;
+    int32_t delta[3] = {after.cx - before.cx, after.cy - before.cy, after.cz - before.cz};
+    int32_t a[3] = {previous[0], previous[1], previous[2] + kSphere};
+    int32_t b[3] = {pos[0] - delta[0], pos[1] - delta[1], pos[2] + kSphere - delta[2]};
+    int32_t hit[3], t = 0;
+    if (Collision::sweptSphereVBox(a, b, kSphere, before, hit, t)) {
+        int32_t center[3], n[3];
+        for (int k = 0; k < 3; ++k) { center[k] = a[k] + mulq(b[k] - a[k], t); n[k] = center[k] - hit[k]; }
+        double len = std::hypot((double)n[0], (double)n[1]);
+        if (len > 0 && std::abs(n[2]) < kSphere / 2) {
+            for (int k = 0; k < 2; ++k) {
+                pos[k] = center[k] + delta[k] + (int32_t)std::lround(n[k] * 64.0 / len);
+                vel[k] = delta[k] * 30;
+            }
+        }
+    }
+    int32_t center[3] = {pos[0], pos[1], pos[2] + kSphere}, n[3], depth;
+    if (Collision::sphereVBox(center, kSphere, after, hit, n, depth) && depth > 0 && std::abs(n[2]) < 2048) {
+        for (int k = 0; k < 2; ++k) pos[k] += mulq(n[k], depth + 64);
+    }
+}
+
 // ATan2(cFixed, cFixed): atan2f * 10430, clamped to a short
 static int16_t atan2q(int32_t y, int32_t x) {
     int v = (int)(atan2f((float)y, (float)x) * 10430.f);
@@ -398,6 +421,7 @@ void Player::playOneShot(int upper, int legs, bool flip) {
 }
 
 bool Player::stepOneShot(const PedSprites* sprites) {   // cOneShotAnimationTask::Process
+    if (!sprites || !sprites->ok()) return true;
     if (doneUpper_ && doneLegs_) return true;
     const int step = 0x88 >> 4;   // (0x88 << timeslice) >> 4
     if (!doneUpper_) doneUpper_ = sprites->advanceOneShot(animUpper_, frameUpper_, step);

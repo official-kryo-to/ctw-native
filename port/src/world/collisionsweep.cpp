@@ -33,10 +33,14 @@ void Collision::candidates(const int32_t p[3], int32_t R, bool groundSlab, Candi
     out.boxes.clear(); out.cyls.clear(); out.tris.clear();
     int cx, cy;
     cellOf(p[0], p[1], &cx, &cy);
-    const Cell* C = cell(cx, cy);
-    if (C) {
+    // Props belong to their placement cell, unlike duplicated static sector geometry.
+    // Include neighbouring cells so a shape straddling a boundary remains solid.
+    int ring = std::max(1, (R + 0x31FFF) / 0x32000);
+    for (int x = std::max(0, cx - ring); x <= std::min(99, cx + ring); ++x)
+    for (int y = std::max(0, cy - ring); y <= std::min(99, cy + ring); ++y) {
+        const Cell* C = cell(x, y);
+        if (!C) continue;
         for (const Box& b : C->boxes) {   // GenerateBoxCandidateList (63 + the slab)
-            if (out.boxes.size() >= 63) break;
             int32_t dx = p[0] - b.cx, dy = p[1] - b.cy;
             if (b.angle == 0) {
                 if (std::abs(dx) <= b.hx + R && std::abs(dy) <= b.hy + R) out.boxes.push_back(&b);
@@ -46,14 +50,12 @@ void Collision::candidates(const int32_t p[3], int32_t R, bool groundSlab, Candi
             }
         }
         for (const Cyl& c : C->cyls) {    // GenerateCylinderCandidateList
-            if (out.cyls.size() >= 32) break;
             int64_t dx = p[0] - c.x, dy = p[1] - c.y, rr = (int64_t)c.r + R;
             if (dx * dx + dy * dy < rr * rr) out.cyls.push_back(&c);
         }
         for (const Mesh& m : C->meshes) { // GenerateMeshCandidateList
             if (!(m.minX <= p[0] + R && p[0] - R <= m.maxX && m.minY <= p[1] + R && p[1] - R <= m.maxY)) continue;
             for (const Tri& t : m.tris) {
-                if (out.tris.size() >= 64) break;
                 if (t.v[0] * 3 + 2 >= (int)m.verts.size() || t.v[1] * 3 + 2 >= (int)m.verts.size() || t.v[2] * 3 + 2 >= (int)m.verts.size()) continue;
                 int64_t dx = t.p[0] - p[0], dy = t.p[1] - p[1], dz = t.p[2] - p[2], rr = (int64_t)R + t.radius * 0x1000;
                 if (dx * dx + dy * dy + dz * dz < rr * rr) out.tris.push_back({&t, m.verts.data()});

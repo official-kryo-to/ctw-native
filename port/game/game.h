@@ -8,6 +8,7 @@
 #include "cargens.h"
 #include "followcam.h"
 #include "player.h"
+#include "radio.h"
 #include "roads.h"
 #include "traffic.h"
 #include "vehicle.h"
@@ -33,6 +34,8 @@ public:
     // one fixed game frame / one display frame
     void tick();
     void render(int width, int height);
+    bool key(int scancode);   // game input shared by interactive and scripted runs
+    Radio radio;
 
     WorldRenderer world;
     Collision collision;
@@ -100,6 +103,17 @@ public:
     std::vector<int> scriptedEnterFrames;   // testing: press enter/exit on these frames
 private:
     std::map<int, std::unique_ptr<Model>> models_;
+    RestartTables restart_;
+    struct Explosion { int32_t pos[3]; int delay; };
+    std::vector<Explosion> explosions_;
+    void processVehicleDeaths();
+    void killInVehicle(Vehicle& car);
+    void updateDeath();
+    int deathFrames_ = 0;
+    int32_t deathEye_[3] = {}, restartFallback_[3] = {};
+    uint16_t deathYaw_ = 0, deathPitch_ = 0;
+    bool deathCameraSettled_ = false;
+    friend struct GameTestAccess;
 };
 
 Game& TheGame();

@@ -32,6 +32,11 @@ public:
     uint16_t pitch() const { return pitch_; }
 
     void position(float out[3]) const;
+    void position(int32_t out[3]) const { for (int i = 0; i < 3; ++i) out[i] = pos_[i]; }
+    void inherit(const int32_t pos[3], uint16_t angle, uint16_t pitch) {
+        for (int i = 0; i < 3; ++i) { pos_[i] = pos[i]; vel_[i] = 0; }
+        yaw = angle; pitch_ = pitch; pitchVel_ = 0;
+    }
 private:
     bool canSeeTarget(Collision* col) const;
     void tryToFaceAngle(int16_t pedHeading, const int32_t pedVel[3], int div, int maxStep);

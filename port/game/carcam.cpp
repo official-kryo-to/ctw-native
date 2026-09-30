@@ -38,6 +38,13 @@ void FollowCarCam::setBehind(const Vehicle& car) {
     reverseFrames_ = 0;
 }
 
+void FollowCarCam::inherit(const int32_t pos[3], uint16_t yaw, uint16_t pitch) {
+    // cBaseCam::TweenFrom(..., 1, false): retain the outgoing view, not SetCameraBehindTarget.
+    for (int i = 0; i < 3; ++i) { pos_[i] = pos[i]; vel_[i] = 0; }
+    yaw_ = yaw; pitch_ = pitch;
+    state_ = 0; reverseFrames_ = 0;
+}
+
 void FollowCarCam::update(const Vehicle& car, Collision* col) {
     int32_t speed = car.speed();
     int32_t back, height;

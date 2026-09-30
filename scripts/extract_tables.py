@@ -114,6 +114,10 @@ class GameBinary:
                 base = regs.get(regname(ins, op[1].mem.base))
                 if base is not None:
                     stack[base + op[1].mem.disp] = value(ins, op[0])
+            elif ins.mnemonic == 'ldr' and ins.reg_name(op[0].reg).startswith('d'):
+                base = regs.get(regname(ins, op[1].mem.base))
+                number = None if base is None else struct.unpack('<Q', self.read(base + op[1].mem.disp, 8))[0]
+                write(ins, op[0], number)
             elif ins.mnemonic == 'bl':
                 yield self.call_name(op[0].imm), dict(regs), dict(stack)
                 for r in range(19):
@@ -123,6 +127,22 @@ class GameBinary:
             else:
                 for reg in ins.regs_access()[1]:
                     regs.pop(regname(ins, reg), None)
+
+    def restart(self):
+        points = []
+        for name, regs, stack in self.constant_calls('_ZN11CScriptMain19DefineRestartPointsEv'):
+            if 'AddHospitalRestartPoint' not in name:
+                continue
+            pointer = regs.get('x1')
+            packed, z, heading = stack.get(pointer), stack.get(pointer + 8) if pointer is not None else None, regs.get('x2')
+            if packed is None or z is None or heading is None:
+                raise TableError('Could not resolve hospital restart coordinates.')
+            x, y = struct.unpack('<2i', struct.pack('<Q', packed))
+            heading = struct.unpack('<i', struct.pack('<I', heading))[0]
+            points.append((x, y, z, heading))
+        if len(points) != 5:
+            raise TableError('Unexpected hospital restart point count.')
+        return b'CTWRESP1' + struct.pack('<I', len(points)) + b''.join(struct.pack('<4i', *p) for p in points)
 
     def population(self):
         profiles = []
@@ -175,8 +195,18 @@ class GameBinary:
                 self.read(0x481b4b, 7) + self.read(0x481b52, 52) + self.read(0x481b86, 52) +
                 self.read(0x48718e, 10) + self.read(0x469dd0, 16))
 
+    def radio(self):
+        # cRadioApp::InitStationIconsAndText and cWavStream's fixed-width filename table.
+        icons = self.read(0x484732, 11)
+        streams = struct.unpack('<11i', self.read(0x484740, 44))
+        labels = struct.unpack('<11i', self.read(0x48476c, 44))
+        names = struct.unpack('<11i', self.read(0x484798, 44))
+        records = b''.join(struct.pack('<4i', *r) for r in zip(icons, streams, labels, names))
+        return b'CTWRAD2\0' + struct.pack('<II', 11, 33) + self.read(0x484728, 10) + records + self.read(0x480b64, 33 * 40)
+
 
 def extract_tables(binary):
     game = GameBinary(binary)
     return {'population_tables.bin': game.population(), 'sound_tables.bin': game.sound(),
-            'render_tables.bin': game.render(), 'gameplay_tables.bin': game.gameplay()}
+            'render_tables.bin': game.render(), 'gameplay_tables.bin': game.gameplay(),
+            'radio_tables.bin': game.radio(), 'restart_tables.bin': game.restart()}

@@ -73,6 +73,36 @@ private:
     bool on_, init_ = false;
 };
 
+// cParticleEmitterFire: ten short-lived, shrinking flames, range four, sprite 12.
+class FireEmitter : public Emitter {
+public:
+    explicit FireEmitter(const int32_t pos[3]) : Emitter(pos, 10, 0x4000, 12, true) {}
+    void addParticle();
+protected:
+    void updateParticle(Particle& p) override;
+};
+
+class ExplosionFlash : public Emitter {
+public:
+    explicit ExplosionFlash(const int32_t pos[3]);
+protected:
+    void updateParticle(Particle& p) override;
+};
+
+class ExplosionCloud : public Emitter {
+public:
+    explicit ExplosionCloud(const int32_t pos[3]);
+protected:
+    void updateParticle(Particle& p) override;
+};
+
+class ExplosionDebris : public Emitter {
+public:
+    explicit ExplosionDebris(const int32_t pos[3]);
+protected:
+    void updateParticle(Particle& p) override;
+};
+
 class Particles {
 public:
     template <class T, class... A> T* add(A&&... a) {

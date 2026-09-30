@@ -53,12 +53,14 @@ public:
     void update(const Input& in, Collision* col, const PedSprites* sprites);
     // cPed::ConstrainByCollision (player): still, upright vehicles nearby act as extra boxes (set by the game)
     std::vector<Collision::Box> obstacles;
+    void collideMovingCar(const int32_t previous[3], const Collision::Box& before, const Collision::Box& after);
     void render(const PedSprites* sprites, const PedLight* light) const;
 
     // Attached to a vehicle (cAttachedManager, while getting in or out): the game places the ped every frame and
     // plays one-shot animations (cOneShotAnimationTask: upper body + legs, optionally flipped).
     bool attached = false;
     bool hidden = false;   // inside a vehicle
+    bool dead = false;
     void setHeading(int16_t h);
     void playOneShot(int upper, int legs, bool flip);   // animation ids of body set 0 (+ 0x113 per body set)
     bool stepOneShot(const PedSprites* sprites);        // true when both halves have finished

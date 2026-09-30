@@ -1433,12 +1433,14 @@ Vehicle::SoundState Vehicle::soundState() const {
     s.burst = tyre_[0].burst || tyre_[1].burst;
     s.rpm = rpm_; s.maxRpm = maxRpm_;
     s.gas = (b62_ & 1) != 0;
+    s.reverseGear = gear_ == -1;
     for (int k = 0; k < 3; ++k) s.accel[k] = accel_[k];
     return s;
 }
 
 void Vehicle::releaseEffects() {
     if (smoke_) { TheParticles().remove(smoke_); smoke_ = nullptr; }
+    if (fire_) { TheParticles().remove(fire_); fire_ = nullptr; }
 }
 
 void Vehicle::setDead() {   // cVehicle::SetDead: the burnt wreck, black smoke and fire for 12 seconds
@@ -1452,6 +1454,8 @@ void Vehicle::setDead() {   // cVehicle::SetDead: the burnt wreck, black smoke a
     smokeColour_ = 3;
     smokeOffset_[0] = 0; smokeOffset_[1] = 0; smokeOffset_[2] = 0x400;
     smokeVel_[0] = smokeVel_[1] = smokeVel_[2] = 0;
+    if (fire_) TheParticles().remove(fire_);
+    fire_ = TheParticles().add<FireEmitter>(pos);
 }
 
 void Vehicle::processDamage(uint32_t frame) {   // the damage part of cVehicle::Process (+ cSmoke::Process)
@@ -1480,6 +1484,13 @@ void Vehicle::processDamage(uint32_t frame) {   // the damage part of cVehicle::
             else { health_ = 0; setDead(); }
         }
     } else if (burnTimer_ > 0) burnTimer_ = (int16_t)(burnTimer_ - 2);
+    if (health_ < 0x1F && burnTimer_ > 0) {
+        int32_t offset[3] = {0, dead_ ? 0 : (hy * 3) / 4, dead_ ? 0x400 : 0x1000}, p[3];
+        localToWorld(offset, p);
+        if (!fire_) fire_ = TheParticles().add<FireEmitter>(p);
+        fire_->setPos(p);
+        fire_->addParticle();
+    } else if (fire_) { TheParticles().remove(fire_); fire_ = nullptr; }
     if (smoke_) {   // cSmoke::Process: follows its car, a puff every 8 frames, gone when its time is up
         int32_t p[3];
         localToWorld(smokeOffset_, p);

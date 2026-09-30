@@ -90,3 +90,45 @@ bool GameplayTables::load(const std::string& path) {
 namespace { GameplayTables g_gameplayTables; }
 const GameplayTables& TheGameplayTables() { return g_gameplayTables; }
 bool LoadGameplayTables(const std::string& dataDir) { return g_gameplayTables.load(dataDir + "/gameplay_tables.bin"); }
+
+bool RadioTables::load(const std::string& path) {
+    *this = RadioTables{};
+    auto file = openTable(path);
+    RadioTables next;
+    uint32_t stationCount = 0, streamCount = 0;
+    if (!magic(file, "CTWRAD2") || !read(file, &stationCount, 4) || !read(file, &streamCount, 4) ||
+        !stationCount || stationCount > 16 || !streamCount || streamCount > 64 ||
+        !read(file, next.volumeSprites, 10)) return false;
+    next.stations.resize(stationCount);
+    if (!read(file, next.stations.data(), stationCount * sizeof(Station))) return false;
+    for (const auto& station : next.stations)
+        if (station.icon < 0 || station.icon >= 32 || station.stream < 0 || station.stream >= (int)streamCount ||
+            station.label < 0 || station.label > 4095 || station.name < 0 || station.name > 4095) return false;
+    for (uint8_t sprite : next.volumeSprites) if (sprite >= 32) return false;
+    for (uint32_t i = 0; i < streamCount; ++i) {
+        char name[40];
+        if (!read(file, name, sizeof name) || !std::memchr(name, 0, sizeof name)) return false;
+        std::string value(name);
+        if (value.find_first_of("/\\:") != std::string::npos || value == "..") return false;
+        next.streams.push_back(value);
+    }
+    if (!end(file)) return false;
+    *this = std::move(next);
+    return true;
+}
+
+bool RestartTables::load(const std::string& path) {
+    hospitals.clear();
+    auto file = openTable(path);
+    uint32_t count = 0;
+    RestartTables next;
+    if (!magic(file, "CTWRESP1") || !read(file, &count, 4) || !count || count > 64) return false;
+    next.hospitals.resize(count);
+    if (!read(file, next.hospitals.data(), count * sizeof(Point)) || !end(file)) return false;
+    for (const auto& p : next.hospitals) {
+        for (int32_t coordinate : p.pos) if (coordinate < -10000 * 4096 || coordinate > 10000 * 4096) return false;
+        if (p.heading < -360 || p.heading > 360) return false;
+    }
+    hospitals.swap(next.hospitals);
+    return true;
+}

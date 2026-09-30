@@ -29,6 +29,7 @@
 class Collision;
 struct Model;
 class SmokeEmitter;
+class FireEmitter;
 
 struct VehicleInfo {   // one record of resource 1994
     uint8_t raw[0x138];
@@ -73,7 +74,7 @@ public:
     void releaseEffects();
     // what the sound code reads (CTyre +0x50 burst / +0x52 wheel spin / +0x53 on the ground, CEngine rpm, the
     // driver's gas input, the last acceleration)
-    struct SoundState { bool rearSpin, frontSpin, frontGround, rearGround, burst; int32_t rpm, maxRpm; bool gas; int32_t accel[3]; };
+    struct SoundState { bool rearSpin, frontSpin, frontGround, rearGround, burst; int32_t rpm, maxRpm; bool gas, reverseGear; int32_t accel[3]; };
     SoundState soundState() const;
     bool engineOn = false;                        // cWheeledVehicle::TurnEngine
     // lights (cCar::RenderHeadlights, cWheeledVehicle::RenderBrakeLights / RenderIndicators)
@@ -83,6 +84,7 @@ public:
     int seatUser[4] = {-1, -1, -1, -1};
     bool generated = false;   // cVehicle::SetIsGeneratedCar
     uint32_t uid = 0;         // stable id (the game's entity id byte +0x63 = uid & 0xFF)
+    int radioStation = -1;    // station selection stays with the vehicle
     // traffic (cVehicle +0x95C, +0xE9, +0x9C8): VehicleSimpleProximityProcess's nearest obstacle ahead
     int32_t leastCollide = 0x3E8000;
     bool blocked = false;
@@ -227,6 +229,7 @@ private:
     bool dead_ = false;
     int16_t burnTimer_ = 0x1E0;                   // +0x970
     SmokeEmitter* smoke_ = nullptr;         // +0x928 (cSmoke)
+    FireEmitter* fire_ = nullptr;
     int16_t smokeLife_ = -1;                      // cSmoke +0xA0
     uint8_t smokeColour_ = 0;                     // cSmoke +0xA2
     int32_t smokeOffset_[3] = {0, 0, 0};          // where it is attached (car space)
@@ -243,4 +246,5 @@ private:
     int numSeats_ = 1;                             // info +0x10C
     void updateDoors();
     void setDoorClosed(int seat);
+    friend struct VehicleTestAccess;
 };

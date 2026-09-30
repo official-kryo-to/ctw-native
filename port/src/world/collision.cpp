@@ -121,9 +121,11 @@ const Collision::Cell* Collision::cell(int cx, int cy) {
                 Cell::PropShapes& ps = C.propShapes[i];
                 ps.box0 = (uint32_t)C.boxes.size();
                 ps.cyl0 = (uint32_t)C.cyls.size();
-                propLibrary_->shapes(C.props[i], C.boxes, C.cyls);
+                ps.mesh0 = (uint32_t)C.meshes.size();
+                propLibrary_->shapes(C.props[i], C.boxes, C.cyls, C.meshes);
                 ps.boxes = (uint32_t)C.boxes.size() - ps.box0;
                 ps.cyls = (uint32_t)C.cyls.size() - ps.cyl0;
+                ps.meshes = (uint32_t)C.meshes.size() - ps.mesh0;
             }
         }
     }
@@ -148,6 +150,14 @@ void Collision::setPropSolid(int cx, int cy, int index, bool solid) {
     Cell* C = mutableCell(cx, cy);
     if (!C || index < 0 || index >= (int)C->propShapes.size()) return;
     Cell::PropShapes& ps = C->propShapes[index];
+    if (ps.solid == solid) return;
+    ps.solid = solid;
+    for (uint32_t i = 0; i < ps.meshes; ++i) {
+        Mesh& m = C->meshes[ps.mesh0 + i];
+        const int32_t dz = solid ? 0x20000000 : -0x20000000;
+        for (size_t k = 2; k < m.verts.size(); k += 3) m.verts[k] += dz;
+        for (Tri& t : m.tris) t.p[2] += dz;
+    }
     if (!solid && ps.savedBoxes.empty() && ps.savedCyls.empty()) {   // park the shapes far below the world
         for (uint32_t i = 0; i < ps.boxes; ++i) {
             ps.savedBoxes.push_back(C->boxes[ps.box0 + i]);

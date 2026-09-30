@@ -11,7 +11,7 @@ bool Audio_Init();
 void Audio_Shutdown();
 
 // Streams an MP3 from disk (decoded on the fly, not loaded whole). Returns false if it can't be opened.
-bool Audio_PlayMusic(const std::string& path, bool loop);
+bool Audio_PlayMusic(const std::string& path, bool loop, double startSeconds = 0);
 void Audio_StopMusic();
 void Audio_SetMusicPaused(bool paused);
 bool Audio_MusicPlaying();
@@ -24,7 +24,7 @@ float Audio_MusicLevel();                // recent peak level 0..1 (for a simple
 
 // Sound effects: the game's samples are 8-bit unsigned mono PCM (cAudioBaseOAL plays them as AL_FORMAT_MONO8).
 // A voice plays one sample (optionally looping) at volume 0..1, pan -1 (left) .. 1 (right) and a pitch factor.
-// The data must stay valid while the voice plays. Handles are > 0; 0 = no voice free.
+// Samples are copied into the voice so bank reloads cannot invalidate playback. Handles are > 0; 0 = no voice free.
 int Audio_SfxPlay(const unsigned char* pcm8, unsigned len, int rate, float volume, float pan, bool loop);
 void Audio_SfxSet(int voice, float volume, float pan, float pitch);
 void Audio_SfxStop(int voice);

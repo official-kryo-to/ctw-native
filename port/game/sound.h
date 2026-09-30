@@ -28,6 +28,7 @@ public:
     void update(Game& g);   // once per game frame, after the vehicles moved
     void doorEvent(const Vehicle& v, bool open);                 // cVehicle::OpenDoor / SetDoorClosed
     void collision(const Vehicle& v, int strength);              // cAudioManager::AddCollision
+    int explosion(Game& game, const int32_t pos[3]);              // cExplosionBigVehicle::PlayScriptSfx
     bool horn = false;                                           // the player holds the horn
     bool ok() const { return !res_.data.empty(); }
 
@@ -61,6 +62,9 @@ private:
     int8_t skidTimer_ = 0, skidCount_ = 0;
     int8_t hornHeld_ = -1;
     uint32_t lastMs_ = 0;
+    uint32_t playerUid_ = 0;
+    void stopSlots(Entity& e, bool bankOnly = false);
+    friend struct SoundTestAccess;
 };
 
 Sound& TheSound();

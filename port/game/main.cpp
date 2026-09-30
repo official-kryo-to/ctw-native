@@ -150,7 +150,7 @@ int main(int argc, char** argv) {
                     int at = -1, x = 0, y = 0, n = 0;
                     char what[8] = "";
                     if (sscanf(p, "%d:%7[a-z]=%d,%d,%d", &at, what, &x, &y, &n) >= 3 && at == f) {
-                        if (!strcmp(what, "key")) Plugins_Key(x);
+                        if (!strcmp(what, "key")) game.key(x);
                         else Host_TestMouse(x, y, !strcmp(what, "click") ? 1 : 0, !strcmp(what, "wheel") ? n : 0);
                     }
                     while (*p && *p != ';') ++p;
@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
         }
         if (keys)
             for (const char* p = keys; *p;) {
-                Plugins_Key(atoi(p));
+                game.key(atoi(p));
                 while (*p && *p != ',') ++p;
                 if (*p) ++p;
             }

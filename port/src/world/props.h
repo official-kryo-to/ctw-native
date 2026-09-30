@@ -31,7 +31,8 @@ public:
     int count() const { return (int)defs_.size(); }
     const Model* model(int prop);                          // loaded on first use; nullptr if it has none
     // The prop's collision shapes in world space (boxes and cylinders; spheres become short cylinders).
-    void shapes(const Collision::Prop& p, std::vector<Collision::Box>& boxes, std::vector<Collision::Cyl>& cyls) const;
+    void shapes(const Collision::Prop& p, std::vector<Collision::Box>& boxes, std::vector<Collision::Cyl>& cyls,
+                std::vector<Collision::Mesh>& meshes) const;
     void lights(const Collision::Prop& p, std::vector<WorldLight>& out) const;
     void draw(const Collision::Prop& p);                   // with the current GL matrices and lights
     static void drawModel(const Model& m, const float matrix[16]);   // any model at a column-major matrix
@@ -49,6 +50,7 @@ private:
     std::vector<Light> lights_;
     std::vector<Kind> kinds_;
     std::map<int, std::unique_ptr<Model>> models_;
+    friend struct PropTestAccess;
 };
 
 // Rotates a local offset (20.12) by the prop's heading and adds its position.

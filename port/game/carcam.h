@@ -21,6 +21,8 @@ public:
     void toWorldCamera(WorldCamera& out) const;
     void position(int32_t out[3]) const { out[0] = pos_[0]; out[1] = pos_[1]; out[2] = pos_[2]; }
     uint16_t yaw() const { return yaw_; }
+    uint16_t pitch() const { return pitch_; }
+    void inherit(const int32_t pos[3], uint16_t yaw, uint16_t pitch);
 
 private:
     int32_t pos_[3] = {0, 0, 0}, vel_[3] = {0, 0, 0};

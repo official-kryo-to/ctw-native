@@ -38,7 +38,7 @@ bool PropLibrary::load() {
             static const int kSize[7] = {0, 0x1C, 0x18, 0x14, 0x10, 0x10, 0x10};
             if (s.type < 1 || s.type > 6 || o + kSize[s.type] > d.size()) return false;
             memcpy(s.v, &d[o + 4], std::min<size_t>(kSize[s.type] - 4, sizeof s.v));
-            if (s.type <= 3) def.shapes.push_back(s);
+            def.shapes.push_back(s);
             o += kSize[s.type];
         }
         defs_.push_back(std::move(def));
@@ -86,6 +86,12 @@ void PropLibrary::footprint(int prop, float& radius, float& height) const {
     radius = height = 0.f;
     if (prop < 0 || prop >= (int)defs_.size()) return;
     for (const Shape& s : defs_[prop].shapes) {
+        if (s.type == 4 || s.type == 6) continue;
+        if (s.type == 5) {
+            radius = std::max(radius, std::hypot(s.v[0] / 4096.f, s.v[1] / 4096.f));
+            height = std::max(height, s.v[2] / 4096.f);
+            continue;
+        }
         const float off = std::sqrt((float)s.v[0] * s.v[0] + (float)s.v[1] * s.v[1]) / 4096.f;
         float r, h;
         if (s.type == 1) { r = std::sqrt((float)s.v[3] * s.v[3] + (float)s.v[4] * s.v[4]) / 8192.f; h = s.v[5] / 4096.f; }
@@ -115,9 +121,23 @@ float PropLibrary::radius(int prop) {
     return r;
 }
 
-void PropLibrary::shapes(const Collision::Prop& p, std::vector<Collision::Box>& boxes, std::vector<Collision::Cyl>& cyls) const {
+void PropLibrary::shapes(const Collision::Prop& p, std::vector<Collision::Box>& boxes, std::vector<Collision::Cyl>& cyls,
+                         std::vector<Collision::Mesh>& meshes) const {
     if (p.prop >= defs_.size()) return;
+    Collision::Mesh mesh{};
+    int32_t offset[3] = {0, 0, 0};
+    for (const Shape& s : defs_[p.prop].shapes)
+        if (s.type == 4) { std::copy(s.v, s.v + 3, offset); break; }
     for (const Shape& s : defs_[p.prop].shapes) {
+        if (s.type >= 4) {
+            if (s.type == 5) {
+                int32_t local[3], at[3];
+                for (int k = 0; k < 3; ++k) local[k] = s.v[k] + offset[k];
+                PropToWorld(p, local, at);
+                mesh.verts.insert(mesh.verts.end(), at, at + 3);
+            }
+            continue;
+        }
         int32_t at[3];
         PropToWorld(p, s.v, at);
         if (s.type == 1) {   // box: size from the bottom centre
@@ -127,6 +147,25 @@ void PropLibrary::shapes(const Collision::Prop& p, std::vector<Collision::Box>& 
         } else {             // sphere: a cylinder as tall as it is wide
             cyls.push_back({at[0], at[1], at[2] - s.v[3], s.v[3], s.v[3] * 2, 0});
         }
+    }
+    for (const Shape& s : defs_[p.prop].shapes) {
+        if (s.type != 6) continue;
+        Collision::Tri t{};
+        bool valid = true;
+        for (int k = 0; k < 3; ++k) {
+            // propCollisionPrimMeshTriangle indices are one-based in the resource.
+            valid &= s.v[k] >= 1 && s.v[k] <= 256 && (size_t)s.v[k] <= mesh.verts.size() / 3;
+            t.v[k] = (uint8_t)(s.v[k] - 1);
+        }
+        if (valid) { Collision::finishTriangle(t, mesh.verts); mesh.tris.push_back(t); }
+    }
+    if (!mesh.tris.empty()) {
+        mesh.minX = mesh.maxX = mesh.verts[0]; mesh.minY = mesh.maxY = mesh.verts[1];
+        for (size_t i = 0; i < mesh.verts.size(); i += 3) {
+            mesh.minX = std::min(mesh.minX, mesh.verts[i]); mesh.maxX = std::max(mesh.maxX, mesh.verts[i]);
+            mesh.minY = std::min(mesh.minY, mesh.verts[i + 1]); mesh.maxY = std::max(mesh.maxY, mesh.verts[i + 1]);
+        }
+        meshes.push_back(std::move(mesh));
     }
 }
 

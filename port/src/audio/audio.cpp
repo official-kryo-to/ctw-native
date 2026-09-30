@@ -40,6 +40,7 @@ struct Stream {
     std::vector<mp3d_sample_t> buf; // decoded source samples not yet consumed
     size_t bufFrames = 0, bufStart = 0;
     uint64_t framesPlayed = 0;
+    double startSeconds = 0, duration = 0;
 };
 static Stream* g_music = nullptr;   // owned; swapped under the device lock, never moved/copied
 static std::atomic<float> g_volume{0.8f};
@@ -68,7 +69,7 @@ static bool refill(Stream& s) {
 }
 
 struct SfxVoice {
-    const unsigned char* data = nullptr;
+    std::vector<unsigned char> data;
     unsigned len = 0;
     double pos = 0, step = 1;
     float vol = 1, pan = 0, pitch = 1;
@@ -110,7 +111,7 @@ int Audio_SfxPlay(const unsigned char* pcm, unsigned len, int rate, float volume
     for (SfxVoice& v : g_sfx)
         if (!v.active) {
             v = SfxVoice{};
-            v.data = pcm; v.len = len; v.rate = rate > 0 ? rate : 22050;
+            v.data.assign(pcm, pcm + len); v.len = len; v.rate = rate > 0 ? rate : 22050;
             v.vol = volume; v.pan = pan; v.loop = loop; v.active = true;
             v.id = h = g_sfxNext++;
             if (g_sfxNext <= 0) g_sfxNext = 1;
@@ -187,6 +188,7 @@ static void SDLCALL mix(void*, Uint8* out8, int len) {
 }
 
 bool Audio_Init() {
+    if (g_dev) return true;
     if (!(SDL_WasInit(SDL_INIT_AUDIO) & SDL_INIT_AUDIO) && SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) return false;
     SDL_AudioSpec want{}, have{};
     want.freq = kOutRate;
@@ -218,9 +220,10 @@ void Audio_Shutdown() {
     freeStream(detachMusic());
     SDL_CloseAudioDevice(g_dev);
     g_dev = 0;
+    for (SfxVoice& v : g_sfx) v = SfxVoice{};
 }
 
-bool Audio_PlayMusic(const std::string& path, bool loop) {
+bool Audio_PlayMusic(const std::string& path, bool loop, double startSeconds) {
     if (!g_dev) return false;
     Stream* s = new Stream();
     // Opened (memory-mapped + frame-indexed) outside the audio lock so playback doesn't glitch.
@@ -234,6 +237,12 @@ bool Audio_PlayMusic(const std::string& path, bool loop) {
     s->loop = loop;
     s->rate = s->dec.info.hz;
     s->channels = s->dec.info.channels;
+    s->duration = (double)s->dec.samples / s->channels / s->rate;
+    if (std::isfinite(startSeconds) && s->duration > 0) {
+        s->startSeconds = std::fmod(std::max(0.0, startSeconds), s->duration);
+        uint64_t sample = (uint64_t)(s->startSeconds * s->rate) * s->channels;
+        if (mp3dec_ex_seek(&s->dec, sample) != 0) { freeStream(s); return false; }
+    }
     SDL_LockAudioDevice(g_dev);
     Stream* old = g_music;
     g_music = s;
@@ -268,7 +277,8 @@ float Audio_MusicLevel() { return g_level.load(); }
 double Audio_MusicPosition() {
     if (!g_dev) return 0;
     SDL_LockAudioDevice(g_dev);
-    double r = g_music ? (double)g_music->framesPlayed / kOutRate : 0;
+    double r = g_music ? g_music->startSeconds + (double)g_music->framesPlayed / kOutRate : 0;
+    if (g_music && g_music->loop && g_music->duration > 0) r = std::fmod(r, g_music->duration);
     SDL_UnlockAudioDevice(g_dev);
     return r;
 }
