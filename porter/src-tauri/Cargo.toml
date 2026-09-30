@@ -1,0 +1,22 @@
+[package]
+name = "ctw-native-porter"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+description = "CTW-Native Porter: turns your GTA: Chinatown Wars APK into the PC port."
+publish = false
+
+[lib]
+name = "ctw_native_porter_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[dependencies]
+ctw-porter-core = { path = "../core" }
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"

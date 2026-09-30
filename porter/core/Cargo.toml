@@ -1,0 +1,19 @@
+[package]
+name = "ctw-porter-core"
+version = "0.0.0"
+edition = "2021"
+license = "GPL-3.0-only"
+description = "Turns a GTA: Chinatown Wars Android APK into the PC game folder (the Porter's engine room)."
+publish = false
+
+[dependencies]
+capstone = "0.14"
+fs4 = "1"
+image = { version = "0.25", default-features = false, features = ["png", "ico"] }
+roxmltree = "0.21"
+tempfile = "3"
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_LibraryLoader"] }
+

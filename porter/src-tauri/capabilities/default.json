@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The Porter's one window: moving and closing it, picking files, and showing the finished folder.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
+    "dialog:allow-open",
+    "opener:allow-reveal-item-in-dir",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://kryo.to" },
+        { "url": "https://github.com/official-kryo-to/ctw-native" },
+        { "url": "https://discord.gg/*" }
+      ]
+    }
+  ]
+}

@@ -18,3 +18,17 @@ check those for the toolchain used when distributing a build.
 
 Original game data is excluded. The project license does not cover Rockstar/Take-Two game files or
 trademarks.
+
+## The Porter
+
+`porter/` builds CTW-Native-Porter.exe, which also contains GTACTW.exe and the mod kit above. Its own components:
+
+| Component | Where | License |
+| --- | --- | --- |
+| Tauri, WebView2 bindings and the Rust crates in `porter/Cargo.lock` | crates.io | MIT or Apache-2.0 (each crate's own) |
+| Capstone 5 (via the `capstone` crate) | crates.io | BSD-3-Clause |
+| React, lucide-react, clsx, tailwind-merge, Tailwind CSS | npm | MIT, ISC |
+| Geist Mono | `@fontsource/geist-mono` | SIL Open Font License 1.1 |
+| Teletext typeface | `porter/public/fonts/` | Licensed to Kryoto; not covered by this project's license. Adrian Frutiger (1979), redrawn by Maximage (2025), published by Maxitype |
+| K// mark and wordmark | `porter/src/ui/ascii/`, `porter/public/brand/` | Kryoto's brand, not covered by this project's license |
+| Banner art | `porter/public/art/banner.webp` | Based on Rockstar Games' Chinatown Wars artwork; not covered by this project's license |

@@ -1,0 +1,267 @@
+@import 'tailwindcss';
+@import '@fontsource/geist-mono/400.css';
+@import '@fontsource/geist-mono/700.css';
+
+/* `dark:` follows the class on <html>, as on kryo.to (site components
+   colour themselves with it). The client is always dark. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------------------
+   Kryoto design tokens - the same ones kryo.to and Forge use.
+
+   COPIED, not reinterpreted: every value comes from kryo.to/app/globals.css
+   by way of Kryoto Desktop, so the Porter, the site, Forge and Desktop are the
+   same grey, the same radius and the same face.
+--------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: 'Teletext';
+  src: url('/fonts/teletext-regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+/* A RANGE, as Forge declares it: the Bold cut's usWeightClass is 600, and a
+   single 700 would miss it and synthesise a smeared Regular. */
+@font-face {
+  font-family: 'Teletext';
+  src: url('/fonts/teletext-bold.woff2') format('woff2');
+  font-weight: 600 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --kryo-text: 'Teletext', 'Geist Mono', ui-monospace, Consolas, monospace;
+  --kryo-text-weight: 400;
+  --kryo-word-spacing: 0.1em;
+  --kryo-radius: 16px;
+  --kryo-radius-pill: 9999px;
+  --kryo-dur-fast: 140ms;
+  --kryo-dur-base: 220ms;
+  --kryo-dur-slow: 340ms;
+  --kryo-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  /* ASCII art is a grid; Teletext is proportional and would tear it. */
+  --font-ascii: 'Geist Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+}
+
+[data-font='mono'] {
+  --kryo-text: 'Geist Mono', ui-monospace, Consolas, monospace;
+  --kryo-word-spacing: normal;
+}
+
+[data-radius='sharp'] { --kryo-radius: 0px; --kryo-radius-pill: 0px; }
+[data-radius='soft'] { --kryo-radius: 2px; --kryo-radius-pill: 2px; }
+[data-radius='rounded'] { --kryo-radius: 5px; --kryo-radius-pill: 5px; }
+[data-radius='round'] { --kryo-radius: 10px; --kryo-radius-pill: 9999px; }
+[data-radius='pill'] { --kryo-radius: 16px; --kryo-radius-pill: 9999px; }
+
+@theme inline {
+  --font-sans: var(--kryo-text);
+  --font-mono: var(--kryo-text);
+  --font-ascii: var(--font-ascii);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+  --color-info: var(--info);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-xs: var(--kryo-radius);
+  --radius-sm: var(--kryo-radius);
+  --radius-md: var(--kryo-radius);
+  --radius-lg: var(--kryo-radius);
+  --radius-xl: var(--kryo-radius-pill);
+  --radius-2xl: var(--kryo-radius-pill);
+  --radius: var(--kryo-radius);
+}
+
+/* Dark, the site's `.dark` - the base every palette overrides. The status
+   colours are the site's and Forge's, so a warning looks the same in all three. */
+:root {
+  color-scheme: dark;
+  --background: oklch(0.15 0 0);
+  --foreground: oklch(0.96 0 0);
+  --card: oklch(0.19 0 0);
+  --card-foreground: oklch(0.96 0 0);
+  --popover: oklch(0.18 0 0);
+  --popover-foreground: oklch(0.96 0 0);
+  --primary: oklch(0.97 0 0);
+  --primary-foreground: oklch(0.15 0 0);
+  --secondary: oklch(0.24 0 0);
+  --secondary-foreground: oklch(0.96 0 0);
+  --muted: oklch(0.22 0 0);
+  --muted-foreground: oklch(0.64 0 0);
+  --accent: oklch(0.24 0 0);
+  --accent-foreground: oklch(0.96 0 0);
+  --destructive: oklch(0.58 0.18 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --warning: oklch(0.76 0.14 78);
+  --success: oklch(0.72 0.15 152);
+  --info: oklch(0.74 0.13 240);
+  --border: oklch(0.28 0 0);
+  --input: oklch(0.26 0 0);
+  --ring: oklch(0.7 0 0);
+}
+
+@layer base {
+  * { border-color: var(--border); }
+  html, body, #root { height: 100%; overflow: hidden; }
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--kryo-text);
+    font-weight: var(--kryo-text-weight);
+    word-spacing: var(--kryo-word-spacing);
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+  ::selection { background: oklch(0.5 0 0 / 0.25); }
+
+  /* The radius preference, applied - the site's rule, with its reason: a
+     plain selector list, because Preflight pins controls square with real
+     specificity and a `:where()` would lose that tie. */
+  button:not(.rounded-full):not(.kryo-pill):not(.kryo-square),
+  [role='button']:not(.rounded-full):not(.kryo-pill):not(.kryo-square),
+  input:not(.rounded-full):not(.kryo-pill),
+  textarea:not(.rounded-full):not(.kryo-pill),
+  .border:not(.rounded-full):not(.kryo-pill):not(.kryo-square) {
+    border-radius: var(--kryo-radius);
+    font: inherit;
+  }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+  button:not(:disabled), [role='button']:not(:disabled), a[href] { cursor: pointer; }
+  input, textarea { cursor: text; user-select: text; }
+  :disabled { cursor: not-allowed; }
+  img { -webkit-user-drag: none; }
+
+  html { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border: 2px solid var(--background); border-radius: 0; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
+  ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+}
+
+/* ASCII art, unlayered so it out-ranks `font-mono`, descendants included. */
+.kryo-ascii-art,
+.kryo-ascii-art * {
+  font-family: var(--font-ascii);
+  word-spacing: normal;
+}
+
+@utility kryo-radius { border-radius: var(--kryo-radius); }
+@utility kryo-pill { border-radius: var(--kryo-radius-pill); }
+@utility kryo-square { border-radius: 0; }
+
+/* Motion, from the site's vocabulary. */
+@keyframes kryo-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes kryo-pop { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes kryo-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes kryo-toast { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes kryo-blink { 50% { opacity: 0; } }
+.kryo-in { animation: kryo-in var(--kryo-dur-base) var(--kryo-ease-out) both; }
+.kryo-pop { animation: kryo-pop var(--kryo-dur-base) var(--kryo-ease-out) both; }
+.kryo-fade { animation: kryo-fade var(--kryo-dur-fast) ease both; }
+/* Art that is still on its way: a slow sweep, not a stand-in picture. */
+@keyframes kryo-shimmer { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+.kryo-shimmer {
+  background-image: linear-gradient(100deg, transparent 30%, color-mix(in oklch, var(--foreground) 6%, transparent) 50%, transparent 70%);
+  background-size: 200% 100%;
+  animation: kryo-shimmer 1.4s ease-in-out infinite;
+}
+.kryo-toast { animation: kryo-toast 260ms var(--kryo-ease-out) both; }
+.kryo-blink { animation: kryo-blink 1s steps(1) infinite; }
+
+/* `.drag` areas move the window and `.no-drag` opts back out: done by
+   lib/window-drag.ts, not -webkit-app-region, which cost every button inside
+   its hand cursor in WebView2. */
+
+/* Game art over the page: a fade into the background, in whatever palette. */
+.hero-fade {
+  background: linear-gradient(to bottom, transparent 35%, color-mix(in oklch, var(--background) 70%, transparent) 75%, var(--background));
+}
+.hero-side {
+  background: linear-gradient(to right, color-mix(in oklch, var(--background) 85%, transparent), transparent 60%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* The site's OLED palette, verbatim: its default. */
+[data-palette='oled'] {
+  --background: oklch(0.02 0 0);
+  --foreground: oklch(0.98 0 0);
+  --card: oklch(0.06 0 0);
+  --card-foreground: oklch(0.98 0 0);
+  --popover: oklch(0.05 0 0);
+  --popover-foreground: oklch(0.98 0 0);
+  --primary: oklch(0.98 0 0);
+  --primary-foreground: oklch(0.05 0 0);
+  --secondary: oklch(0.12 0 0);
+  --secondary-foreground: oklch(0.98 0 0);
+  --muted: oklch(0.14 0 0);
+  --muted-foreground: oklch(0.6 0 0);
+  --accent: oklch(0.14 0 0);
+  --accent-foreground: oklch(0.98 0 0);
+  --border: oklch(0.18 0 0);
+  --input: oklch(0.16 0 0);
+  --sidebar: oklch(0.05 0 0);
+  --sidebar-foreground: oklch(0.98 0 0);
+  --sidebar-border: oklch(0.18 0 0);
+}
+
+/* A real button gives under the pointer, as on kryo.to (its
+   active:scale-[0.97]): Button and IconButton opt in with kryo-press.
+   Not rows, checkboxes, cards or art - only things drawn as buttons. Reduced
+   motion (the account's, or the system's) keeps them still. */
+@utility kryo-press {
+  transition-property: color, background-color, border-color, opacity, transform;
+  transition-duration: var(--kryo-dur-fast);
+  transition-timing-function: var(--kryo-ease-out);
+  &:active:not(:disabled) {
+    transform: scale(0.97);
+    transition-duration: 60ms;
+  }
+}
+html[data-motion='reduced'] .kryo-press:active {
+  transform: none;
+}
+html[data-motion='reduced'] *,
+html[data-motion='reduced'] *::before,
+html[data-motion='reduced'] *::after {
+  animation-duration: 0.01ms !important;
+  transition-duration: 0.01ms !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kryo-press:active {
+    transform: none;
+  }
+}
+
+/* CTW's own colours, from its logo: the red and the orange outline. Used only
+   for the game's side of the screen; the chrome stays Kryoto grey. */
+:root {
+  --ctw-red: #d8261e;
+  --ctw-amber: #f2a51f;
+}
