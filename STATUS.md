@@ -32,7 +32,7 @@ it is not a claim of complete compatibility with the original.
 
 ## Mods
 
-Mods use a public C interface (`ctw-modkit/include/ctw_mod.h`) and are managed by the mouse-driven mod menu
+Mods use a public C interface (`ctw-modkit/include/ctw_mod.h`) and are managed by the mod menu
 (`ModMenu.dll`, F4), a plugin of its own. Texture mods are PNGs named after the texture: opaque ones replace it,
 ones with transparency are layers over it. Code mods can change time and weather, the camera (including a free
 camera and render distance), spawn vehicles and draw their pictures, change speeds, and use the mouse, typed text
