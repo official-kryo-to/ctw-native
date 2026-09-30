@@ -1,0 +1,17 @@
+name: Feature proposal
+description: Discuss a focused change before implementing it.
+body:
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and scope
+      description: Describe known behavior, assumptions and the smallest useful implementation.
+    validations:
+      required: true

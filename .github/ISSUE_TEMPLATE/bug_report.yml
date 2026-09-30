@@ -1,0 +1,30 @@
+name: Bug report
+description: Report a reproducible problem with the port.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the result and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include the command or actions that trigger it.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Build and environment
+      description: Commit, Windows version, compiler, GPU and driver. Confirm Android game version 4.4.243.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Remove personal paths. Do not upload game files or private analysis.
+      render: text
