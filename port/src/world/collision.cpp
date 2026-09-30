@@ -1,4 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "collision.h"
+#include "props.h"
 #include "os/gamefs.h"
 #include <stb_image.h>
 #include <glad/gl.h>
@@ -108,12 +112,69 @@ const Collision::Cell* Collision::cell(int cx, int cy) {
         }
     }
     if (sec[10].size() >= 400) C.groundMap.assign(sec[10].begin(), sec[10].begin() + 400);
+    if (uint32_t k = count(sec[6]); k && sec[6].size() >= 4 + k * 20) {
+        C.props.resize(k);
+        memcpy(C.props.data(), &sec[6][4], k * 20);
+        if (propLibrary_) {   // street furniture is solid too (cDynamicProp collision)
+            C.propShapes.resize(k);
+            for (uint32_t i = 0; i < k; ++i) {
+                Cell::PropShapes& ps = C.propShapes[i];
+                ps.box0 = (uint32_t)C.boxes.size();
+                ps.cyl0 = (uint32_t)C.cyls.size();
+                propLibrary_->shapes(C.props[i], C.boxes, C.cyls);
+                ps.boxes = (uint32_t)C.boxes.size() - ps.box0;
+                ps.cyls = (uint32_t)C.cyls.size() - ps.cyl0;
+            }
+        }
+    }
+    if (uint32_t k = count(sec[8]); k && sec[8].size() >= 4 + k * 16) {
+        C.emitters.resize(k);
+        memcpy(C.emitters.data(), &sec[8][4], k * 16);
+    }
     if (uint32_t k = count(sec[7]); k && sec[7].size() >= 4 + k * 20) {
         C.carGens.resize(k);
         memcpy(C.carGens.data(), &sec[7][4], k * 20);
     }
     C.loaded = true;
     return &C;
+}
+
+void Collision::setPropState(int cx, int cy, int index, uint16_t state) {
+    Cell* C = mutableCell(cx, cy);
+    if (C && index >= 0 && index < (int)C->props.size()) C->props[index].state = state;
+}
+
+void Collision::setPropSolid(int cx, int cy, int index, bool solid) {
+    Cell* C = mutableCell(cx, cy);
+    if (!C || index < 0 || index >= (int)C->propShapes.size()) return;
+    Cell::PropShapes& ps = C->propShapes[index];
+    if (!solid && ps.savedBoxes.empty() && ps.savedCyls.empty()) {   // park the shapes far below the world
+        for (uint32_t i = 0; i < ps.boxes; ++i) {
+            ps.savedBoxes.push_back(C->boxes[ps.box0 + i]);
+            C->boxes[ps.box0 + i].cz = -0x40000000;
+            C->boxes[ps.box0 + i].hz = 0;
+        }
+        for (uint32_t i = 0; i < ps.cyls; ++i) {
+            ps.savedCyls.push_back(C->cyls[ps.cyl0 + i]);
+            C->cyls[ps.cyl0 + i].z = -0x40000000;
+            C->cyls[ps.cyl0 + i].h = 0;
+        }
+    } else if (solid) {
+        for (size_t i = 0; i < ps.savedBoxes.size(); ++i) C->boxes[ps.box0 + i] = ps.savedBoxes[i];
+        for (size_t i = 0; i < ps.savedCyls.size(); ++i) C->cyls[ps.cyl0 + i] = ps.savedCyls[i];
+        ps.savedBoxes.clear();
+        ps.savedCyls.clear();
+    }
+}
+
+const std::vector<Collision::CityEmitter>* Collision::emitters(int cx, int cy) {
+    const Cell* C = cell(cx, cy);
+    return C && !C->emitters.empty() ? &C->emitters : nullptr;
+}
+
+const std::vector<Collision::Prop>* Collision::props(int cx, int cy) {
+    const Cell* C = cell(cx, cy);
+    return C && !C->props.empty() ? &C->props : nullptr;
 }
 
 const std::vector<Collision::CarGen>* Collision::carGens(int cx, int cy) {

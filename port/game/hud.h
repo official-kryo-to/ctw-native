@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // 2D drawing for the HUD and the mod menu, using the game's own font (IPhone_Hel_16x16).
 #pragma once
 #include <cstdint>

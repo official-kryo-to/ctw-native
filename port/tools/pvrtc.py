@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Kryo.to
+# See LICENSE in the repository root.
 """PVRTC1 decoder (2bpp and 4bpp), numpy. Written to compare game.pak textures with their dxt.bin replacements.
 Follows the public PVRTC1 description: 64-bit blocks (u32 modulation, u32 colours) in Morton order,
 two low-res colour images (A, B) bilinearly upscaled from block centres, per-pixel modulation weight 0..8."""
@@ -16,7 +19,7 @@ def _colours(cw):
     """cw: uint32 array of colour words -> (A, B) as float arrays [...,4] RGBA in 0..255"""
     cw = cw.astype(np.uint32)
     def ext(v, bits):   # expand n-bit to 8-bit
-        v = v.astype(np.uint32); return ((v << (8 - bits)) | (v >> (2 * bits - 8 if bits > 4 else 0) if bits > 4 else (v << (8 - bits)) >> bits)).astype(np.float64) if False else (v * 255.0 / ((1 << bits) - 1))
+        v = v.astype(np.uint32); return v * 255.0 / ((1 << bits) - 1)
     a = cw & 0xFFFF; b = cw >> 16
     A = np.zeros(cw.shape + (4,)); B = np.zeros(cw.shape + (4,))
     op = (a & 0x8000) != 0   # colour A: opaque RGB554 (blue has 4 bits incl. mode bit slot), else ARGB3443

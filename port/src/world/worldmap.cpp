@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "worldmap.h"
 #include "gfx/assets.h"
 #include "gfx/model.h"
@@ -5,9 +8,6 @@
 #include <algorithm>
 #include <cstring>
 #include <set>
-
-// cWorldModelInstance::Init: render list = table[instance.renderList] (DAT_00586b04)
-static const uint8_t kRenderList[9] = {5, 3, 4, 8, 1, 2, 9, 10, 7};
 
 template <class T> static bool rd(const std::vector<uint8_t>& b, size_t o, T* v) {
     if (o + sizeof(T) > b.size()) return false;
@@ -142,7 +142,7 @@ bool WorldMap::build(int c, int r, const std::map<WorldObjectKey, int>& skip, in
                 out.anims.push_back(wa);
                 out.anims.back().step();
             }
-            uint8_t list = listIdx < 9 ? kRenderList[listIdx] : 0;
+            uint8_t list = listIdx < 9 ? static_cast<uint8_t>(Assets_RenderTables().renderList[listIdx]) : 0;
             const float s = m.scale;
             for (const ModelBatch& mb : m.batches) {
                 if (!mb.mask) continue;

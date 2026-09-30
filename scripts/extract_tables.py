@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Kryo.to
+# See LICENSE in the repository root.
 """Read local lookup data from the supported ARM64 binary; never execute it."""
 import io
 import struct
@@ -11,11 +14,15 @@ class GameBinary:
     def __init__(self, data):
         try:
             from elftools.elf.elffile import ELFFile
+            from elftools.common.exceptions import ELFError
             from capstone import Cs, CS_ARCH_ARM64, CS_MODE_ARM
         except ImportError as exc:
             raise TableError("Install requirements-setup.txt before preparing the APK.") from exc
         self.data = data
-        self.elf = ELFFile(io.BytesIO(data))
+        try:
+            self.elf = ELFFile(io.BytesIO(data))
+        except ELFError as exc:
+            raise TableError('Invalid ELF game binary.') from exc
         if self.elf['e_machine'] != 'EM_AARCH64' or not self.elf.little_endian:
             raise TableError("Expected a little-endian ARM64 libGame.so.")
         dynsym = self.elf.get_section_by_name('.dynsym')
@@ -24,6 +31,11 @@ class GameBinary:
         self.symbols = {s.name: s for s in dynsym.iter_symbols()}
         self.names = {s['st_value']: s.name for s in self.symbols.values() if s['st_value']}
         self.segments = [p for p in self.elf.iter_segments() if p['p_type'] == 'PT_LOAD']
+        # Fixed offsets below are verified only for this ARM64 build. A manifest version alone is insufficient.
+        note = self.elf.get_section_by_name('.note.gnu.build-id')
+        ids = [n['n_desc'] for n in note.iter_notes() if n['n_type'] == 'NT_GNU_BUILD_ID'] if note else []
+        if ids != ['a4c441f4943abbcc72e8270ec18248e4358a89e2']:
+            raise TableError('Unsupported ARM64 build ID; fixed lookup offsets are not verified for this binary.')
         self.relocations = {}
         for section in self.elf.iter_sections():
             if section['sh_type'] not in ('SHT_RELA', 'SHT_REL'):
@@ -151,7 +163,20 @@ class GameBinary:
         # The rev-after-shift table has no exported name in this supported version.
         return data + self.read(0x480920, 16)
 
+    def render(self):
+        angles = b''.join(self.read(a, 16) for a in (0x46a980, 0x469b00, 0x468600, 0x46a450))
+        colours = self.symbol_data('TextColours', 92)[:32]
+        return b'CTWREND1' + self.read(0x486b04, 36) + self.read(0x486a8c, 24) + angles + colours
+
+    def gameplay(self):
+        # The top-ratio table stores 64-bit integers even though its values fit in Q12 int32.
+        top = struct.pack('<6i', *struct.unpack('<6q', self.read(0x487250, 48)))
+        return (b'CTWGAME1' + self.read(0x4872c0, 64) + top + self.read(0x481b44, 7) +
+                self.read(0x481b4b, 7) + self.read(0x481b52, 52) + self.read(0x481b86, 52) +
+                self.read(0x48718e, 10) + self.read(0x469dd0, 16))
+
 
 def extract_tables(binary):
     game = GameBinary(binary)
-    return {'population_tables.bin': game.population(), 'sound_tables.bin': game.sound()}
+    return {'population_tables.bin': game.population(), 'sound_tables.bin': game.sound(),
+            'render_tables.bin': game.render(), 'gameplay_tables.bin': game.gameplay()}

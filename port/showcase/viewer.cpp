@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Texture browser: cycles through every texture in DXT.bin and every loose PNG in the data dir.
 #include "viewer.h"
 #include "os/os.h"

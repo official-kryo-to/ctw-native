@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // The driving camera (cFollowCarCam2), 20.12 fixed point.
 //   - Height 28 units above the car (phones; 35 otherwise) plus 7.5 x (per-frame speed)², lowered when the car
 //     is fast and high up; it hangs back along the car's facing by 10 units minus the same speed terms.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // World collision (CCollision + cWorld / cWorldSector), from world.bin in ROM.WAD.
 //
 // world.bin (cWorld::Init / UpdateStreaming): u32 per collision cell, index x * 100 + y, cells 50 x 50 units from
@@ -9,12 +12,16 @@
 //   +0x100 meshes    u32 count, meshes {i32 minX, minY, maxX, maxY, u16 nVerts, u16 nTris,
 //                    nVerts x i32[3], nTris x 40-byte triangles} - triangle: i32[3] plane point, u8 v0 v1 v2,
 //                    u8 radius, i16 normal[3], i16 edgeNormal[3][3]; point/radius/normals are computed at load.
-//   +0x108 .. +0x120 (pickups, ... - not used yet)
+//   +0x108 .. +0x118 (pickups, ... - not used yet)
+//   +0x120 props: u32 count, count x 20 bytes sPackedPropData (see props.h); their collision shapes are added to
+//          the cell when a PropLibrary is set
 //   +0x128 car generators (cCarGenManager::SpawnAllCarGensInSector): u32 count, count x 20 bytes sPackedCarGenData
 //          {i32 x, y, z, i16 heading, u8 vehicle (info index), u8 flags, u8 colour (25 = random), 3 x pad};
 //          flags: 1 random vehicle, 2 random heading (+-0x38E), 4 random position (+-0.2), bits 3-5 chance,
 //          0x40 only where no player can see it, 0x80 needs the script flag (save game +0x64 & 0x3000)
-//   +0x130 .. +0x138 (emitters, attractors - not used yet)
+//   +0x130 city emitters (cCityEmitters::SpawnAllEmittersInSector): u32 count, count x 16 bytes {u8 type, 3 x pad,
+//          i32 x, y, z}; type 0 = steam (cParticleEmitterSteam), 1 = fountain (cFountainStream)
+//   +0x138 (attractors - not used yet)
 //   +0x140 ground map: 40 x 40 x 2 bits (1.25-unit squares): 1 = land (z 0), 2 = lake (z -2.5), else sea (-7.5)
 //   +0x148 (not used yet)
 // All values are 20.12 fixed point; the queries below take and return floats in world units.
@@ -44,6 +51,18 @@ public:
     static_assert(sizeof(CarGen) == 20, "sPackedCarGenData");
     const std::vector<CarGen>* carGens(int cx, int cy);   // the car generators of a 50-unit cell (nullptr: none)
     static void cellOfPos(int32_t x, int32_t y, int& cx, int& cy);
+
+    struct Prop { uint16_t prop, kind; int16_t heading; uint16_t state; int32_t x, y, z; };   // sPackedPropData
+    static_assert(sizeof(Prop) == 20, "sPackedPropData");
+    const std::vector<Prop>* props(int cx, int cy);        // the props of a 50-unit cell (nullptr: none)
+    struct CityEmitter { uint8_t type, pad[3]; int32_t x, y, z; };                     // sSectorEmitterData
+    static_assert(sizeof(CityEmitter) == 16, "sSectorEmitterData");
+    const std::vector<CityEmitter>* emitters(int cx, int cy);
+    void setPropLibrary(const class PropLibrary* library) { propLibrary_ = library; }
+    // Runtime state of a prop (0 = standing; the game sets others when one is knocked over or smashed). A prop that
+    // is not solid keeps its shapes aside until it is made solid again.
+    void setPropState(int cx, int cy, int index, uint16_t state);
+    void setPropSolid(int cx, int cy, int index, bool solid);
 
     // Debug: wireframes of the boxes (yellow), cylinders (cyan) and mesh triangles (magenta) within `range`.
     void debugDraw(float x, float y, float range);
@@ -93,11 +112,17 @@ private:
         std::vector<Mesh> meshes;
         std::vector<uint8_t> groundMap;   // 400 bytes or empty
         std::vector<CarGen> carGens;
+        std::vector<Prop> props;
+        struct PropShapes { uint32_t box0 = 0, boxes = 0, cyl0 = 0, cyls = 0; std::vector<Box> savedBoxes; std::vector<Cyl> savedCyls; };
+        std::vector<PropShapes> propShapes;   // per prop: its shapes in boxes / cyls
+        std::vector<CityEmitter> emitters;
         bool loaded = false;              // false = no data (off-map)
     };
     const Cell* cell(int cx, int cy);
+    Cell* mutableCell(int cx, int cy) { return const_cast<Cell*>(cell(cx, cy)); }
     static void finishTriangle(Tri& t, const std::vector<int32_t>& verts);
 
     std::vector<uint8_t> world_;
     std::map<int, std::unique_ptr<Cell>> cells_;
+    const class PropLibrary* propLibrary_ = nullptr;
 };

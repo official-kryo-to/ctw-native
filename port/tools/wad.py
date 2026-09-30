@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Kryo.to
+# See LICENSE in the repository root.
 import struct, os
 M=0xFFFFFFFF
 def name_hash(name):

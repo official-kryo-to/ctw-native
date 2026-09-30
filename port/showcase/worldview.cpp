@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Showcase city viewer: a free-fly camera around the engine's WorldRenderer.
 #include "worldview.h"
 #include "world/worldrenderer.h"

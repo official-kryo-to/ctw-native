@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Peds (people) are layered, animated, flat sprites seen from above (cSpriteFrameManager / cPedSprite).
 //
 // Animation table = gGameDir[7] (resource 2101): u16 offsets (in 4-byte units) at +2 + anim*2; per animation

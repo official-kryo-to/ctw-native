@@ -1,10 +1,16 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // GTA: Chinatown Wars - PC port, the game itself (work in progress).
 //   ctw_game [--data DIR] [--mods DIR] [--shot out.bmp --frames N]
-// --data defaults to "data" (the user's extracted game files), --mods to the "mods" folder next to the exe.
+// --data defaults to the "data" folder next to the exe (or "data" in the current folder while developing), --mods
+// to the "mods" folder next to the exe.
 #include "game.h"
 #include "hud.h"
 #include "plugins.h"
 #include "os/os.h"
+#include "os/license.h"
+#include "gfx/assets.h"
 #include <SDL.h>   // SDL_main
 #include <glad/gl.h>
 #include <cstdio>
@@ -34,11 +40,14 @@ static bool saveBmp(const char* path) {
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && !strcmp(argv[1], "--license")) { Ctw_PrintLicense(); return 0; }
     std::string data, mods;
     const char* shot = nullptr;
     int frames = 60;
     const char* keys = nullptr;
+    const char* ui = nullptr;   // shot mode: "frame:key=N;frame:click=x,y;frame:mouse=x,y;frame:wheel=x,y,n" (UI tests)
     bool trace = false;
+    const char* exportTextures = nullptr;   // --export-textures DIR: every game texture as <id>.png (for modders)
     struct XC { float x, y, h; int id = 0; };
     std::vector<XC> extraCars;
     float hour = -1;
@@ -51,7 +60,7 @@ int main(int argc, char** argv) {
         else if (!strcmp(option, "--car")) values = 3;
         else if (!strcmp(option, "--veh")) values = 4;
         else if (strcmp(option, "--data") && strcmp(option, "--mods") && strcmp(option, "--shot") &&
-                 strcmp(option, "--frames") && strcmp(option, "--keys") && strcmp(option, "--state") &&
+                 strcmp(option, "--frames") && strcmp(option, "--keys") && strcmp(option, "--export-textures") && strcmp(option, "--ui") && strcmp(option, "--state") &&
                  strcmp(option, "--enter") && strcmp(option, "--handbrake") && strcmp(option, "--hour")) {
             fprintf(stderr, "Unknown option: %s\n", option);
             return 4;
@@ -64,6 +73,8 @@ int main(int argc, char** argv) {
         if (!strcmp(argv[i], "--mods")) mods = argv[i + 1];
         if (!strcmp(argv[i], "--shot")) shot = argv[i + 1];
         if (!strcmp(argv[i], "--frames")) frames = atoi(argv[i + 1]);
+        if (!strcmp(argv[i], "--ui")) ui = argv[i + 1];
+        if (!strcmp(argv[i], "--export-textures")) exportTextures = argv[i + 1];
         if (!strcmp(argv[i], "--keys")) keys = argv[i + 1];   // shot mode: comma-separated SDL scancodes to press
         if (!strcmp(argv[i], "--walk") && i + 2 < argc) {       // shot mode: hold this input (x y, -1..1) all frames
             TheGame().scriptedInput = true;
@@ -98,11 +109,23 @@ int main(int argc, char** argv) {
     char* baseC = SDL_GetBasePath();
     std::string base = baseC ? baseC : "";
     SDL_free(baseC);
-    if (data.empty()) data = std::filesystem::exists(base + "data/game.pak") || !std::filesystem::exists("data") ? base + "data" : "data";
+    if (data.empty())
+        data = std::filesystem::exists(base + "data/game.pak") || !std::filesystem::exists("data") ? base + "data" : "data";
     if (mods.empty()) mods = base + "mods";
-    OS_SetResourceRoot(data.c_str());
     OS_SetDocumentsRoot((base + "saves").c_str());
     if (!Host_Init("GTA: Chinatown Wars (PC port)", 1280, 720)) return 1;
+    OS_SetResourceRoot(data.c_str());
+    if (exportTextures) {   // modding help: dump the textures, then quit
+        std::error_code ec;
+        std::filesystem::create_directories(exportTextures, ec);
+        if (!Assets_Open(data)) { fprintf(stderr, "Could not open the game files in %s\n", data.c_str()); Host_Shutdown(); return 2; }
+        int count = 0;
+        for (int id = 0; id < Assets_TextureIdLimit(); ++id)
+            if (Assets_ExportTexturePNG(id, std::string(exportTextures) + "/" + std::to_string(id) + ".png")) ++count;
+        printf("Exported %d textures to %s\n", count, exportTextures);
+        Host_Shutdown();
+        return count ? 0 : 2;
+    }
     Game& game = TheGame();
     if (!game.init(data, mods)) {
         std::string msg = "Could not find the game files.\n\nPut the files from your own copy of GTA: Chinatown Wars in:\n" + data;
@@ -122,6 +145,19 @@ int main(int argc, char** argv) {
     if (shot) {   // automated test: run N game frames, optionally press keys, save a screenshot
         for (int f = 0; f < frames; ++f) {
             game.tick();
+            if (ui) {   // UI tests: this frame's scripted input, then a rendered frame for the immediate-mode UI
+                for (const char* p = ui; *p;) {
+                    int at = -1, x = 0, y = 0, n = 0;
+                    char what[8] = "";
+                    if (sscanf(p, "%d:%7[a-z]=%d,%d,%d", &at, what, &x, &y, &n) >= 3 && at == f) {
+                        if (!strcmp(what, "key")) Plugins_Key(x);
+                        else Host_TestMouse(x, y, !strcmp(what, "click") ? 1 : 0, !strcmp(what, "wheel") ? n : 0);
+                    }
+                    while (*p && *p != ';') ++p;
+                    if (*p) ++p;
+                }
+                game.render((int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());
+            }
             if (trace && game.playerCar >= 0) {
                 const Vehicle& c = game.cars[game.playerCar];
                 printf("f%3d car %.2f %.2f %.2f speed %.2f gear %d head %d phys %d simple %d up %d hp %d\n", f, c.pos[0] / 4096.f, c.pos[1] / 4096.f,
@@ -149,6 +185,7 @@ int main(int argc, char** argv) {
             for (const Vehicle& c : game.cars) printf(" [%s %.1f %.1f]", game.vehicleInfos[c.infoId].name().c_str(), c.pos[0] / 4096.f, c.pos[1] / 4096.f);
             printf("\n");
         }
+        if (trace) printf("world blocks loaded: %zu\n", game.world.stats().blocks);
         bool ok = saveBmp(shot);
         game.shutdown();
         Host_Shutdown();

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "pedsprites.h"
 #include <utility>
 #include "gfx/assets.h"
@@ -7,10 +10,6 @@
 #include <cmath>
 #include <cstring>
 
-// DAT_00586a8c: palette slot of each layer, per body type (upper body = 0/2, legs = 1/3)
-static const uint8_t kLayerSlot[4][6] = {{2, 12, 8, 3, 5, 13}, {8, 10, 12, 0, 0, 0}, {2, 12, 8, 3, 5, 13}, {8, 5, 10, 10, 0, 0}};
-// cPedSprite::ModifyForward: (cos, sin) for the animation's angle adjustment in 45° steps
-static const int kAngle[8][2] = {{4096, 0}, {2895, 2895}, {0, 4096}, {-2895, 2895}, {-4096, 0}, {-2895, -2895}, {0, -4096}, {2895, -2895}};
 static const float kLayerStep = -204.f / 4096.f;   // sSpriteOffset
 
 bool PedSprites::init() {
@@ -98,7 +97,7 @@ void PedSprites::draw(const float pos[3], float heading, int anim, int frame, in
     float fx = -sinf(heading), fy = cosf(heading);
     if (angleAdj) {
         int k = angleAdj >> 13 & 7;
-        float c = kAngle[k][0] / 4096.f, s = kAngle[k][1] / 4096.f;
+        float c = Assets_RenderTables().angle[k][0] / 4096.f, s = Assets_RenderTables().angle[k][1] / 4096.f;
         float nx = c * fx + s * fy, ny = c * fy - s * fx;
         fx = nx; fy = ny;
     }
@@ -120,7 +119,7 @@ void PedSprites::draw(const float pos[3], float heading, int anim, int frame, in
         bool groupA = c < split;
         int pal = groupA ? palA : palB;
         uint16_t col = 0x7FFF;
-        size_t pi = (size_t)pal * 32 + (size_t)kLayerSlot[body & 3][c % 6] * 2;
+        size_t pi = (size_t)pal * 32 + (size_t)Assets_RenderTables().layerSlot[body & 3][c % 6] * 2;
         if (pi + 2 <= palettes_.size()) memcpy(&col, &palettes_[pi], 2);
         float z = pos[2] + (groupA ? zA : zB) + kLayerStep * c;
         float bx = pos[0] + side * rx + fwd * fx, by = pos[1] + side * ry + fwd * fy;

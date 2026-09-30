@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "player.h"
 #include "gfx/pedsprites.h"
 #include "world/collision.h"
@@ -110,7 +113,7 @@ void Player::update(const Input& in, Collision* col, const PedSprites* sprites) 
     updateSpeed(in);
     animate(sprites);
     if (onGround_) {   // velocity from the facing, only while standing on something
-        int32_t sp = currentSpeed();
+        int32_t sp = (int32_t)(currentSpeed() * speedScale);
         int32_t v[3] = {mulq(sp, fwd[0]), mulq(sp, fwd[1]), vel[2] + mulq(sp, fwd[2])};
         if (groundNormal[2] != 0x1000) {   // along the slope
             int64_t dot = (int64_t)v[0] * groundNormal[0] + (int64_t)v[1] * groundNormal[1] + (int64_t)groundNormal[2] * v[2];

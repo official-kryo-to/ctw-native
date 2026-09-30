@@ -1,4 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "audio.h"
+#include "os/datafile.h"
 #include <SDL.h>
 #include <algorithm>
 #include <atomic>
@@ -13,7 +17,22 @@
 static const int kOutRate = 44100;
 static SDL_AudioDeviceID g_dev = 0;
 
+// MP3s are streamed through the data layer, so they can come from a folder or from inside the exe.
+struct Mp3Source {
+    DataFile file;
+    mp3dec_io_t io{};
+    bool open(const std::string& path) {
+        if (!file.open(path)) return false;
+        io.read = [](void* buf, size_t size, void* user) { return ((DataFile*)user)->read(buf, size); };
+        io.read_data = &file;
+        io.seek = [](uint64_t position, void* user) { return ((DataFile*)user)->seek(position) ? 0 : -1; };
+        io.seek_data = &file;
+        return true;
+    }
+};
+
 struct Stream {
+    Mp3Source source;
     mp3dec_ex_t dec{};
     bool open = false, loop = false, paused = false;
     int rate = 0, channels = 0;
@@ -206,7 +225,7 @@ bool Audio_PlayMusic(const std::string& path, bool loop) {
     Stream* s = new Stream();
     // Opened (memory-mapped + frame-indexed) outside the audio lock so playback doesn't glitch.
     // MP3D_SEEK_TO_SAMPLE lets looping seek back to sample 0 exactly.
-    if (mp3dec_ex_open(&s->dec, path.c_str(), MP3D_SEEK_TO_SAMPLE) != 0 || s->dec.info.channels <= 0 ||
+    if (!s->source.open(path) || mp3dec_ex_open_cb(&s->dec, &s->source.io, MP3D_SEEK_TO_SAMPLE) != 0 || s->dec.info.channels <= 0 ||
         s->dec.info.hz <= 0) {
         freeStream(s);
         return false;
@@ -255,8 +274,9 @@ double Audio_MusicPosition() {
 }
 
 bool Audio_Probe(const std::string& path, AudioTrackInfo* out) {
+    Mp3Source source;
     mp3dec_ex_t d;
-    if (mp3dec_ex_open(&d, path.c_str(), MP3D_SEEK_TO_SAMPLE) != 0) return false;
+    if (!source.open(path) || mp3dec_ex_open_cb(&d, &source.io, MP3D_SEEK_TO_SAMPLE) != 0) return false;
     out->sampleRate = d.info.hz;
     out->channels = d.info.channels;
     out->seconds = (d.info.hz && d.info.channels) ? (double)d.samples / d.info.channels / d.info.hz : 0;

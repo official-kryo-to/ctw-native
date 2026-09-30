@@ -1,17 +1,14 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "pak.h"
 #include <cstring>
 
-#ifdef _WIN32
-#define SEEK64 _fseeki64
-#else
-#define SEEK64 fseeko
-#endif
 
 bool Pak::open(const std::string& path) {
-    fp_ = fopen(path.c_str(), "rb");
-    if (!fp_) return false;
+    if (!file_.open(path)) return false;
     std::vector<uint8_t> head(0x1000);
-    if (fread(head.data(), 1, head.size(), fp_) != head.size()) return false;
+    if (file_.read(head.data(), head.size()) != head.size()) return false;
     uint32_t v[6];
     memcpy(v, head.data(), sizeof v);
     seg1_ = v[1]; seg2_ = v[2]; seg3_ = v[3]; count_ = v[4]; endPage_ = v[5];
@@ -23,8 +20,8 @@ bool Pak::open(const std::string& path) {
     size_t need = 0x18 + (size_t)count_ * 2;
     if (hdr > 0x1000) {
         head.resize(hdr, 0);
-        if (SEEK64(fp_, (int64_t)endPage_ * 4096, SEEK_SET) != 0) return false;
-        size_t got = fread(head.data() + 0x1000, 1, hdr - 0x1000, fp_);
+        if (!file_.seek((uint64_t)endPage_ * 4096)) return false;
+        size_t got = file_.read(head.data() + 0x1000, hdr - 0x1000);
         if (0x1000 + got < need) return false;
     }
     if (need > head.size()) return false;
@@ -50,8 +47,8 @@ bool Pak::readPrefix(uint32_t id, size_t maxBytes, std::vector<uint8_t>& out) co
     if (!sizeBytes(id, &sz) || sz == 0) return false;
     size_t n = sz < maxBytes ? sz : maxBytes;
     out.resize(n);
-    if (SEEK64(fp_, (int64_t)(pageOf(id) * 4096u), SEEK_SET) != 0) return false;
-    return fread(out.data(), 1, n, fp_) == n;
+    if (!file_.seek(pageOf(id) * 4096u)) return false;
+    return file_.read(out.data(), n) == n;
 }
 
 bool Pak::read(uint32_t id, std::vector<uint8_t>& out) const { return readPrefix(id, (size_t)-1, out); }

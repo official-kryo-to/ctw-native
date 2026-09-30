@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Kryo.to
+# See LICENSE in the repository root.
 import struct, collections
 def decode_color_block(b, alpha_mode):
     c0,c1,bits=struct.unpack('<HHI',b)

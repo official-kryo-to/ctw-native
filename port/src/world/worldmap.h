@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // The city: streaming blocks from game.pak, as loaded by cRenderWorld / cRenderWorldSector / cWorldModelInstance.
 //
 // World map header = gGameDir[0] (resource 1):

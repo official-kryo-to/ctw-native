@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // The road network cars drive on: ai.bin (cAIHub::Init), in ROM.WAD.
 //
 //   u32 linkCount, u32 nodeCount, u32 (0), u32 nodeOffset; u16 links[linkCount] at 0x10; nodes at nodeOffset,

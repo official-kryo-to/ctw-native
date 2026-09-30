@@ -1,11 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "wad.h"
 #include <algorithm>
+#include <cstring>
 
-#ifdef _WIN32
-#define SEEK64 _fseeki64
-#else
-#define SEEK64 fseeko
-#endif
 
 uint32_t Wad::hashName(const char* s) {
     uint32_t h = 0;
@@ -21,17 +20,11 @@ uint32_t Wad::hashName(const char* s) {
 
 bool Wad::open(const std::string& dir) {
     std::string tocPath = dir + "/rom.toc", wadPath = dir + "/rom.wad";
-    FILE* t = fopen(tocPath.c_str(), "rb");
-    if (!t) return false;
-    fseek(t, 0, SEEK_END);
-    long n = ftell(t) / (long)sizeof(Entry);
-    fseek(t, 0, SEEK_SET);
-    toc_.resize((size_t)n);
-    size_t got = fread(toc_.data(), sizeof(Entry), (size_t)n, t);
-    fclose(t);
-    if (got != (size_t)n) return false;
-    fp_ = fopen(wadPath.c_str(), "rb");
-    return fp_ != nullptr;
+    std::vector<uint8_t> toc;
+    if (!Data_ReadAll(tocPath, toc)) return false;
+    toc_.resize(toc.size() / sizeof(Entry));
+    if (!toc_.empty()) memcpy(toc_.data(), toc.data(), toc_.size() * sizeof(Entry));
+    return file_.open(wadPath);
 }
 
 const Wad::Entry* Wad::find(const char* name) const {
@@ -52,8 +45,8 @@ bool Wad::size(const char* name, uint32_t* out) const {
 
 bool Wad::read(const char* name, std::vector<uint8_t>& out) const {
     const Entry* e = find(name);
-    if (!e || !fp_) return false;
+    if (!e || !file_.isOpen()) return false;
     out.resize(e->size);
-    if (SEEK64(fp_, (int64_t)e->offset, SEEK_SET) != 0) return false;
-    return fread(out.data(), 1, e->size, fp_) == e->size;
+    if (!file_.seek(e->offset)) return false;
+    return file_.read(out.data(), e->size) == e->size;
 }

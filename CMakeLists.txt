@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.20)
+project(ctw_native C CXX)
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+include(CTest)
+add_subdirectory(port)
+option(CTW_BUILD_MODKIT "Build the bundled mod menu and example mods" ON)
+if(CTW_BUILD_MODKIT)
+    add_subdirectory(ctw-modkit)
+endif()

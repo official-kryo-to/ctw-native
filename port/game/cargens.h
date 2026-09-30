@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Parked cars from the map's car generators: a port of cCarGenManager.
 //
 // Every 50-unit sector of world.bin carries its car generators (section +0x128, see world/collision.h). When a

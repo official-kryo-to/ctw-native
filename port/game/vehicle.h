@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Cars: a port of cPhysical + cVehicle + cWheeledVehicle + CTyre + CEngine and the static-world part of
 // cPhysicalIntegrator, in the game's fixed point (20.12 units, Q12 vectors, angles 0x10000 = 360°).
 //
@@ -132,6 +135,7 @@ private:
     void placeUpright(const int32_t p[3], int16_t heading);
 public:
     void setToPhysics(bool on);
+    void collisionSpheres(int32_t (*out)[4], int& n) const { spheres(out, n); }   // cPhysical::CalcSpheres
 private:
     void setToSimple(bool on);
     bool velocityBelow(int32_t tol) const;

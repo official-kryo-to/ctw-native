@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // The game (in progress). Runs the game logic at a fixed 30 frames per second like OS_ApplicationTick /
 // cGame::Process, and renders every display frame.
 #pragma once
@@ -11,6 +14,9 @@
 #include "gfx/model.h"
 #include "gfx/pedsprites.h"
 #include "world/collision.h"
+#include "world/props.h"
+#include "propdynamics.h"
+#include "watercannon.h"
 #include "world/worldrenderer.h"
 #include <cstdint>
 #include <map>
@@ -30,6 +36,14 @@ public:
 
     WorldRenderer world;
     Collision collision;
+    PropLibrary props;                       // street furniture (cDynamicPropManager)
+    // The props around the camera: draw = false collects their lights for the world renderer, true draws them.
+    void renderProps(const WorldCamera& cam, bool draw);
+    void updateCityEmitters();               // cCityEmitters: steam and fountains from the cells around the player
+    void updateWorldObjects();               // city emitters, fountains and knocked-over props
+    std::map<int, std::vector<class Emitter*>> cityEmitters;   // cell key -> its emitters
+    std::map<int, std::vector<std::unique_ptr<Fountain>>> fountains;   // cell key -> its fountains (type 1)
+    PropDynamics propDynamics;               // street furniture knocked over by vehicles
     PedSprites pedSprites;
     FollowPedCam camera;
     Player player;
@@ -68,6 +82,11 @@ public:
     const Model* carModel(int infoId);
     uint32_t frame = 0;
     bool clockRunning = true;
+    float speedScale = 1.f;              // mods: player speed on foot and in a vehicle
+    float gameSpeed = 1.f;               // mods: simulation speed (the clock follows it)
+    float renderDistance = 120.f;        // units of city loaded around the camera (the game: one block ring)
+    void setRenderDistance(float units);
+    struct FreeCamera { bool on = false; WorldCamera cam; } freeCam;   // mods: replaces the game camera
     bool showCollision = false;          // F3: draw the collision shapes around the player
     bool scriptedInput = false;          // testing: use scriptedMove instead of the keyboard
     float scriptedMove[2] = {0, 0};

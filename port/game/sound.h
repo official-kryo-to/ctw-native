@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Sound effects: a port of the parts of cAudioManager / cSoundEvents / cAudioBaseOAL the vehicles use.
 //
 // Data (ROM.WAD): resbnk.bin - the resident bank, u32 count + count x {u32 offset, u32 size, u32 rate} and the
@@ -10,6 +13,7 @@
 // square of the distance; pan from the camera's point of view; the pitch of a slot is 1 + 20 x (rate - value) / rate
 // for the value the vehicle code puts in the slot.
 #pragma once
+#include "lookups.h"
 #include <cstdint>
 #include <map>
 #include <string>
@@ -36,6 +40,7 @@ private:
         bool sample(int i, const uint8_t*& pcm, uint32_t& len, uint32_t& rate) const;
     };
     Bank res_, car_;
+    SoundTables tables_;
     int carBankEnum_ = -1;
 
     struct Slot { int event = 0x9C; int volume = 0, radius = 0, sfx = -1; int32_t freq = 0, lastFreq = 0;

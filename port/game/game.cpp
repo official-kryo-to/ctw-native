@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "game.h"
 #include "hud.h"
 #include "particles.h"
@@ -20,9 +23,15 @@ Game& TheGame() { return g_game; }
 bool Game::init(const std::string& data, const std::string& mods) {
     dataDir = data;
     modsDir = mods;
+    if (!LoadGameplayTables(dataDir)) {
+        fprintf(stderr, "gameplay_tables.bin missing or invalid: run scripts/setup_game.py\n");
+        return false;
+    }
     if (!world.init(dataDir)) return false;
     world.setRadius(1);   // the game keeps a 3 x 3 sector window; one block ring around the player covers it
     Hud_Init(dataDir);
+    if (props.load()) collision.setPropLibrary(&props);   // before any collision cell loads
+    else fprintf(stderr, "prop definitions not found: no street furniture\n");
     if (!collision.init(dataDir)) fprintf(stderr, "world.bin not found: no collision\n");
     player.placeOnGround(&collision);
     if (!pedSprites.init()) fprintf(stderr, "ped sprites not found\n");
@@ -31,8 +40,8 @@ bool Game::init(const std::string& data, const std::string& mods) {
     player.posf(p);
     world.loadAllNow(p[0], p[1]);
     if (!roads.load(dataDir)) fprintf(stderr, "ai.bin not found: no traffic\n");
-    if (!TheSound().init(dataDir)) fprintf(stderr, "resbnk.bin not found (or no audio device): no sound effects\n");
-    if (!traffic.init(dataDir)) fprintf(stderr, "infozones.bin / popinfo.bin not found: no traffic\n");
+    if (!TheSound().init(dataDir)) fprintf(stderr, "sound_tables.bin / resbnk.bin invalid or no audio device: no sound effects (run scripts/setup_game.py)\n");
+    if (!traffic.init(dataDir)) fprintf(stderr, "population_tables.bin / infozones.bin / popinfo.bin invalid: no traffic (run scripts/setup_game.py)\n");
     LoadVehicleInfos(vehicleInfos);   // parked cars come from the map's car generators (cargens.cpp)
     if (getenv("CTW_VEHDBG"))
         for (size_t i = 0; i < vehicleInfos.size(); ++i)
@@ -85,13 +94,83 @@ void Game::spawnGenerated(int infoId, const int32_t pos[3], int16_t heading, int
     if (i >= 0) cars[i].generated = true;
 }
 
+void Game::renderProps(const WorldCamera& cam, bool draw) {   // cDynamicPropManager + cLightManager::AddPropLights
+    const int32_t ex = (int32_t)(cam.eye[0] * 4096.f), ey = (int32_t)(cam.eye[1] * 4096.f);
+    int cx, cy;
+    Collision::cellOfPos(ex, ey, cx, cy);
+    const int64_t range = (int64_t)(renderDistance + 40.f) << 12;   // about the streamed city around the camera
+    const int cells = (int)(range >> 12) / 50 + 1;                   // collision cells are 50 units
+    for (int dy = -cells; dy <= cells; ++dy)
+        for (int dx = -cells; dx <= cells; ++dx) {
+            const std::vector<Collision::Prop>* list = collision.props(cx + dx, cy + dy);
+            if (!list) continue;
+            for (const Collision::Prop& p : *list) {
+                const int64_t ddx = p.x - ex, ddy = p.y - ey;
+                if (ddx * ddx + ddy * ddy > range * range || p.state != 0) continue;   // (knocked: PropDynamics)
+                if (!draw) { props.lights(p, world.propLights); continue; }
+                const int32_t at[3] = {p.x, p.y, p.z};
+                if (canSee(at, props.radius(p.prop))) props.draw(p);
+            }
+        }
+    if (draw) {
+        propDynamics.render(*this);
+        glDisable(GL_LIGHTING);
+        glDisable(GL_BLEND);
+        glDisable(GL_ALPHA_TEST);
+        glDepthMask(GL_TRUE);
+    }
+}
+
+void Game::setRenderDistance(float units) {
+    renderDistance = std::max(120.f, std::min(units, 720.f));
+    world.setRadius((int)std::ceil(renderDistance / 120.f));   // streaming blocks are 120 units
+}
+
+void Game::updateCityEmitters() {   // cWorldSector::DataLoaded -> cCityEmitters::SpawnAllEmittersInSector
+    int32_t f[3];
+    focus(f);
+    int cx, cy;
+    Collision::cellOfPos(f[0], f[1], cx, cy);
+    for (auto it = cityEmitters.begin(); it != cityEmitters.end();) {   // cells left behind
+        const int kx = it->first / 100, ky = it->first % 100;
+        if (std::abs(kx - cx) <= 2 && std::abs(ky - cy) <= 2) { ++it; continue; }
+        for (Emitter* e : it->second) TheParticles().remove(e);
+        fountains.erase(it->first);
+        it = cityEmitters.erase(it);
+    }
+    for (int dy = -1; dy <= 1; ++dy)
+        for (int dx = -1; dx <= 1; ++dx) {
+            const int key = (cx + dx) * 100 + (cy + dy);
+            if (cx + dx < 0 || cy + dy < 0 || cityEmitters.count(key)) continue;
+            std::vector<Emitter*>& list = cityEmitters[key];
+            if (const std::vector<Collision::CityEmitter>* es = collision.emitters(cx + dx, cy + dy))
+                for (const Collision::CityEmitter& e : *es)
+                    if (e.type == 0) {
+                        const int32_t at[3] = {e.x, e.y, e.z};
+                        list.push_back(TheParticles().add<SteamEmitter>(at, true));
+                    } else if (e.type == 1) {   // cFountainStream(nullptr, pos, (0, 0, 2.0), -1, 1, 0, 0x7F39)
+                        const int32_t at[3] = {e.x, e.y, e.z};
+                        const int16_t up[3] = {0, 0, 0x2000};
+                        fountains[key].push_back(std::make_unique<Fountain>(at, up));
+                    }
+        }
+}
+
+void Game::updateWorldObjects() {   // once per game frame, after the vehicles moved
+    updateCityEmitters();
+    for (auto& kv : fountains)
+        for (auto& f : kv.second) f->tick(frame);
+    propDynamics.update(*this);
+}
+
 void Game::focus(int32_t o[3]) const {
     const int32_t* p = playerCar >= 0 ? cars[playerCar].pos : player.pos;
     o[0] = p[0]; o[1] = p[1]; o[2] = p[2];
 }
 
 void Game::viewCamera(WorldCamera& cam) const {
-    if (playerCar >= 0) carCam.toWorldCamera(cam);
+    if (freeCam.on) cam = freeCam.cam;
+    else if (playerCar >= 0) carCam.toWorldCamera(cam);
     else camera.toWorldCamera(cam);
 }
 
@@ -302,6 +381,7 @@ static int16_t padAngle(float x, float y) { return (int16_t)(atan2f(x, y) * 1043
 
 void Game::tick() {
     ++frame;
+    player.speedScale = speedScale;
     Plugins_BeginFrameInput();
     // input -> the player's yoke (cPlayerOnFoot::HandleStrafe: wanted heading = camera yaw + stick angle)
     float mx = 0, my = 0;
@@ -352,8 +432,17 @@ void Game::tick() {
         traffic.update(*this);
         for (int i = 0; i < (int)cars.size(); ++i) cars[i].act(i == playerCar ? dc : Vehicle::Controls{}, i == playerCar, &collision);
         Vehicle::collideCars(cars, playerCar, frame);
+        propDynamics.checkImpacts(*this);
         for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); c.processDamage(frame); }
-        TheParticles().update();
+        if (speedScale != 1.f && dc.throttle > 0) {   // mods: the speed changer nudges the driven vehicle's speed
+            Vehicle& me = cars[playerCar];
+            if (speedScale < 1.f || me.speed() < (int32_t)(30.f * 4096.f * speedScale)) {
+                float k = 1.f + (speedScale - 1.f) * 0.04f;
+                for (int i = 0; i < 3; ++i) me.vel[i] = (int32_t)(me.vel[i] * k);
+            }
+        }
+        updateWorldObjects();
+        TheParticles().update(frame);
         TheSkidmarks().process();
         if (cars[playerCar].isBike() && player.hidden) {   // cPed::AnimatePedInVehicle on a bike
             const Vehicle& c = cars[playerCar];
@@ -382,7 +471,7 @@ void Game::tick() {
         sprintHeld_ = false;
         world.tick();
         if (clockRunning) { world.timeCycle().advanceFrames(1); world.timeCycle().evaluate(); }
-        world.stream(me.pos[0] / 4096.f, me.pos[1] / 4096.f, 2);
+        if (!freeCam.on) world.stream(me.pos[0] / 4096.f, me.pos[1] / 4096.f, 2);
         carGens.update(*this);
         removeFarCars();
         TheSound().update(*this);
@@ -421,15 +510,17 @@ void Game::tick() {
     traffic.update(*this);
     for (Vehicle& c : cars) c.act(Vehicle::Controls{}, false, &collision);
     Vehicle::collideCars(cars, -1, frame);
+    propDynamics.checkImpacts(*this);
     for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); c.processDamage(frame); c.justDied = false; }
-    TheParticles().update();
+    updateWorldObjects();
+    TheParticles().update(frame);
     TheSkidmarks().process();
     camera.update(player.pos, player.heading(), player.vel, &collision);
     world.tick();
     if (clockRunning) { world.timeCycle().advanceFrames(1); world.timeCycle().evaluate(); }   // cTimeCycle::Process
     float p[3];
     player.posf(p);
-    world.stream(p[0], p[1], 2);
+    if (!freeCam.on) world.stream(p[0], p[1], 2);   // (the free camera streams around itself in render)
     carGens.update(*this);
     removeFarCars();
     TheSound().horn = false;
@@ -439,8 +530,11 @@ void Game::tick() {
 
 void Game::render(int W, int H) {
     WorldCamera cam;
-    if (playerCar >= 0) carCam.toWorldCamera(cam);
-    else camera.toWorldCamera(cam);
+    viewCamera(cam);
+    if (freeCam.on) world.stream(cam.eye[0], cam.eye[1], 2);   // also while the game is paused
+    world.propLights.clear();
+    renderProps(cam, false);   // their lights, drawn by the world renderer with its own
+    world.drawBeforeLights = [&] { renderProps(cam, true); };
     world.render(cam, W, H);
     // the world renderer leaves the view matrix set: draw the player in the same space
     glEnable(GL_DEPTH_TEST);
@@ -452,6 +546,11 @@ void Game::render(int W, int H) {
     {   // cCar::UpdateHeadLights: headlights on outside 07:00 .. 20:00
         bool night = t - 0x7000u >= 0xD000u;
         for (const Vehicle& c : cars) c.renderLights(cam, frame, night, &collision);
+    }
+    {   // fountains, tinted by the time cycle's ambient colour (cTimeCycle::Colour(0xD))
+        const uint32_t ambient = world.timeCycle().ok() ? world.timeCycle().colour(13) : 0x808080u;
+        for (auto& kv : fountains)
+            for (auto& f : kv.second) f->render(cam, ambient);
     }
     TheParticles().render(cam);
     glEnable(GL_DEPTH_TEST);
@@ -497,9 +596,9 @@ void Game::run() {
             }
         }
         double now = OS_TimeAccurate();
-        acc += now - last;
+        acc += (now - last) * std::max(0.f, std::min(gameSpeed, 20.f));
         last = now;
-        if (acc > 0.25) acc = 0.25;   // don't spiral after a stall
+        acc = std::min(acc, 0.25 * std::max(1.f, gameSpeed));   // don't spiral after a stall
         while (acc >= step) { tick(); acc -= step; }
         render((int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());
         OS_ScreenSwapBuffers();

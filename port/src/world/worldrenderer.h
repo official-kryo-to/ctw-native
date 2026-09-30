@@ -1,9 +1,13 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // The city renderer shared by the showcase viewer and the game: streams world blocks around a focus point and draws
 // them the way the game does - render lists and materials (cBucketManager::Render), time-of-day lighting
 // (cRenderer + cTimeCycle), animated models, water (cWaterRenderBlock) and world lights (cLightManager::Render).
 #pragma once
 #include "world/timecycle.h"
 #include "world/worldmap.h"
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -36,6 +40,8 @@ public:
 
     // Debug / viewer options
     bool textured = true, wireframe = false;
+    std::vector<WorldLight> propLights;   // lights of street furniture near the camera (drawn like world lights)
+    std::function<void()> drawBeforeLights;   // more of the world (props), drawn after the blocks, before the lights
     struct Stats { size_t blocks, draws; int objects; };
     Stats stats() const;
 

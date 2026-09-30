@@ -1,4 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "vehicle.h"
+#include "lookups.h"
 #include "gfx/assets.h"
 #include "gfx/model.h"
 #include "os/pak.h"
@@ -26,10 +30,6 @@ static void normalise(int32_t v[3]) {
     for (int i = 0; i < 3; ++i) { float f = inv * (float)v[i]; v[i] = (int32_t)((f >= 0 ? 0.5f : -0.5f) + f * 4096.f); }
 }
 
-// Tables (libGame.so .rodata): gear ratios by gear + 1 (reverse, neutral, 1..6), 32.32 (DAT_005872c0) and
-// 20.12 (DAT_00587280); the top gear ratio by number of gears (DAT_00587250).
-static const int64_t kGearRatio64[8] = {-0x211F00000LL, 0, 0x2F8500000LL, 0x211F00000LL, 0x16E100000LL, 0x100000000LL, 0xD7100000LL, 0x8F600000LL};
-static const int32_t kTopRatio[6] = {0x2F85, 0x211F, 0x16E1, 0x1000, 0xD71, 0x8F6};
 static const int32_t kGravityZ = -0x1D000;   // GravityVector (cPhysical static init)
 static bool dbg() { static int d = getenv("CTW_CARDBG") ? 1 : 0; return d; }
 #define DBG(...) do { if (dbg()) printf(__VA_ARGS__); } while (0)
@@ -97,7 +97,7 @@ void Vehicle::init(const VehicleInfo& info, int id, const int32_t p[3], int16_t 
     }
     gripBase_ = info.s16(0x48);
     for (int i = 0; i < 6; ++i) swayK_[i] = info.s32(0x74 + i * 4);
-    for (int i = 0; i < 6; ++i) info_[i] = info.s32(0xC4 + i * 4 + (i >= 3 ? 0 : 0));   // +0xC4 rear lamps, +0xD0 headlamps
+    for (int i = 0; i < 6; ++i) info_[i] = info.s32(0xC4 + i * 4);   // +0xC4 rear lamps, +0xD0 headlamps
     for (int i = 0; i < 4; ++i) {
         doorNode_[i] = (int8_t)info.raw[0x94 + i];
         doorOff_[i][0] = info.s32(0x98 + i * 8); doorOff_[i][1] = info.s32(0x9C + i * 8);
@@ -115,7 +115,7 @@ void Vehicle::init(const VehicleInfo& info, int id, const int32_t p[3], int16_t 
     numGears_ = info.raw[0x4C];
     topSpeed_ = (int32_t)((uint32_t)(info.raw[0x4E] | info.raw[0x4F] << 8) << 12);
     // final drive ratio (the top gear reaches the top speed at max rpm)
-    int32_t ratio = numGears_ >= 1 && numGears_ <= 6 ? kTopRatio[numGears_ - 1] : 0;
+    int32_t ratio = numGears_ >= 1 && numGears_ <= 6 ? TheGameplayTables().topRatio[numGears_ - 1] : 0;
     finalDrive_ = 0;
     if (ratio && topSpeed_) {
         int64_t a = ((int64_t)maxRpm_ << 32) / ratio;
@@ -536,7 +536,7 @@ static int32_t torqueCurve(int64_t r) {   // CEngine: ((1.8 r - 4.5) r + 2.2) r 
 void Vehicle::updateEngine() {   // CEngine::Update
     driveForce_ = 0;
     if (shiftDelay_) { --shiftDelay_; return; }
-    int64_t gr = gear_ + 1 >= 0 && gear_ + 1 < 8 ? kGearRatio64[gear_ + 1] : 0;
+    int64_t gr = gear_ + 1 >= 0 && gear_ + 1 < 8 ? TheGameplayTables().gearRatio[gear_ + 1] : 0;
     int32_t fd = finalDriveRatio();
     int64_t ratio = (gr * fd) >> 32;
     int64_t spin = mulq(tyre_[1].spin, 0x98C9) + mulq(tyre_[0].spin, 0x98C9);
@@ -1236,10 +1236,9 @@ void Vehicle::setDoorClosed(int seat) {   // cVehicle::SetDoorClosed
 }
 
 void Vehicle::updateDoors() {   // cVehicle::UpdateDoorMatrices -> cVehicleDoor::Update (max angles DAT_0058718e)
-    static const uint16_t kMax[5] = {192, 192, 192, 192, 270};
     for (int i = 0; i < 5; ++i) {
         Door& d = doors_[i];
-        uint16_t max = kMax[i];
+        uint16_t max = TheGameplayTables().doorMax[i];
         if (d.mode == 3) {
             if (d.angle < max && d.speed > 9) { if (d.speed != 10) d.speed -= 5; }
             else { d.speed = 0; d.mode = 1; }
@@ -1269,9 +1268,8 @@ void Vehicle::updateDoors() {   // cVehicle::UpdateDoorMatrices -> cVehicleDoor:
 }
 
 void Vehicle::doorSpawnPoint(int seat, int32_t o[3]) const {
-    static const int32_t kSpawn[4][2] = {{-0x1800, -0x1800}, {0x1800, -0x1800}, {-0x1800, -0x1800}, {0x1800, -0x1800}};   // DAT_00569dd0
-    o[0] = doorOff_[seat][0] + kSpawn[seat][0];
-    o[1] = doorOff_[seat][1] + (!(infoFlags8e_ >> 2 & 1) ? kSpawn[seat][1] : 0);
+    o[0] = doorOff_[seat][0] + TheGameplayTables().spawnOffset[seat & 1][0];
+    o[1] = doorOff_[seat][1] + (!(infoFlags8e_ >> 2 & 1) ? TheGameplayTables().spawnOffset[seat & 1][1] : 0);
     o[2] = 0;
 }
 

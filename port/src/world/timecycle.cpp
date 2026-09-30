@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "timecycle.h"
 #include <algorithm>
 #include <cmath>
@@ -37,13 +40,14 @@ static void initElement(uint8_t out[24], const int32_t* in, bool wrapAngles) {
 }
 
 // Table order in the file (per weather) -> value slot, and whether the table is an angle (x0x100, wraps).
-struct Slot { int v; bool angle; };
-static const Slot kSlots[38] = {
-    {0, false}, {1, false}, {2, false}, {3, true}, {4, true}, {5, false}, {6, false}, {7, false}, {8, true}, {9, true},
-    {10, false}, {11, false}, {12, false}, {13, false}, {14, false}, {15, false}, {16, false}, {17, false}, {18, false},
-    {25, false}, {19, false}, {20, false}, {21, false}, {26, false}, {27, false}, {28, false}, {22, false}, {23, false},
-    {24, false}, {29, false}, {30, false}, {31, false}, {32, false}, {33, false}, {34, false}, {35, false}, {36, false},
-    {37, false}};
+static bool angleSlot(int table) { return table == 3 || table == 4 || table == 8 || table == 9; }
+static int valueSlot(int table) {
+    if (table == 19) return 25;
+    if (table >= 20 && table <= 22) return table - 1;
+    if (table >= 23 && table <= 25) return table + 3;
+    if (table >= 26 && table <= 28) return table - 4;
+    return table;
+}
 
 bool TimeCycle::load(const std::vector<uint8_t>& dat) {
     if (dat.size() != 8 * 38 * 96) return false;
@@ -52,7 +56,7 @@ bool TimeCycle::load(const std::vector<uint8_t>& dat) {
             int32_t in[24];
             memcpy(in, &dat[((size_t)w * 38 + t) * 96], 96);
             // cTimeCycle::Init passes wrap=true for the four angle tables only
-            initElement(tab_[w][t], in, kSlots[t].angle);
+            initElement(tab_[w][t], in, angleSlot(t));
         }
     ok_ = true;
     evaluate();
@@ -66,14 +70,14 @@ void TimeCycle::evaluate() {
     for (int t = 0; t < 38; ++t) {
         int cur = tab_[weather_][t][hour], nxt = tab_[weather_][t][next];
         int d = nxt - cur;
-        if (kSlots[t].angle) {   // x0x100, wrapping at 256 (InitInterpolators)
+        if (angleSlot(t)) {   // x0x100, wrapping at 256 (InitInterpolators)
             int dd = d * 0x100;
             if (d <= -0x80) dd += 0x10000;
             if (d >= 0x80) dd -= 0x10000;
-            v_[kSlots[t].v] = (float)(((int)(dd * (int)frac + 0x800) >> 12) + cur * 0x100);
+            v_[valueSlot(t)] = (float)(((int)(dd * (int)frac + 0x800) >> 12) + cur * 0x100);
         } else {
             int dd = d * 0x800;
-            v_[kSlots[t].v] = (float)(cur * 0x800 + ((int)(dd * (int)frac + 0x800) >> 12));
+            v_[valueSlot(t)] = (float)(cur * 0x800 + ((int)(dd * (int)frac + 0x800) >> 12));
         }
     }
 }

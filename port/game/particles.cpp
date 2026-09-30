@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "particles.h"
 #include "cargens.h"   // Rand32Critical
 #include "gfx/assets.h"
@@ -9,15 +12,6 @@
 
 static Particles g_particles;
 Particles& TheParticles() { return g_particles; }
-
-// cAssetManager (resource gGameDir[9]): the sprite sheet texture and its rects {x, y, w, h} in pixels
-static const uint16_t kSheetTexture = 2397;
-static const uint16_t kSheet[26][4] = {
-    {206, 70, 32, 32}, {138, 138, 63, 64}, {206, 2, 32, 64}, {110, 206, 16, 32}, {130, 206, 16, 32}, {2, 2, 64, 64},
-    {70, 2, 64, 64}, {138, 2, 64, 64}, {205, 138, 32, 32}, {150, 206, 16, 32}, {244, 106, 8, 8}, {2, 70, 64, 64},
-    {2, 206, 32, 32}, {70, 70, 64, 64}, {138, 70, 64, 64}, {2, 138, 64, 64}, {244, 118, 2, 1}, {70, 138, 64, 64},
-    {170, 206, 16, 32}, {226, 106, 14, 14}, {190, 206, 16, 32}, {38, 206, 32, 32}, {242, 82, 8, 7}, {242, 70, 8, 8},
-    {206, 106, 16, 16}, {74, 206, 32, 32}};
 
 static uint32_t randNC(uint32_t n) { return Rand32Critical(n); }   // Rand32NonCritical
 
@@ -83,10 +77,11 @@ void Emitter::process() {   // Process -> ParticleUpdateLoop(true)
 
 void Emitter::render(const WorldCamera& cam) const {   // cParticleEmitterBase::ManagedRender
     if (!alive_) return;
-    GLuint tex = Assets_Texture(kSheetTexture);
+    int texture; uint16_t r[4];
+    if (!Assets_EffectSprite(sprite_, texture, r)) return;
+    GLuint tex = Assets_Texture(texture);
     int tw = 256, th = 256;
-    Assets_TextureSize(kSheetTexture, &tw, &th);
-    const uint16_t* r = kSheet[sprite_ < 26 ? sprite_ : 0];
+    Assets_TextureSize(texture, &tw, &th);
     float u0 = r[0] / (float)tw, v0 = r[1] / (float)th, u1 = (r[0] + r[2]) / (float)tw, v1 = (r[1] + r[3]) / (float)th;
     if (tex) { glEnable(GL_TEXTURE_2D); glBindTexture(GL_TEXTURE_2D, tex); } else glDisable(GL_TEXTURE_2D);
     float R = range_ / 4096.f;
@@ -169,14 +164,41 @@ void SmokeEmitter::updateParticle(Particle& q) {   // cParticleEmitterSmoke::Upd
     if (na < 1) q.life = 0;
 }
 
+// ============================================================================================== steam
+void SteamEmitter::addParticle() {   // cParticleEmitterSteam::AddParticle(const cSimpleMover*) with no mover
+    if (!init_) { tmpl_.spin = 0; tmpl_.colour = 0x7FFF; tmpl_.alphaStep = 0; init_ = true; }
+    tmpl_.alpha = 0x14;
+    auto scaled = [&](int32_t v) { return (int16_t)((uint32_t)(v * inv_) >> 12); };   // world units -> the range
+    tmpl_.p[0] = tmpl_.p[1] = tmpl_.p[2] = 0;
+    tmpl_.v[0] = tmpl_.v[1] = 0;
+    tmpl_.v[2] = scaled((int32_t)randNC(0xCD) + 0xCC);        // up 0.05 .. 0.1 a frame
+    tmpl_.size = scaled((int32_t)randNC(0x333) + 0x800);      // 0.5 .. 0.7
+    tmpl_.grow = scaled((int32_t)randNC(0x7B) + 0x7A);
+    tmpl_.life = 0xC8;                                        // SetStandardDataLifeTime(200)
+    tmpl_.angle = (uint16_t)(((uint32_t)randNC(0x8000000) + 0xC000000) >> 12);
+    addFromData(tmpl_);
+}
+
+void SteamEmitter::tick(uint32_t frame) {   // cParticleEmitterSteam::Process
+    if (on_ && (frame & 7) == 0) addParticle();
+}
+
+void SteamEmitter::updateParticle(Particle& q) {   // base update, then fade by one every 8 life steps
+    Emitter::updateParticle(q);
+    if ((int8_t)q.alpha >= 2 && (q.life & 7) == 0) q.alpha = (uint8_t)(q.alpha - 1);
+}
+
 // ============================================================================================== all emitters
 void Particles::remove(const Emitter* e) {
     for (auto& p : emitters_)
         if (p.get() == e) p->dying = true;
 }
 
-void Particles::update() {
-    for (auto& e : emitters_) e->process();
+void Particles::update(uint32_t frame) {
+    for (auto& e : emitters_) {
+        if (auto* steam = dynamic_cast<SteamEmitter*>(e.get())) steam->tick(frame);
+        e->process();
+    }
     emitters_.erase(std::remove_if(emitters_.begin(), emitters_.end(), [](const std::unique_ptr<Emitter>& e) { return e->finished(); }),
                     emitters_.end());
 }
@@ -195,10 +217,11 @@ void Particles::render(const WorldCamera& cam) const {
 }
 
 void DrawSheetSprite(int sprite, uint32_t c, const float p[3], const float ax[3], const float ay[3], float sx, float sy) {
-    GLuint tex = Assets_Texture(kSheetTexture);
+    int texture; uint16_t r[4];
+    if (!Assets_EffectSprite(sprite, texture, r)) return;
+    GLuint tex = Assets_Texture(texture);
     int tw = 256, th = 256;
-    Assets_TextureSize(kSheetTexture, &tw, &th);
-    const uint16_t* r = kSheet[sprite >= 0 && sprite < 26 ? sprite : 0];
+    Assets_TextureSize(texture, &tw, &th);
     float u0 = r[0] / (float)tw, v0 = r[1] / (float)th, u1 = (r[0] + r[2]) / (float)tw, v1 = (r[1] + r[3]) / (float)th;
     if (tex) { glEnable(GL_TEXTURE_2D); glBindTexture(GL_TEXTURE_2D, tex); } else glDisable(GL_TEXTURE_2D);
     glEnable(GL_BLEND);

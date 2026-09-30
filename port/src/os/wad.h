@@ -1,6 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Reader for the game's ROM.TOC / ROM.WAD virtual filesystem.
 // TOC = array of little-endian {u32 nameHash, u32 offset, u32 size}, sorted by hash.
 #pragma once
+#include "datafile.h"
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -17,11 +21,10 @@ public:
     bool read(const char* name, std::vector<uint8_t>& out) const;
     size_t count() const { return toc_.size(); }
     static uint32_t hashName(const char* name);   // case-insensitive
-    ~Wad() { if (fp_) fclose(fp_); }
 
 private:
     struct Entry { uint32_t hash, offset, size; };
     const Entry* find(const char* name) const;
     std::vector<Entry> toc_;
-    mutable FILE* fp_ = nullptr;
+    mutable DataFile file_;
 };

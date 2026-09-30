@@ -5,7 +5,7 @@ on:
 permissions:
   contents: read
 jobs:
-  source:
+  python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,23 +14,25 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements-setup.txt
       - run: python -m unittest discover -s tests -v
-      - run: python scripts/check_public_files.py
   windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
           install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja git
-      - name: Build game and showcase without game data
+      - name: Build game, showcase and mod kit (no game data needed)
         shell: msys2 {0}
         run: |
-          cmake -S port -B port/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B port/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build port/build
-      - name: Build mod kit
-        shell: msys2 {0}
+          ctest --test-dir port/build --output-on-failure
+      - name: Python tests
         run: |
-          cmake -S ctw-modkit -B ctw-modkit/build -G Ninja
-          cmake --build ctw-modkit/build
+          python -m pip install -r requirements-setup.txt
+          python -m unittest discover -s tests -v

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "os.h"
 #include <SDL.h>
 #include <glad/gl.h>
@@ -47,11 +50,15 @@ static std::string resolve(const std::string& root, const char* rel) {
 struct OSFile { FILE* fp = nullptr; };
 
 void OS_SetResourceRoot(const char* d) { g_resRoot = d; }
-void OS_SetDocumentsRoot(const char* d) { g_docRoot = d; fs::create_directories(d); }
+void OS_SetDocumentsRoot(const char* d) { g_docRoot = d; }   // created on the first write
 
 int OS_FileOpen(OSFileDataArea area, void** out, const char* path, OSFileAccessType acc) {
     bool docs = area == OS_AREA_DOCUMENTS || acc == OS_FILE_WRITE || acc == OS_FILE_READWRITE;
     std::string full = resolve(docs ? g_docRoot : g_resRoot, path);
+    if (acc == OS_FILE_WRITE || acc == OS_FILE_READWRITE) {
+        std::error_code ec;
+        fs::create_directories(fs::path(full).parent_path(), ec);
+    }
     FILE* fp = nullptr;
     switch (acc) {
         case OS_FILE_WRITE: fp = fopen(full.c_str(), "wb"); break;
@@ -151,6 +158,24 @@ bool Host_Init(const char* title, int w, int h) {
 #include <deque>
 static std::deque<int> g_keys;
 static std::deque<int> g_wheel;
+static int g_clicks = 0;
+static std::string g_text;
+static float g_dx = 0, g_dy = 0;
+static int g_testX = -1, g_testY = -1;
+void Host_TestMouse(int x, int y, int clicks, int wheel) {
+    g_testX = x; g_testY = y;
+    g_clicks |= clicks;
+    for (; wheel > 0; --wheel) g_wheel.push_back(1);
+    for (; wheel < 0; ++wheel) g_wheel.push_back(-1);
+}
+int Host_PopClicks() { int c = g_clicks; g_clicks = 0; return c; }
+std::string Host_PopText() { std::string t; t.swap(g_text); return t; }
+void Host_SetRelativeMouse(bool on) {
+    if ((SDL_GetRelativeMouseMode() == SDL_TRUE) == on) return;
+    SDL_SetRelativeMouseMode(on ? SDL_TRUE : SDL_FALSE);
+    g_dx = g_dy = 0;
+}
+void Host_PopMouseDelta(float* dx, float* dy) { *dx = g_dx; *dy = g_dy; g_dx = g_dy = 0; }
 int Host_PopWheel() { if (g_wheel.empty()) return 0; int w = g_wheel.front(); g_wheel.pop_front(); return w; }
 bool Host_MouseDown(int b) { return (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON(b + 1)) != 0; }
 int Host_PopKey() {
@@ -161,6 +186,7 @@ int Host_PopKey() {
 }
 void Host_SetTitle(const char* t) { SDL_SetWindowTitle(g_win, t); }
 void Host_GetMouse(int* x, int* y) {
+    if (g_testX >= 0) { *x = g_testX; *y = g_testY; return; }
     int wx, wy, ww, wh, dw, dh;
     SDL_GetMouseState(&wx, &wy);
     SDL_GetWindowSize(g_win, &ww, &wh);
@@ -174,6 +200,16 @@ bool Host_PumpEvents() {
         if (e.type == SDL_QUIT) return false;
         if (e.type == SDL_MOUSEWHEEL && e.wheel.y != 0) g_wheel.push_back(e.wheel.y > 0 ? 1 : -1);
         if (e.type == SDL_KEYDOWN && !e.key.repeat) g_keys.push_back((int)e.key.keysym.scancode);
+        if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_BACKSPACE) g_text += '\b';
+        if (e.type == SDL_TEXTINPUT) g_text += e.text.text;
+        if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button >= 1 && e.button.button <= 3) g_clicks |= 1 << (e.button.button - 1);
+        if (e.type == SDL_MOUSEMOTION && SDL_GetRelativeMouseMode()) {
+            int ww, wh, dw, dh;
+            SDL_GetWindowSize(g_win, &ww, &wh);
+            SDL_GL_GetDrawableSize(g_win, &dw, &dh);
+            g_dx += ww ? (float)e.motion.xrel * dw / ww : (float)e.motion.xrel;
+            g_dy += wh ? (float)e.motion.yrel * dh / wh : (float)e.motion.yrel;
+        }
         if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
             SDL_GL_GetDrawableSize(g_win, &g_w, &g_h);
     }

@@ -1,4 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "aispline.h"
+#include "lookups.h"
 #include "roads.h"
 #include "cargens.h"   // Rand32Critical
 #include <cmath>
@@ -21,15 +25,11 @@ static uint32_t rand16(uint32_t n) { return Rand32Critical(n); }
 
 // ============================================================================================== cTarget
 int AISpline::laneConvert(int from, int lane, int to, bool flag5) {   // DAT_00581b44 / 4b / 52 / 86
-    static const int8_t kRow[7] = {-1, 0, 1, -1, 3, -1, 7}, kCol[7] = {-1, 0, 1, -1, 2, -1, 3};
-    static const uint8_t kFlag5[52] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 9, 1, 2, 4, 9, 1,
-                                       3, 5, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 2, 9, 1, 2, 3, 9, 1, 3, 4, 9, 1, 3, 5};
-    static const uint8_t kPlain[52] = {0, 0, 9, 9, 0, 0, 9, 9, 0, 1, 9, 9, 0, 0, 9, 9, 0, 0, 9, 9, 0, 1, 9, 9, 0, 1,
-                                       9, 9, 0, 0, 9, 9, 0, 0, 9, 9, 0, 0, 9, 9, 0, 1, 9, 9, 0, 1, 9, 9, 0, 1, 9, 9};
+    const GameplayTables& tables = TheGameplayTables();
     if (from < 0 || from > 6 || to < 0 || to > 6) return 0;
-    int idx = (kRow[from] + lane) * 4 + kCol[to];
+    int idx = (tables.laneRow[from] + lane) * 4 + tables.laneCol[to];
     if (idx < 0 || idx >= 52) return 0;
-    return flag5 ? kFlag5[idx] : kPlain[idx];
+    return flag5 ? tables.laneFlag5[idx] : tables.lanePlain[idx];
 }
 
 void AISpline::setLink(const RoadNetwork& rn, LinkTarget& t, int a, int b, int32_t ratioQ12, int lane, bool laneInfo) {

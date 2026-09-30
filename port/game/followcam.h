@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // The on-foot game camera (cFollowPedCam + cBaseCam), in the game's own fixed point (20.12, angles 0x10000 = 360°).
 //   - Sits `height` above the target (0x23000 = 35 units, times GetCamHeightScale: 0.72 on phones, 1.0 otherwise)
 //     plus 2 units, following it with a damped spring (gain 0x333, damping 0x38D) - ProcessFacingWander; it sits

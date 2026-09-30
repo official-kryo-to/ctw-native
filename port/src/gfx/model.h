@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // cModel resource (game.pak). Layout, verified against cModel::OnLoad/LoadTextures, cModelInstance::Render/AddToRenderList
 // and cBucketManager::Render, and against all 40 vehicle models in the game data:
 //   0x00  16-byte header: 'M','G', u16 A, u8 B, u8 C, u16 D, ...

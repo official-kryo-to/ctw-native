@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // .gxt string table: "DS_GXT", u16 count, then count * { u16 length, u16 chars[length] } (UTF-16LE).
 // Strings may contain in-band tags: 0xFEFE = insert number, 0xFEFF = insert string (script arguments).
 #pragma once

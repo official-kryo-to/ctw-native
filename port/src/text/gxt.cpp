@@ -1,4 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "gxt.h"
+#include "os/datafile.h"
 #include <cstdio>
 #include <cstring>
 
@@ -24,13 +28,6 @@ bool GxtFile::parse(const std::vector<uint8_t>& b) {
 }
 
 bool GxtFile::load(const std::string& path) {
-    FILE* f = fopen(path.c_str(), "rb");
-    if (!f) return false;
-    fseek(f, 0, SEEK_END);
-    long n = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    std::vector<uint8_t> b((size_t)n);
-    bool ok = fread(b.data(), 1, (size_t)n, f) == (size_t)n;
-    fclose(f);
-    return ok && parse(b);
+    std::vector<uint8_t> b;
+    return Data_ReadAll(path, b) && parse(b);
 }

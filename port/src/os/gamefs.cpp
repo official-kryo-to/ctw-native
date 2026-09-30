@@ -1,8 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "gamefs.h"
+#include "datafile.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
-#include <filesystem>
 
 static std::string lower(std::string s) {
     for (auto& c : s) c = (char)tolower((unsigned char)c);
@@ -11,12 +14,7 @@ static std::string lower(std::string s) {
 
 bool GameFs::open(const std::string& dataDir) {
     dir_ = dataDir;
-    std::error_code ec;
-    for (auto& e : std::filesystem::recursive_directory_iterator(dataDir, ec)) {
-        if (!e.is_regular_file()) continue;
-        std::string rel = std::filesystem::relative(e.path(), dataDir).generic_string();
-        loose_[lower(rel)] = e.path().string();
-    }
+    for (const std::string& rel : Data_List(dataDir)) loose_[lower(rel)] = dataDir + "/" + rel;
     return wad_.open(dataDir);
 }
 
@@ -44,15 +42,7 @@ bool GameFs::read(const std::string& name, std::vector<uint8_t>& out) const {
     if (isNonWad(name, oldFonts_)) {
         std::string p = loosePath(name);
         if (!p.empty()) {
-            FILE* f = fopen(p.c_str(), "rb");
-            if (!f) return false;
-            fseek(f, 0, SEEK_END);
-            long n = ftell(f);
-            fseek(f, 0, SEEK_SET);
-            out.resize((size_t)n);
-            bool ok = fread(out.data(), 1, (size_t)n, f) == (size_t)n;
-            fclose(f);
-            return ok;
+            return Data_ReadAll(p, out);
         }
     }
     return wad_.read(name.c_str(), out);   // Open() falls back to the WAD when no loose file exists

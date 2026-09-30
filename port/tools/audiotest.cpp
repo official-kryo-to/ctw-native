@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Headless check for the game's MP3s: header info, full length, and loudness of the first 10 seconds.
 // Exit code 0 only if every file decodes and none of them is silent.
 #include <cmath>

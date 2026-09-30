@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Creates GL textures for game resource ids, following cResourceManager::Load + cTexture::TexImage:
 //  1. dxt.bin replacement if one exists (GetDXTData)
 //  2. otherwise the game.pak resource: 12-byte header {u16 w, u16 h, u16 format, u8, u8, u32 dataSize} + data

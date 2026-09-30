@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Kryo.to
+# See LICENSE in the repository root.
 # world.bin (ROM.WAD): collision/sector data, decoded from cWorld::Init / UpdateStreaming / cWorldSector::DataLoaded.
 import struct, zlib, sys
 sys.path.insert(0, 'tools')

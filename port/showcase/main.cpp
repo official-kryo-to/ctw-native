@@ -1,4 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "os/os.h"
+#include "os/license.h"
 #include "viewer.h"
 #include "worldview.h"
 #include <SDL.h>   // renames main() to SDL_main for SDL2main
@@ -39,6 +43,7 @@ static int DumpTexture(const char* data, int id, const char* out) {
 //                                  --world X Y Z --yaw D --pitch D]]
 //   ctw [--data DIR] --dumptex ID out.raw     (debug: the uploaded GL texture as i32 w, i32 h, RGBA8 pixels)
 int main(int argc, char** argv) {
+    if (argc == 2 && !strcmp(argv[1], "--license")) { Ctw_PrintLicense(); return 0; }
     const char* data = "data";
     const char* shot = nullptr;
     int index = 0, str = 0, lang = 0, model = -1;
@@ -75,7 +80,7 @@ int main(int argc, char** argv) {
             return r;
         }
     if (!Viewer_Init(data)) {
-        fprintf(stderr, "no assets found in '%s' (run tools/extract_assets.py)\n", data);
+        fprintf(stderr, "no assets found in '%s' (run scripts/setup_game.py)\n", data);
         return 2;
     }
     if (world) {

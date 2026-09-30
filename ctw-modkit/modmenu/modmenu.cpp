@@ -1,12 +1,18 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // ModMenu.dll - the mod loader and in-game mod menu (F4) for the GTA: Chinatown Wars PC port.
 //
-// A plugin (ctw_plugin.h): the game loads it from its mods folder. It then finds mods in mods/<ModName>/ folders
-// (mod.ini), applies asset mods (textures/<resource id>.png), loads code mods (DLLs using ctw_mod.h) and gives
-// them the mod API, which it implements on top of the game's plugin interface.
+// A plugin (ctw_plugin.h): the game loads it from its mods folder. It finds mods in
+// mods/<ModName>/ folders (mod.ini), applies texture mods (textures/<resource id>.png), loads code
+// mods (DLLs using ctw_mod.h) and gives them the mod API, which it implements on top of the plugin interface.
+// The menu is used with the mouse; the game keeps its keyboard, so the player can walk while it is open.
 #include "ctw_mod.h"
 #include "ctw_plugin.h"
+#include "ctw_ui.h"
 #include <algorithm>
 #include <cstdio>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -23,14 +29,14 @@
 
 namespace fs = std::filesystem;
 
-// SDL scancodes used by the menu
-enum { SC_RETURN = 40, SC_ESCAPE = 41, SC_BACKSPACE = 42, SC_F4 = 61, SC_RIGHT = 79, SC_LEFT = 80, SC_DOWN = 81, SC_UP = 82 };
+enum { SC_ESCAPE = 41, SC_F4 = 61 };   // SDL scancodes
 
 struct CtwMod {   // the opaque handle mods receive
     std::string folder, dir, name, author, version, description, dllName;
     bool enabled = true;
-    bool codeLoaded = false;       // the DLL is running (only switches off after a restart)
-    std::vector<int> textures;     // texture overrides currently applied
+    bool codeLoaded = false;       // the DLL is running (it only stops completely after a restart)
+    bool expanded = false;         // menu: options shown
+    std::vector<int> textures;     // texture overrides and patches currently applied
     void* lib = nullptr;
     CtwModShutdownFn shutdown = nullptr;
     struct Item { enum Kind { Toggle, Slider, Button } kind; std::string label; int* ival = nullptr; float* fval = nullptr;
@@ -44,12 +50,13 @@ const CtwHostApi* H = nullptr;
 std::string g_modsDir;
 std::vector<std::unique_ptr<CtwMod>> g_mods;
 struct Hook { CtwMod* mod; CtwCallback fn; void* user; };
+struct KeyHook { CtwMod* mod; CtwKeyCallback fn; void* user; };
+std::vector<KeyHook> g_keyHooks;
 std::vector<Hook> g_tickHooks, g_hudHooks;
 
 bool g_menuOpen = false;
-int g_menuMod = -1;       // -1 = mod list, else index into g_mods
-int g_sel = 0;
-bool g_dirty = false;     // enabled state changed (saved on close)
+CtwUi g_ui;
+CtwUiScroll g_scroll;
 
 void log(const std::string& s) { H->log(s.c_str()); }
 
@@ -72,6 +79,7 @@ std::map<std::string, std::string> readIni(const fs::path& p) {
 }
 
 void saveEnabled() {
+    if (g_mods.empty()) return;   // nothing to remember: keep the mods folder clean
     std::ofstream f(fs::path(g_modsDir) / "enabled.ini");
     f << "; which mods are switched on (1) or off (0); edited by the mod menu (F4)\n";
     for (auto& m : g_mods) f << m->folder << "=" << (m->enabled ? 1 : 0) << "\n";
@@ -107,16 +115,29 @@ void api_draw_text(float x, float y, float s, uint32_t rgba, const char* t) { H-
 void api_draw_rect(float x, float y, float w, float h, uint32_t rgba) { H->draw_rect(x, y, w, h, rgba); }
 int api_screen_w() { return H->screen_width(); }
 int api_screen_h() { return H->screen_height(); }
-int api_override_texture(CtwMod* m, int id, const char* png) {
-    if (!png) return 0;
-    std::string path = png;
+std::string modPath(CtwMod* m, const char* file) {
+    std::string path = file;
     if (m && fs::path(path).is_relative()) path = m->dir + path;
-    if (!H->override_texture_png(id, path.c_str())) return 0;
+    return path;
+}
+void remember(CtwMod* m, int id) {
     if (m && std::find(m->textures.begin(), m->textures.end(), id) == m->textures.end()) m->textures.push_back(id);
+}
+int api_override_texture(CtwMod* m, int id, const char* png) {
+    if (!png || !H->override_texture_png(id, modPath(m, png).c_str())) return 0;
+    remember(m, id);
     return 1;
 }
+int api_patch_texture(CtwMod* m, int id, float x, float y, float w, float h, const char* png) {
+    if (!png || !H->patch_texture_png(id, x, y, w, h, modPath(m, png).c_str())) return 0;
+    remember(m, id);
+    return 1;
+}
+void api_on_key(CtwMod* m, CtwKeyCallback fn, void* user) { if (fn) g_keyHooks.push_back({m, fn, user}); }
 int api_key_down(int sc) { return H->key_down(sc); }
 int api_key_pressed(int sc) { return H->key_pressed(sc); }
+int api_menu_is_open() { return g_menuOpen ? 1 : 0; }
+void api_set_captured(int on) { H->set_mouse_captured(on && !g_menuOpen); }   // the open menu keeps the cursor
 
 const CtwApi g_api = {
     CTW_MOD_API_VERSION, sizeof(CtwApi),
@@ -129,12 +150,30 @@ const CtwApi g_api = {
     api_draw_text, api_draw_rect, api_screen_w, api_screen_h,
     api_override_texture,
     api_key_down, api_key_pressed,
+    // version 2
+    api_on_key, [](int on) { H->set_game_input(on); }, [](float s, const char* t) { return H->text_width(s, t); },
+    [](float s) { return H->line_height(s); },
+    [] { return H->vehicle_count(); }, [](int id) { return H->vehicle_name(id); },
+    [](int id) { return H->vehicle_spawnable(id); }, [](int id) { return H->spawn_vehicle(id); },
+    [](float s) { H->set_speed_scale(s); }, [] { return H->get_speed_scale(); },
+    [](float s) { H->set_game_speed(s); }, [] { return H->get_game_speed(); },
+    [](int on, const float eye[3], float yaw, float pitch) { H->set_free_camera(on, eye, yaw, pitch); },
+    api_patch_texture,
+    // version 3
+    [](float* x, float* y) { H->get_mouse(x, y); }, [](int b) { return H->mouse_down(b); },
+    [](int b) { return H->mouse_clicked(b); }, [] { return H->mouse_wheel(); },
+    api_set_captured, [](float* dx, float* dy) { H->mouse_delta(dx, dy); }, [] { return H->text_input(); },
+    [](int id, float x, float y, float w, float h, float yaw) { H->draw_vehicle(id, x, y, w, h, yaw); },
+    [](float x, float y, float w, float h) { H->set_clip(x, y, w, h); },
+    [](float eye[3], float* yaw, float* pitch) { H->get_camera(eye, yaw, pitch); },
+    api_menu_is_open, [] { return H->time_seconds(); },
+    [](float u) { H->set_render_distance(u); }, [] { return H->get_render_distance(); },
 };
 
 // ------------------------------------------------------------------------------------------------ loading
 void* loadLib(const std::string& path) {
 #ifdef _WIN32
-    return (void*)LoadLibraryA(path.c_str());
+    return (void*)LoadLibraryW(fs::u8path(path).wstring().c_str());
 #else
     return dlopen(path.c_str(), RTLD_NOW);
 #endif
@@ -154,14 +193,16 @@ void freeLib(void* lib) {
 #endif
 }
 
-void applyTextures(CtwMod& m) {   // the asset part: textures/<resource id>.png
+// The asset part: textures/<resource id>.png. An opaque PNG replaces the texture; one with transparency is a layer
+// drawn over it (the game does the difference, see override_texture_png).
+void applyTextures(CtwMod& m) {
     std::error_code ec;
-    for (auto& e : fs::directory_iterator(fs::path(m.dir) / "textures", ec)) {
+    for (auto& e : fs::directory_iterator(fs::u8path(m.dir) / "textures", ec)) {
         if (e.path().extension() != ".png") continue;
         char* end = nullptr;
         std::string stem = e.path().stem().string();
         long id = strtol(stem.c_str(), &end, 10);
-        if (end && *end == 0 && id >= 0) api_override_texture(&m, (int)id, e.path().string().c_str());
+        if (end && *end == 0 && id >= 0) api_override_texture(&m, (int)id, e.path().u8string().c_str());
     }
 }
 
@@ -186,52 +227,27 @@ void loadMod(CtwMod& m) {
     log("loaded " + m.name + " " + m.version + (m.textures.empty() ? "" : " (" + std::to_string(m.textures.size()) + " textures)"));
 }
 
+void setEnabled(CtwMod& m, bool on) {
+    m.enabled = on;
+    if (on) loadMod(m);        // textures now; code mods start now if they never ran
+    else removeTextures(m);    // code stops getting callbacks now and is unloaded at the next start
+    saveEnabled();
+}
+
 // ------------------------------------------------------------------------------------------------ menu
-int menuCount() {
-    if (g_menuMod < 0) return (int)g_mods.size();
-    return 1 + (int)g_mods[g_menuMod]->items.size();   // row 0 = enabled switch
-}
-
-void adjust(CtwMod::Item& it, int dir) {
-    if (it.kind == CtwMod::Item::Toggle) *it.ival = !*it.ival;
-    else if (it.kind == CtwMod::Item::Slider) *it.fval = std::max(it.mn, std::min(it.mx, *it.fval + dir * it.step));
-    else if (it.kind == CtwMod::Item::Button && dir == 0) it.fn(it.user);
-}
-
 void setOpen(bool open) {
     g_menuOpen = open;
-    H->set_game_input(open ? 0 : 1);
-    if (!open && g_dirty) { saveEnabled(); g_dirty = false; }
+    if (open) H->set_mouse_captured(0);
 }
 
 int onKey(int k, void*) {
-    if (k == SC_F4) {
+    if (k == SC_F4 || (k == SC_ESCAPE && g_menuOpen)) {   // Esc closes the menu instead of quitting
         setOpen(!g_menuOpen);
-        g_menuMod = -1;
-        g_sel = 0;
         return 1;
     }
-    if (!g_menuOpen) return 0;
-    int n = menuCount();
-    if (k == SC_UP && n) g_sel = (g_sel + n - 1) % n;
-    else if (k == SC_DOWN && n) g_sel = (g_sel + 1) % n;
-    else if (k == SC_ESCAPE || k == SC_BACKSPACE) {
-        if (g_menuMod >= 0) { g_sel = g_menuMod; g_menuMod = -1; }
-        else setOpen(false);
-    } else if (g_menuMod < 0) {
-        if ((k == SC_RETURN || k == SC_RIGHT) && n) { g_menuMod = g_sel; g_sel = 0; }
-    } else {
-        CtwMod& m = *g_mods[g_menuMod];
-        int dir = k == SC_LEFT ? -1 : k == SC_RIGHT ? 1 : (k == SC_RETURN ? 0 : 99);
-        if (dir == 99) return 1;
-        if (g_sel == 0) {
-            m.enabled = !m.enabled;
-            g_dirty = true;
-            if (m.enabled) loadMod(m);     // textures now; code mods start now if they never ran
-            else removeTextures(m);        // code keeps running until the game restarts
-        } else if (m.codeLoaded) adjust(m.items[g_sel - 1], dir);
-    }
-    return 1;   // the open menu takes every key
+    for (auto& h : g_keyHooks)
+        if (h.mod->enabled && h.fn(k, h.user)) return 1;
+    return 0;   // everything else goes to the game: the player can move with the menu open
 }
 
 void onTick(void*) {
@@ -239,81 +255,110 @@ void onTick(void*) {
         if (h.mod->enabled) h.fn(h.user);
 }
 
+const float kRow = 36.f, kSlider = 48.f, kHeader = 52.f;
+
+float modHeight(const CtwMod& m) {
+    float h = kHeader;
+    if (!m.expanded) return h;
+    h += 26.f;                                                      // description
+    if (!m.error.empty() || (!m.enabled && m.codeLoaded)) h += 24.f;
+    for (auto& it : m.items) h += it.kind == CtwMod::Item::Slider ? kSlider : kRow;
+    return h + 10.f;
+}
+
+void drawMenu() {
+    CtwUi& ui = g_ui;
+    ctw_ui_begin(&ui, &g_api);
+    const float W = (float)H->screen_width(), Hh = (float)H->screen_height();
+    const float pw = std::min(420.f, W - 40.f), px = 20.f, py = 20.f, ph = Hh - 40.f;
+    char count[48];
+    snprintf(count, sizeof count, "%d installed", (int)g_mods.size());
+    if (ctw_ui_panel(&ui, px, py, pw, ph, "MODS", count)) { setOpen(false); return; }
+
+    const float lx = px + 10.f, ly = py + 50.f, lw = pw - 20.f, lh = ph - 50.f - 34.f;
+    float content = 0.f;
+    for (auto& m : g_mods) content += modHeight(*m) + 8.f;
+    if (g_mods.empty()) content = 0.f;
+    ctw_ui_scroll_begin(&ui, 1, &g_scroll, lx, ly, lw, lh, content);
+    const float cw = lw - 14.f;   // room for the scrollbar
+    float y = ly - g_scroll.pos;
+    if (g_mods.empty()) {
+        ctw_ui_text(&ui, lx + 10.f, ly + 10.f, 1.f, CTW_UI_DIM, "No mods installed.");
+        ctw_ui_text(&ui, lx + 10.f, ly + 34.f, 1.f, CTW_UI_DIM, "Put each mod in its own folder");
+        ctw_ui_text(&ui, lx + 10.f, ly + 56.f, 1.f, CTW_UI_DIM, "inside the game's mods folder.");
+    }
+    int index = 0;
+    const bool inList = ctw_ui_in(&ui, lx, ly, lw, lh);
+    CtwUi clickless = ui;   // rows scrolled out of view must not react
+    clickless.clicked = 0;
+    for (auto& mp : g_mods) {
+        CtwMod& m = *mp;
+        const float mh = modHeight(m);
+        int id = 1000 + 64 * index++;   // slider ids, stable while scrolling
+        if (y + mh < ly || y > ly + lh) { y += mh + 8.f; continue; }
+        CtwUi& u = inList ? ui : clickless;
+        H->draw_rect(lx, y, cw, mh, 0xFFFFFF0Cu);
+        // header: expand on click, switch on the right
+        const bool hot = ctw_ui_in(&u, lx, y, cw - 70.f, kHeader);
+        if (hot) H->draw_rect(lx, y, cw, kHeader, CTW_UI_HOVER);
+        if (hot && u.clicked) m.expanded = !m.expanded;
+        H->draw_text(lx + 12.f, ctw_ui_text_y(&u, y, kHeader, 1.1f), 1.1f, CTW_UI_DIM, m.expanded ? "-" : "+");
+        std::string title = m.name + (m.version.empty() ? "" : "  " + m.version);
+        ctw_ui_text_fit(&u, lx + 32.f, y + 9.f, 1.15f, CTW_UI_TEXT, title.c_str(), cw - 120.f);
+        const char* kind = !m.error.empty() ? "error" : m.dllName.empty() ? "asset mod" : "code mod";
+        ctw_ui_text(&u, lx + 32.f, y + 31.f, 0.85f, !m.error.empty() ? 0xE05050FFu : CTW_UI_DIM, kind);
+        int on = m.enabled ? 1 : 0;
+        if (ctw_ui_switch(&u, lx + cw - 70.f, y, 70.f, kHeader, "", &on)) setEnabled(m, on != 0);
+        float ry = y + kHeader;
+        if (m.expanded) {
+            std::string about = (m.author.empty() ? "" : "by " + m.author + " - ") + m.description;
+            ctw_ui_text_fit(&u, lx + 12.f, ry + 4.f, 0.9f, CTW_UI_DIM, about.c_str(), cw - 24.f);
+            ry += 26.f;
+            if (!m.error.empty()) { ctw_ui_text(&u, lx + 12.f, ry + 2.f, 0.9f, 0xE05050FFu, m.error.c_str()); ry += 24.f; }
+            else if (!m.enabled && m.codeLoaded) { ctw_ui_text(&u, lx + 12.f, ry + 2.f, 0.9f, CTW_UI_DIM, "Fully off after a restart."); ry += 24.f; }
+            CtwUi& iu = m.enabled && m.codeLoaded ? u : clickless;
+            for (auto& it : m.items) {
+                if (it.kind == CtwMod::Item::Toggle) {
+                    ctw_ui_switch(&iu, lx + 6.f, ry, cw - 12.f, kRow, it.label.c_str(), it.ival);
+                    ry += kRow;
+                } else if (it.kind == CtwMod::Item::Slider) {
+                    ctw_ui_slider(&iu, id++, lx + 6.f, ry, cw - 12.f, kSlider - 4.f, it.label.c_str(), it.fval, it.mn, it.mx, it.step);
+                    ry += kSlider;
+                } else {
+                    if (ctw_ui_button(&iu, lx + 16.f, ry + 3.f, cw - 32.f, kRow - 6.f, it.label.c_str())) it.fn(it.user);
+                    ry += kRow;
+                }
+            }
+        }
+        ui.drag = u.drag;   // keep a slider drag that started in this frame
+        y += mh + 8.f;
+    }
+    ctw_ui_scroll_end(&ui);
+    ctw_ui_text(&ui, px + 14.f, py + ph - 26.f, 0.9f, CTW_UI_DIM, "Click a mod for its options.  F4: close");
+}
+
 void onHud(void*) {
     for (auto& h : g_hudHooks)
         if (h.mod->enabled) h.fn(h.user);
-    if (!g_menuOpen) return;
-
-    int W = H->screen_width();
-    auto text = [](float x, float y, float s, uint32_t c, const std::string& t) { H->draw_text(x, y, s, c, t.c_str()); };
-    auto width = [](const std::string& t, float s) { return H->text_width(s, t.c_str()); };
-    const float s = 1.25f, lh = H->line_height(s) + 6.f;
-    float pw = std::min(760.f, W - 40.f), x = (W - pw) / 2, y = 60.f;
-    int n = menuCount();
-    float ph = 90.f + lh * std::max(n, 1) + 60.f;
-    H->draw_rect(x, y, pw, ph, 0x000000C8u);
-    H->draw_rect(x, y, pw, 4.f, 0xE0B020FFu);
-    if (g_menuMod < 0) {
-        text(x + 20, y + 16, 1.6f, 0xFFFFFFFFu, "MODS");
-        text(x + pw - 20 - width("F4: close", 1.f), y + 22, 1.f, 0xB4B4B4FFu, "F4: close");
-        if (g_mods.empty()) text(x + 20, y + 70, s, 0xB4B4B4FFu, "No mods installed. Put mods in the \"mods\" folder.");
-        for (int i = 0; i < n; ++i) {
-            CtwMod& m = *g_mods[i];
-            float ry = y + 70 + i * lh;
-            if (i == g_sel) H->draw_rect(x + 10, ry - 3, pw - 20, lh, 0xE0B02060u);
-            text(x + 24, ry, s, 0xFFFFFFFFu, m.name + (m.version.empty() ? "" : "  " + m.version));
-            bool restart = !m.enabled && m.codeLoaded;
-            std::string st = restart ? "OFF (after restart)" : !m.enabled ? "OFF" : !m.error.empty() ? "ERROR" : "ON";
-            uint32_t col = !m.enabled ? 0x808080FFu : !m.error.empty() ? 0xCD1212FFu : 0x2CCD12FFu;
-            text(x + pw - 24 - width(st, s), ry, s, col, st);
-        }
-        text(x + 20, y + ph - 34, 1.f, 0xB4B4B4FFu, "Up/Down: choose   Enter: open   Esc: close");
-    } else {
-        CtwMod& m = *g_mods[g_menuMod];
-        text(x + 20, y + 16, 1.6f, 0xFFFFFFFFu, m.name);
-        std::string by = (m.author.empty() ? "" : "by " + m.author + "   ") + m.description;
-        while (by.size() > 4 && width(by, 1.f) > pw - 40) by = by.substr(0, by.size() - 4) + "...";
-        text(x + 20, y + 50, 1.f, 0xB4B4B4FFu, by);
-        for (int i = 0; i < n; ++i) {
-            float ry = y + 80 + i * lh;
-            if (i == g_sel) H->draw_rect(x + 10, ry - 3, pw - 20, lh, 0xE0B02060u);
-            std::string label, value;
-            if (i == 0) {
-                label = "Enabled";
-                value = m.enabled ? "ON" : "OFF";
-                if (!m.enabled && m.codeLoaded) value += " (after restart)";
-            } else {
-                CtwMod::Item& it = m.items[i - 1];
-                label = it.label;
-                if (it.kind == CtwMod::Item::Toggle) value = *it.ival ? "ON" : "OFF";
-                else if (it.kind == CtwMod::Item::Slider) { char b[32]; snprintf(b, sizeof b, "< %.2f >", *it.fval); value = b; }
-                else value = "[Enter]";
-            }
-            text(x + 24, ry, s, m.codeLoaded || i == 0 ? 0xFFFFFFFFu : 0x808080FFu, label);
-            text(x + pw - 24 - width(value, s), ry, s, 0xE0B020FFu, value);
-        }
-        if (!m.error.empty()) text(x + 20, y + ph - 58, 1.f, 0xCD1212FFu, m.error);
-        text(x + 20, y + ph - 34, 1.f, 0xB4B4B4FFu, "Up/Down: choose   Left/Right/Enter: change   Esc: back");
-    }
+    if (g_menuOpen) drawMenu();
 }
 }  // namespace
 
 extern "C" CTW_PLUGIN_EXPORT int ctw_plugin_init(const CtwHostApi* host) {
-    if (!host || host->version < 1) return 1;
+    if (!host || host->version < CTW_PLUGIN_API_VERSION || host->size < sizeof(CtwHostApi)) return 1;
     H = host;
     g_modsDir = H->mods_dir();
-    log("mod menu: mod API version " + std::to_string(CTW_MOD_API_VERSION));
-    auto enabled = readIni(fs::path(g_modsDir) / "enabled.ini");
+    auto enabled = readIni(fs::u8path(g_modsDir) / "enabled.ini");
     std::vector<fs::path> dirs;
     std::error_code ec;
-    for (auto& e : fs::directory_iterator(g_modsDir, ec))
+    for (auto& e : fs::directory_iterator(fs::u8path(g_modsDir), ec))
         if (e.is_directory() && fs::exists(e.path() / "mod.ini")) dirs.push_back(e.path());
     std::sort(dirs.begin(), dirs.end());
     for (auto& d : dirs) {
         auto ini = readIni(d / "mod.ini");
         auto m = std::make_unique<CtwMod>();
-        m->folder = d.filename().string();
-        m->dir = d.string() + "/";
+        m->folder = d.filename().u8string();
+        m->dir = d.u8string() + "/";
         m->name = ini.count("name") ? ini["name"] : m->folder;
         m->author = ini["author"];
         m->version = ini["version"];
@@ -325,7 +370,7 @@ extern "C" CTW_PLUGIN_EXPORT int ctw_plugin_init(const CtwHostApi* host) {
     }
     for (auto& m : g_mods)
         if (m->enabled) loadMod(*m);
-    saveEnabled();
+    if (!g_mods.empty()) log("mod menu: " + std::to_string(g_mods.size()) + " mods, API version " + std::to_string(CTW_MOD_API_VERSION));
     H->on_key(onKey, nullptr);
     H->on_tick(onTick, nullptr);
     H->on_draw_hud(onHud, nullptr);
@@ -340,4 +385,5 @@ extern "C" CTW_PLUGIN_EXPORT void ctw_plugin_shutdown(void) {
     g_mods.clear();
     g_tickHooks.clear();
     g_hudHooks.clear();
+    g_keyHooks.clear();
 }

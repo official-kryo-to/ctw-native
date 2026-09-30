@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Native audio output: SDL2 device + streaming MP3 playback (minimp3).
 // The original plays its radio stations / music MP3s through OpenAL + mpg123 (cAudioManager); this is the
 // platform side of that, the game's own mixing logic comes with the audio-manager port.

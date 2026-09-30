@@ -40,6 +40,7 @@ compile_commands.json
 **/__pycache__/
 *.py[cod]
 .venv/
+/port/.ctw-setup-*/
 .pytest_cache/
 .vscode/
 .idea/

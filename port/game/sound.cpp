@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "sound.h"
 #include "game.h"
 #include "cargens.h"   // Rand32Critical
@@ -11,14 +14,14 @@
 #include <cstdlib>
 
 namespace {
-#include "soundtables.inc"
 inline int32_t isqrt64(int64_t v) { return v <= 0 ? 0 : (int32_t)std::sqrt((double)v); }
-const char* bankFile(int e) {   // eRomBanks -> file (cAudioBase::mpBanks)
-    static const char* names[25] = {"resbnk", "carbnk1", "carbnk1", "carbnk1", "carbnk1", "carbnk2", "carbnk3", "carbnk4",
-                                    "carbnk5", "carbnk6", "carbnk7", "carbnk8", "carbnk9", "carbnk10", "carbnk11", "carbnk12",
-                                    "carbnk13", "carbnk14", "carbnk15", "carbnkpl", "carbnkgn", "carbnk16", "carbnk17",
-                                    "carbnk18", "carbnk19"};
-    return e >= 0 && e < 25 ? names[e] : nullptr;
+std::string bankFile(int e) {   // eRomBanks -> file naming convention
+    if (e == 0) return "resbnk";
+    if (e == 19) return "carbnkpl";
+    if (e == 20) return "carbnkgn";
+    if (e < 1 || e > 24) return {};
+    int number = e <= 4 ? 1 : e <= 18 ? e - 3 : e - 5;
+    return "carbnk" + std::to_string(number);
 }
 }   // namespace
 
@@ -50,13 +53,15 @@ bool Sound::Bank::sample(int i, const uint8_t*& pcm, uint32_t& len, uint32_t& ra
 }
 
 bool Sound::init(const std::string& dataDir) {
+    res_.data.clear(); res_.entries.clear();
+    if (!tables_.load(dataDir + "/sound_tables.bin")) return false;
     if (!Audio_Init()) return false;
     return res_.load(dataDir, "resbnk");
 }
 
 int Sound::addEvent(Entity& e, int event, int volume, int radius, int sfx) {   // cAudioManager::AddSoundEvent
     if (event < 0 || event >= 156) return -1;
-    const EventInfo& ei = kEventInfo[event];
+    const EventInfo& ei = tables_.events[event];
     if (ei.mode == 1)   // a looping event already playing just gets refreshed
         for (int i = 0; i < 5; ++i)
             if (e.s[i].event == event) { e.s[i].active = true; e.s[i].volume = volume; return i; }
@@ -80,7 +85,7 @@ void Sound::processEntity(Game& g, Entity& e, bool persistent) {   // cAudioMana
     uint32_t d2 = (uint32_t)((dx * dx + dy * dy + dz * dz) >> 24);
     for (Slot& s : e.s) {
         if (s.event == 0x9C) continue;
-        const EventInfo& ei = kEventInfo[s.event];
+        const EventInfo& ei = tables_.events[s.event];
         // cAudioManager::ComputeVolume
         int vol = 0;
         if (s.radius > 0 && d2 <= 100000) {
@@ -157,7 +162,7 @@ void Sound::collision(const Vehicle& v, int strength) {   // cAudioManager::AddC
     uint32_t now = (uint32_t)(OS_TimeAccurate() * 1000.0);
     if (now - lastCollision_ <= 200) return;
     lastCollision_ = now;
-    const int32_t* tab = strength > 0x32 ? (strength > 0x45 ? kCollisionHigh : kCollisionMed) : kCollisionLow;
+    const int32_t* tab = strength > 0x32 ? (strength > 0x45 ? tables_.collisionHigh : tables_.collisionMed) : tables_.collisionLow;
     int off = strength > 0x32 ? (strength > 0x45 ? 0x1E : 0) : -0x14;
     int vol = std::clamp(off + strength - (int)Rand32Critical(0x1E), 5, 0x7F);
     Entity& e = ents_[v.uid];
@@ -167,7 +172,7 @@ void Sound::collision(const Vehicle& v, int strength) {   // cAudioManager::AddC
 
 void Sound::carEngine(Game& g, Vehicle& v, Entity& e) {   // cSoundEvents::ProcessEntityTypeCar
     if (!v.engineOn || v.dead()) return;
-    const GearSound& gs = kGears[std::min<int>(g.vehicleInfos[v.infoId].raw[0x8C], 19)];
+    const GearSound& gs = tables_.gears[std::min<int>(g.vehicleInfos[v.infoId].raw[0x8C], 19)];
     int32_t sp = v.speed();
     int32_t capped = std::min(sp, 0xF000);
     if (sp < 3000) addEvent(e, 0xD, 0x5A, 200, gs.idle);
@@ -182,7 +187,7 @@ void Sound::carEngine(Game& g, Vehicle& v, Entity& e) {   // cSoundEvents::Proce
 
 void Sound::playerCar(Game& g, Vehicle& v, Entity& e) {   // cSoundEvents::ProcessEntityTypePlayerCar
     const VehicleInfo& info = g.vehicleInfos[v.infoId];
-    const GearSound& gs = kGears[std::min<int>(info.raw[0x8C], 19)];
+    const GearSound& gs = tables_.gears[std::min<int>(info.raw[0x8C], 19)];
     uint16_t flags = (uint16_t)info.s16(0x8E);
     // the horn (event 0x47): full volume while held, one more at half volume when let go
     if (horn && !(flags & 1)) { addEvent(e, 0x47, gs.volume, 300, gs.horn); hornHeld_ = 1; }
@@ -190,7 +195,8 @@ void Sound::playerCar(Game& g, Vehicle& v, Entity& e) {   // cSoundEvents::Proce
     // the car's own bank goes in RAM bank 1
     if (carBankEnum_ != gs.bank) {
         carBankEnum_ = gs.bank;
-        if (const char* f = bankFile(gs.bank)) car_.load(g.dataDir, f);
+        std::string file = bankFile(gs.bank);
+        if (!file.empty()) car_.load(g.dataDir, file.c_str());
         state_ = 0; revs_ = 0; volA_ = volB_ = 0; gear_ = 0;
     }
     if (!v.engineOn || v.dead()) return;
@@ -265,7 +271,7 @@ void Sound::playerCar(Game& g, Vehicle& v, Entity& e) {   // cSoundEvents::Proce
             volA_ = std::max(volA_ - 7, 10);
             volB_ = std::max(volB_ - 7, 10);
             revs_ += (int32_t)dt * 0x80 - (int32_t)dt * 8;
-            if (gs.thr[std::clamp(gear_ - 1, 0, 4)] + 0x14000 < revs_) { state_ = 1; revs_ = kRevAfterShift[std::clamp(gear_, 0, 3)]; }
+            if (gs.thr[std::clamp(gear_ - 1, 0, 4)] + 0x14000 < revs_) { state_ = 1; revs_ = tables_.revAfterShift[std::clamp(gear_, 0, 3)]; }
         } else {   // top gear
             if (!ss.gas) state_ = 4;
             else {

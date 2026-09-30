@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "worldrenderer.h"
 #include "gfx/assets.h"
 #include "os/gamefs.h"
@@ -230,8 +233,11 @@ void WorldRenderer::renderLights(const WorldCamera& cam) {
     const int64_t cx = (int64_t)(cam.eye[0] * 4096.f), cy = (int64_t)(cam.eye[1] * 4096.f), cz = (int64_t)(cam.eye[2] * 4096.f);
     const uint32_t streakAlpha = (uint32_t)((8u * 0x1000u / 0x1Fu) * 0xFF000u) >> 24;   // sStreakAlpha = 8
     glBegin(GL_QUADS);
-    for (auto& kv : blocks_)
-        for (const WorldLight& l : kv.second->mesh.lights) {
+    std::vector<const std::vector<WorldLight>*> lists;
+    for (auto& kv : blocks_) lists.push_back(&kv.second->mesh.lights);
+    lists.push_back(&propLights);
+    for (const std::vector<WorldLight>* list : lists)
+        for (const WorldLight& l : *list) {
             int cur = lightSize(l.size, t);
             float p[3] = {l.x / 4096.f, l.y / 4096.f, l.z / 4096.f};
             int64_t dx = (cx - l.x) >> 4, dy = (cy - l.y) >> 4;
@@ -375,6 +381,10 @@ void WorldRenderer::render(const WorldCamera& cam, int W, int H) {
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
 
+    if (drawBeforeLights) {
+        glEnable(GL_DEPTH_TEST);
+        drawBeforeLights();
+    }
     renderLights(cam);
 
     if (const char* pick = getenv("CTW_PICK")) {

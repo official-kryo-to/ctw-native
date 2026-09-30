@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // The CCollision swept-sphere / overlap routines peds and cameras use, ported from the game's fixed-point code
 // (20.12 positions, Q12 normals). Quirks of the original are kept on purpose (noted where they matter).
 #include "collision.h"

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Skid marks: a port of cSkidmarkManager / cSkidmark and cWheeledVehicle::AddSkidmarks.
 //
 // 16 marks. A mark belongs to one wheel (the game uses the tyre's address; here car id x 4 + wheel) and stores up to

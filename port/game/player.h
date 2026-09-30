@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // The player on foot: a port of the cPed / cPlayer movement code, in the game's own fixed point (20.12 units,
 // angles 0x10000 = 360°, headings clockwise from +y).
 //
@@ -40,6 +43,7 @@ public:
 
     int32_t pos[3] = {-1000 * 4096, -1590 * 4096, 0};   // feet
     int32_t vel[3] = {0, 0, 0};                        // units per second (cSimpleMover +0xB8)
+    float speedScale = 1.f;                            // mods: multiplies the on-foot speed
     int16_t fwd[3] = {0, 0x1000, 0};                   // facing (cEntity +0x42)
     int16_t groundNormal[3] = {0, 0, 0x1000};          // cPed +0x324
     int bodySet = 1, palUpper = 4, palLegs = 5;

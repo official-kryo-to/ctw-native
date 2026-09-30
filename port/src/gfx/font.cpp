@@ -1,4 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
+#include "assets.h"
 #include "font.h"
+#include "os/datafile.h"
 #include <glad/gl.h>
 #include <stb_image.h>
 #include <cstring>
@@ -14,7 +19,9 @@ bool BitmapFont::load(const std::vector<uint8_t>& bin, const std::string& pngPat
     height_ = h;
 
     int w, hh, comp;
-    unsigned char* px = stbi_load(pngPath.c_str(), &w, &hh, &comp, 4);
+    std::vector<uint8_t> png;
+    if (!Data_ReadAll(pngPath, png)) return false;
+    unsigned char* px = stbi_load_from_memory(png.data(), (int)png.size(), &w, &hh, &comp, 4);
     if (!px) return false;
     texW_ = w; texH_ = hh;
     glGenTextures(1, &tex_);
@@ -42,10 +49,6 @@ static char16_t replaceUnsupported(char16_t c, size_t glyphCount, bool japanese)
     if (orig == 0xAD) c = 0x8020;
     return c;
 }
-
-// First 8 entries of the original's TextColours table (RGBA, read from libGame.so).
-static const unsigned char kTextColours[8][3] = {
-    {255, 255, 255}, {205, 18, 18}, {44, 205, 18}, {18, 141, 205}, {205, 203, 18}, {180, 180, 180}, {64, 64, 64}, {0, 0, 0}};
 
 // cFontManager::HandleTextTag: which colour index a tag selects. Returns -1 if the tag doesn't change colour.
 static int tagColour(char16_t t) {
@@ -88,7 +91,7 @@ float BitmapFont::draw(const std::u16string& s, float x, float y, float scale, i
         if (c < 0x20 || isTag(c) || (size_t)(c - 0x20) >= glyphs_.size()) continue;
         const Glyph& g = glyphs_[c - 0x20];
         if (cur == 0) glColor4f(base[0], base[1], base[2], base[3]);
-        else glColor4ub(kTextColours[cur][0], kTextColours[cur][1], kTextColours[cur][2], 255);
+        else glColor4ub(Assets_RenderTables().textColour[cur][0], Assets_RenderTables().textColour[cur][1], Assets_RenderTables().textColour[cur][2], 255);
         float hx = 0.5f / texW_, hy = 0.5f / texH_;   // half-texel inset: keep bilinear filtering inside the glyph cell
         float u0 = (float)g.x / texW_ + hx, v0 = (float)g.y / texH_ + hy;
         float u1 = (float)(g.x + adv(g.w)) / texW_ - hx, v1 = (float)(g.y + height_) / texH_ - hy;

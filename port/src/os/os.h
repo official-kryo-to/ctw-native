@@ -1,6 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // OS abstraction layer expected by the game code (mirrors the original OS_* API surface).
 // Semantics were determined by reading the original Android implementation.
 #pragma once
+#include <string>
 #include <cstdint>
 
 enum OSFileDataArea { OS_AREA_RESOURCES = 0, OS_AREA_DOCUMENTS = 1 };
@@ -59,3 +63,8 @@ void Host_GetMouse(int* x, int* y);   // in drawable pixels
 bool Host_MouseDown(int button);      // 0 = left
 int  Host_PopWheel();                 // +1 / -1 per wheel notch, 0 when none
 int  Host_PopKey();       // SDL scancode of the next pressed key, or 0
+int  Host_PopClicks();                // mouse buttons pressed since the last call (bit 0 left, 1 middle, 2 right)
+std::string Host_PopText();           // UTF-8 typed since the last call; '\b' = backspace (repeats while held)
+void Host_SetRelativeMouse(bool on);  // hide and capture the cursor; movement comes from Host_PopMouseDelta
+void Host_PopMouseDelta(float* dx, float* dy);   // relative movement since the last call, drawable pixels
+void Host_TestMouse(int x, int y, int clicks, int wheel);   // testing (--shot): fake the mouse for the next frame

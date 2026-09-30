@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Particles: a port of cParticleEmitterBase and the emitters the vehicles use.
 //
 // An emitter owns up to N particles of 28 bytes (sParticle): i16 position / velocity (fractions of the emitter's range,
@@ -56,6 +59,20 @@ private:
     bool init_ = false;
 };
 
+// cParticleEmitterSteam: range 7, 15 particles, sprite 21, camera-facing; while on, a puff every 8 frames that
+// rises, grows and fades (city emitters of type 0: steam from vents and manholes)
+class SteamEmitter : public Emitter {
+public:
+    SteamEmitter(const int32_t pos[3], bool on) : Emitter(pos, 15, 0x70000, 21, true), on_(on) {}
+    void tick(uint32_t frame);                 // cParticleEmitterSteam::Process (before Emitter::process)
+protected:
+    void updateParticle(Particle& p) override;
+private:
+    void addParticle();
+    Particle tmpl_{};
+    bool on_, init_ = false;
+};
+
 class Particles {
 public:
     template <class T, class... A> T* add(A&&... a) {
@@ -63,7 +80,7 @@ public:
         return static_cast<T*>(emitters_.back().get());
     }
     void remove(const Emitter* e);   // (the emitter keeps going until its particles are gone)
-    void update();
+    void update(uint32_t frame);
     void render(const WorldCamera& cam) const;
 private:
     std::vector<std::unique_ptr<Emitter>> emitters_;

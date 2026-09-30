@@ -4,7 +4,7 @@ What problem does this solve, and what happens after the change?
 
 ## Evidence
 
-What observations support the implementation? Identify any assumptions.
+What observations support it? Note any assumptions.
 
 ## Verification
 
@@ -15,6 +15,5 @@ Commands run, results and manual checks:
 Describe meaningful AI assistance and how you checked its output, or write "None".
 
 - [ ] I understand and can explain the changes.
-- [ ] I ran the relevant checks and `python scripts/check_public_files.py`.
+- [ ] I ran the build and tests.
 - [ ] This PR contains no game data, binaries, extracted tables or decompiler output.
-- [ ] The changes are focused and include no unrelated generated filler.

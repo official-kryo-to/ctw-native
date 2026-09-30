@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Plugin host: loads the DLLs placed directly in the mods folder (e.g. the mod menu from the mod kit) and gives
 // them the CtwHostApi (ctw_plugin.h). The game ships without any plugin; nothing here is needed to play.
 #pragma once

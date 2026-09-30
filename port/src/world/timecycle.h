@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Time of day / weather colours (cTimeCycle, timecycle.dat in ROM.WAD).
 //
 // timecycle.dat: 8 weathers x 38 tables x 24 hourly i32 values (20.12 fixed point, -1.0 = "fill in"): 29184 bytes.

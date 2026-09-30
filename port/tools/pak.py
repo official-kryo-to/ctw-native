@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (C) 2026 Kryo.to
+# See LICENSE in the repository root.
 """game.pak reader (verified: all 4180 entries tile the file exactly).
 Header: u32 version, u32 seg1, u32 seg2, u32 seg3, u32 count, u32 endPage; u16 page table at 0x18.
 The table only fits partly in the first 4 KB page; cResourceManager::Init reads the remainder from endPage*4096

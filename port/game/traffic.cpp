@@ -1,6 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 #include "traffic.h"
 #include "game.h"
 #include "os/gamefs.h"
+#include "lookups.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -8,9 +12,6 @@
 #include <cstdlib>
 
 namespace {
-struct ZoneSetup { const char* name; int night, profile, pedMakeup, vehMakeup, pedDensity, carDensity, sex, flag; };
-#include "zones.inc"
-
 bool tdbg() { static int d = getenv("CTW_TRAFFICDBG") ? 1 : 0; return d; }
 inline int32_t mulq(int64_t a, int64_t b) { return (int32_t)((a * b) >> 12); }
 inline int32_t isqrt64(int64_t v) { return v <= 0 ? 0 : (int32_t)std::sqrt((double)v); }
@@ -25,6 +26,11 @@ void profileFields(const int p[12], int f[20]) {
 }   // namespace
 
 bool Traffic::init(const std::string& dataDir) {
+    zones_.clear();
+    infos_[0].clear(); infos_[1].clear();
+    lists_.clear(); makeups_.clear(); drivers_.clear();
+    PopulationTables tables;
+    if (!tables.load(dataDir + "/population_tables.bin")) return false;
     GameFs fs;
     std::vector<uint8_t> z, pi;
     if (!fs.open(dataDir) || !fs.read("infozones.bin", z) || !fs.read("popinfo.bin", pi) || pi.size() < 14) return false;
@@ -43,11 +49,11 @@ bool Traffic::init(const std::string& dataDir) {
     def.fields[1] = 10;
     def.pedMakeup = 0; def.vehMakeup = 5; def.pedDensity = 25; def.carDensity = 25;
     for (int dn = 0; dn < 2; ++dn) infos_[dn].assign(names.size(), def);
-    for (const ZoneSetup& s : kZoneSetup) {   // cZoneManager::SetupDefaultPopulation -> cPopulationZones::Add
-        auto it = std::find(names.begin(), names.end(), std::string(s.name));
+    for (const ZoneSetup& s : tables.zones) {   // cZoneManager::SetupDefaultPopulation -> cPopulationZones::Add
+        auto it = std::find(names.begin(), names.end(), std::string(s.name, strnlen(s.name, 8)));
         if (it == names.end()) continue;
         ZoneInfo& zi = infos_[s.night][it - names.begin()];
-        profileFields(kProfiles[s.profile], zi.fields);
+        profileFields(tables.profiles[s.profile].data(), zi.fields);
         zi.pedMakeup = s.pedMakeup; zi.vehMakeup = s.vehMakeup;
         zi.pedDensity = std::min(s.pedDensity, 100); zi.carDensity = std::min(s.carDensity, 100);
     }

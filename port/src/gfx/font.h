@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Bitmap font as used by the game: <name>.bin (glyph table) + <name>.png (glyph atlas).
 // .bin = u16 count, u16 cellHeight, then count * { u16 width, u16 x, u16 y } (pixels in the PNG).
 // Glyph for character code c is entry (c - 0x20).

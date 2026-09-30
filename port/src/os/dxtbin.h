@@ -1,6 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Reader for DXT.bin: 8192 u32 offsets indexed by resource id, followed by texture blobs.
 // Blob = { u16 width, u16 height, u16 glFormat (0x83F0..0x83F3), u8, u8, u32 } + compressed data.
 #pragma once
+#include "datafile.h"
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -18,11 +22,10 @@ public:
     DxtBin() = default;
     DxtBin(const DxtBin&) = delete;
     DxtBin& operator=(const DxtBin&) = delete;
-    ~DxtBin() { if (fp_) fclose(fp_); }
     const std::vector<int>& ids() const { return ids_; }
     bool get(int id, DxtTexture& out) const;
 private:
-    mutable FILE* fp_ = nullptr;
+    mutable DataFile file_;
     size_t fileSize_ = 0;
     std::vector<uint32_t> offs_;
     std::vector<int> ids_;

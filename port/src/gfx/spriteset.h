@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (C) 2026 Kryo.to
+// See LICENSE in the repository root.
 // Sprite sheet description as stored in SS_*.bin (found in ROM.WAD):
 //   u32 count, then count * { u16 id, u16 sheetSlot, u16 x, u16 y, i16 offX, i16 offY, u16 w, u16 h }
 // Coordinates are in the original sheet's pixel space; the loose ss_*.png sheets are 2x that (see pngScaleFor).
