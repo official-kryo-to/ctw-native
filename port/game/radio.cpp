@@ -30,8 +30,8 @@ std::string text(const GxtFile& gxt, int id) {
     return out;
 }
 bool inCar(const Game& game) {
-    return game.playerCar >= 0 && game.playerCar < (int)game.cars.size() &&
-           game.cars[game.playerCar].infoId != 32 && !game.cars[game.playerCar].dead();
+    return !game.player.dead && game.playerCar >= 0 && game.playerCar < (int)game.cars.size() &&
+           !game.cars[game.playerCar].isBike() && !game.cars[game.playerCar].dead();
 }
 }
 
@@ -73,7 +73,7 @@ bool Radio::init(const std::string& dir) {
     }
     Station off; off.available = true; off.label = text(labels, 112); off.name = off.label;
     stations_.push_back(off);
-    selected_ = 0; playing_ = -1; volume_ = 8; open_ = paused_ = false; carUid_ = 0;
+    selected_ = 0; playing_ = -1; volume_ = 8; open_ = false; carUid_ = 0;
     loadSave();
     carousel_ = (float)selected_;
     Audio_Init();
@@ -89,12 +89,14 @@ void Radio::shutdown() {
     remember();
     if (!stations_.empty()) save();
     Audio_StopMusic();
+    Audio_SetSfxPaused(false);
     if (texture_) glDeleteTextures(1, &texture_);
     texture_ = 0; stations_.clear(); playing_ = -1; open_ = false;
 }
 
 void Radio::sync(Game& game) {
-    bool enabled = open_ || inCar(game);
+    bool enabled = inCar(game);
+    Audio_SetSfxPaused(open_ && enabled);
     if (!enabled || stations_.empty() || !stations_[selected_].available || stations_[selected_].stream < 0) {
         remember(); Audio_StopMusic(); playing_ = -1; return;
     }
@@ -103,16 +105,25 @@ void Radio::sync(Game& game) {
         const Station& s = stations_[selected_];
         if (Audio_PlayMusic(s.path, true, s.position)) playing_ = selected_;
     }
-    Audio_SetMusicPaused(paused_);
+}
+
+void Radio::setOpen(bool open, Game& game) {
+    open_ = open && inCar(game);
+    if (!open_) { remember(); save(); }
+    // Discard clicks/wheel input from the previous screen before opening the selector.
+    Host_PopClicks();
+    while (Host_PopWheel()) {}
+    sync(game);
 }
 
 void Radio::update(Game& game) {
     if (stations_.empty()) return;
     uint32_t uid = inCar(game) ? game.cars[game.playerCar].uid : 0;
+    if (open_ && !inCar(game)) setOpen(false, game);
     if (uid && uid != carUid_) {
         int& saved = game.cars[game.playerCar].radioStation;
         if (saved < 0 || saved >= (int)stations_.size()) saved = selected_;
-        selected_ = saved; carousel_ = (float)selected_; paused_ = false;
+        selected_ = saved; carousel_ = (float)selected_;
     }
     carUid_ = uid;
     sync(game);
@@ -126,7 +137,6 @@ void Radio::update(Game& game) {
 void Radio::select(int index, Game& game) {
     if (stations_.empty()) return;
     selected_ = (index + (int)stations_.size()) % (int)stations_.size();
-    paused_ = false;
     if (inCar(game)) game.cars[game.playerCar].radioStation = selected_;
     sync(game);
 }
@@ -147,12 +157,14 @@ void Radio::volume(int step) {
 
 bool Radio::key(int k, Game& game) {
     if (stations_.empty()) return false;
-    if (game.player.dead && !open_) return false;
+    if (!inCar(game)) {
+        if (open_) setOpen(false, game);
+        return false;
+    }
     if (k == SDL_SCANCODE_R || (open_ && k == SDL_SCANCODE_ESCAPE)) {
-        open_ = !open_; sync(game); if (!open_) { remember(); save(); } return true;
+        setOpen(!open_, game); return true;
     }
     if (!open_) {
-        if (!inCar(game)) return false;
         if (k == SDL_SCANCODE_LEFTBRACKET) { cycle(-1, game); return true; }
         if (k == SDL_SCANCODE_RIGHTBRACKET) { cycle(1, game); return true; }
         return false;
@@ -161,7 +173,6 @@ bool Radio::key(int k, Game& game) {
     if (k == SDL_SCANCODE_RIGHT || k == SDL_SCANCODE_D) cycle(1, game);
     if (k == SDL_SCANCODE_UP || k == SDL_SCANCODE_EQUALS) volume(1);
     if (k == SDL_SCANCODE_DOWN || k == SDL_SCANCODE_MINUS) volume(-1);
-    if (k == SDL_SCANCODE_SPACE || k == SDL_SCANCODE_RETURN) { paused_ = !paused_; sync(game); }
     return true;
 }
 
@@ -180,17 +191,23 @@ void Radio::sprite(int id, float x, float y, float scale, float alpha) const {
 }
 
 void Radio::render(int W, int H, Game& game) {
-    if (!open_ || stations_.empty()) return;
+    if (!open_ || stations_.empty() || W <= 0 || H <= 0) return;
+    if (!inCar(game)) { setOpen(false, game); return; }
     float scale = std::min(W / 480.f, H / 448.f), ox = (W - 480 * scale) / 2, oy = (H - 448 * scale) / 2;
     int mx, my; Host_GetMouse(&mx, &my);
     float x = (mx - ox) / scale, y = (my - oy) / scale;
-    if (Host_PopClicks() & 1) {
+    while (int notch = Host_PopWheel()) cycle(notch > 0 ? -1 : 1, game);
+    if ((Host_PopClicks() & 1) && x >= 0 && x <= 480 && y >= 0 && y <= 448) {
         if (y >= 270 && y <= 335 && x >= 160 && x <= 207) volume(-1);
         else if (y >= 270 && y <= 335 && x >= 270 && x <= 319) volume(1);
-        else if (y >= 70 && y <= 220) { if (x < 170) cycle(-1, game); else if (x > 310) cycle(1, game); else { paused_ = !paused_; sync(game); } }
-        else if (y >= 396) { open_ = false; remember(); save(); sync(game); }
+        else if (y >= 70 && y <= 220) { if (x < 170) cycle(-1, game); else if (x > 310) cycle(1, game); }
+        else if (y >= 396) setOpen(false, game);
     }
-    Hud_Rect(0, 0, (float)W, (float)H, 0xFF000000);
+    // This screen replaces the world draw. Clear the colour buffer on every frame, including while animating.
+    // HUD colours are RRGGBBAA, so FF000000 was transparent red and retained all previous station icons.
+    glClearColor(0, 0, 0, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    Hud_Rect(0, 0, (float)W, (float)H, 0x000000FF);
     glPushMatrix(); glTranslatef(ox, oy, 0); glScalef(scale, scale, 1);
     Hud_Text(240 - Hud_TextWidth("Radio", 1.5f) / 2, 22, 1.5f, 0xFFFFFFFF, "Radio");
     const float count = (float)stations_.size();
@@ -215,7 +232,7 @@ void Radio::render(int W, int H, Game& game) {
     sprite(13, 176, 288); sprite(15, 272, 288); sprite(20, 208, 270);
     if (volume_ > 0) sprite(tables_.volumeSprites[volume_ - 1], 208, 270);
     sprite(1, 110, 139); sprite(2, 357, 139);
-    Hud_Rect(0, 396, 480, 52, 0xFF202020);
+    Hud_Rect(0, 396, 480, 52, 0x202020FF);
     Hud_Text(240 - Hud_TextWidth("Back", 1) / 2, 414, 1, 0xFFFFFFFF, "Back");
     glPopMatrix();
 }

@@ -54,6 +54,8 @@ bool Sound::Bank::sample(int i, const uint8_t*& pcm, uint32_t& len, uint32_t& ra
 
 bool Sound::init(const std::string& dataDir) {
     for (auto& item : ents_) stopSlots(item.second);
+    stopSlots(ped_);
+    lastWalkFrame_ = -1; firstFoot_ = true;
     ents_.clear();
     car_ = Bank{}; carBankEnum_ = -1; playerUid_ = 0;
     res_.data.clear(); res_.entries.clear();
@@ -65,6 +67,14 @@ bool Sound::init(const std::string& dataDir) {
 void Sound::stopSlots(Entity& e, bool bankOnly) {
     for (Slot& s : e.s) {
         if (bankOnly && (s.event == 0x9C || tables_.events[s.event].bank == 0)) continue;
+        if (s.voice) Audio_SfxStop(s.voice);
+        s = Slot{};
+    }
+}
+
+void Sound::stopLoops(Entity& e) {
+    for (Slot& s : e.s) {
+        if (s.event == 0x9C || tables_.events[s.event].mode != 1) continue;
         if (s.voice) Audio_SfxStop(s.voice);
         s = Slot{};
     }
@@ -231,7 +241,8 @@ void Sound::playerCar(Game& g, Vehicle& v, Entity& e) {   // cSoundEvents::Proce
     const GearSound& gs = tables_.gears[std::min<int>(info.raw[0x8C], 19)];
     uint16_t flags = (uint16_t)info.s16(0x8E);
     if (playerUid_ != v.uid) {
-        stopSlots(e);
+        // The closing door can be queued on the very frame the player takes this seat.
+        stopLoops(e);
         state_ = revs_ = volA_ = volB_ = gear_ = lastRpm_ = 0;
         damageClank_ = 0; skidTimer_ = skidCount_ = 0; hornHeld_ = -1; lastMs_ = 0;
         playerUid_ = v.uid;
@@ -351,17 +362,40 @@ void Sound::playerCar(Game& g, Vehicle& v, Entity& e) {   // cSoundEvents::Proce
     }
 }
 
+void Sound::playerPed(Game& g) {
+    const Player& player = g.player;
+    for (int k = 0; k < 3; ++k) ped_.pos[k] = player.pos[k];
+    if (g.playerCar >= 0 || player.hidden || player.attached || player.dead || !player.onGround() || player.level() == 0) {
+        lastWalkFrame_ = -1;
+        firstFoot_ = true;
+        // Let a footfall finish when stopping, but discard it when leaving the on-foot controller.
+        if (g.playerCar >= 0 || player.hidden || player.attached || player.dead) stopSlots(ped_);
+        return;
+    }
+    // Observed in Android 4.4.243 ProcessEntityTypePlayerPed: the unarmed cycle emits event 0x35
+    // at frames 6 and 13, volume 0x23 and squared radius 200. The foot alternates once per half-cycle.
+    int frame = player.walkFrame();
+    if (frame == lastWalkFrame_) return;
+    if ((firstFoot_ && frame >= 6 && frame < 13) || (!firstFoot_ && frame >= 13)) {
+        addEvent(ped_, 0x35, 0x23, 200, -1);
+        firstFoot_ = !firstFoot_;
+    }
+    lastWalkFrame_ = frame;
+}
+
 void Sound::update(Game& g) {
     if (!ok()) return;
     ++ticks_;
-    const uint32_t uid = g.playerCar >= 0 ? g.cars[g.playerCar].uid : 0;
+    const uint32_t uid = g.playerCar >= 0 && g.playerCar < (int)g.cars.size() ? g.cars[g.playerCar].uid : 0;
     if (playerUid_ && uid != playerUid_) {
         auto it = ents_.find(playerUid_);
-        if (it != ents_.end()) stopSlots(it->second);
+        if (it != ents_.end()) stopLoops(it->second);
         playerUid_ = 0;
     }
     if (skidTimer_ > 0) --skidTimer_;   // cSoundEvents::Process
     if (skidCount_ > 0) --skidCount_;
+    playerPed(g);
+    processEntity(g, ped_, false);
     for (auto& [uid, e] : ents_) e.seen = false;
     for (int i = 0; i < (int)g.cars.size(); ++i) {
         Vehicle& v = g.cars[i];

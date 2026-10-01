@@ -662,22 +662,24 @@ void Game::render(int W, int H) {
     }
     float p[3];
     player.posf(p);
-    if (showCollision) { collision.debugDraw(p[0], p[1], 40.f); roads.debugDraw(p[0], p[1], 80.f); }
+    if (showDebug) { collision.debugDraw(p[0], p[1], 40.f); roads.debugDraw(p[0], p[1], 80.f); }
     glDisable(GL_DEPTH_TEST);
 
     Hud_Begin(W, H);
-    char clock[16];
-    snprintf(clock, sizeof clock, "%02u:%02u", t >> 12, (t & 0xFFF) * 60 >> 12);
-    Hud_Text(W - 20 - Hud_TextWidth(clock, 1.5f), 16, 1.5f, 0xFFFFFFFFu, clock);
-    if (player.dead) {
-        const std::string label = "WASTED";
-        Hud_Text((W - Hud_TextWidth(label, 3)) / 2, H * 0.45f, 3, 0xFF3030FF, label);
-    } else Hud_Text(16, H - 30, 1.f, 0xFFFFFFB0u, playerCar >= 0 ? "Gameplay prototype.  W/S: accelerate/brake-reverse, A/D: steer, Space: handbrake, F: get out, Esc: quit"
-                                                         : "Gameplay prototype.  WASD: move, Shift: sprint, Ctrl: walk, F / Enter: get in a car, F5: spawn car, F3: collision, Esc: quit");
+    if (showDebug) {
+        char clock[16];
+        snprintf(clock, sizeof clock, "%02u:%02u", t >> 12, (t & 0xFFF) * 60 >> 12);
+        Hud_Text(W - 20 - Hud_TextWidth(clock, 1.5f), 16, 1.5f, 0xFFFFFFFFu, clock);
+        if (player.dead) {
+            const std::string label = "WASTED";
+            Hud_Text((W - Hud_TextWidth(label, 3)) / 2, H * 0.45f, 3, 0xFF3030FF, label);
+        } else Hud_Text(16, H - 30, 1.f, 0xFFFFFFB0u, playerCar >= 0 ? "W/S: drive, A/D: steer, Space: handbrake, H: horn, R: radio, [ / ]: station, F: get out, F3: debug off"
+                                                             : "WASD: move, Shift: sprint, Ctrl: walk, F / Enter: get in, F5: spawn car, F3: debug off");
+    }
     Plugins_DrawHud(W, H);
     if (deathFrames_ >= 60 && deathFrames_ < 84) {
         int alpha = deathFrames_ < 72 ? (deathFrames_ - 60) * 255 / 12 : (84 - deathFrames_) * 255 / 12;
-        Hud_Rect(0, 0, (float)W, (float)H, (uint32_t)alpha << 24);
+        Hud_Rect(0, 0, (float)W, (float)H, (uint32_t)alpha);   // RRGGBBAA: black with the fade alpha
     }
     Hud_End();
 }
@@ -691,7 +693,6 @@ void Game::run() {
         while (int k = Host_PopKey()) {
             if (key(k)) continue;
             if (k == SDL_SCANCODE_ESCAPE) running = false;
-            else if (k == SDL_SCANCODE_F3) showCollision = !showCollision;
             else if (k == SDL_SCANCODE_F || k == SDL_SCANCODE_RETURN) enterPressed = true;
             else if (k == SDL_SCANCODE_F5 && playerCar < 0 && !vehicleInfos.empty()) {   // testing: a car in front of the player
                 for (int tries = 0; tries < (int)vehicleInfos.size(); ++tries) {
@@ -713,6 +714,7 @@ void Game::run() {
 }
 
 bool Game::key(int k) {
+    if (k == SDL_SCANCODE_F3) { showDebug = !showDebug; return true; }
     if (radio.open()) return radio.key(k, *this);
     if (Plugins_Key(k)) return true;
     return Plugins_GameInput() && radio.key(k, *this);

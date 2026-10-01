@@ -90,7 +90,7 @@ public:
     float renderDistance = 120.f;        // units of city loaded around the camera (the game: one block ring)
     void setRenderDistance(float units);
     struct FreeCamera { bool on = false; WorldCamera cam; } freeCam;   // mods: replaces the game camera
-    bool showCollision = false;          // F3: draw the collision shapes around the player
+    bool showDebug = false;              // F3: prototype HUD, controls and collision diagnostics (off by default)
     bool scriptedInput = false;          // testing: use scriptedMove instead of the keyboard
     float scriptedMove[2] = {0, 0};
     int scriptedState = 2;               // Player::MoveState while scripted input moves

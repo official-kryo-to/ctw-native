@@ -73,6 +73,7 @@ public:
     int16_t heading() const;          // cEntity::Heading
     int level() const { return level_; }
     bool onGround() const { return onGround_; }
+    int walkFrame() const { return frameUpper_ >> 8; }   // cSoundEvents reads the unarmed upper-body cycle
     void posf(float out[3]) const { for (int i = 0; i < 3; ++i) out[i] = pos[i] / 4096.f; }
     int32_t currentSpeed() const;     // cPed::CurrentSpeed, units per second (20.12)
 
@@ -93,4 +94,5 @@ private:
     int32_t clearance_ = 0, lastPos_[3] = {0, 0, 0};     // +0x320, +0x2F8
     int animUpper_ = -1, animLegs_ = -1, frameUpper_ = 0, frameLegs_ = 0;
     bool flip_ = false, doneUpper_ = false, doneLegs_ = false;
+    friend struct PlayerTestAccess;
 };

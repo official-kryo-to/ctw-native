@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 
 static int failures;
 static void check(bool ok, const char* description) {
@@ -26,6 +27,13 @@ struct VehicleTestAccess {
         v.accel_[0] = accel; v.tyre_[0].onGround = v.tyre_[1].onGround = true;
     }
     static bool fire(const Vehicle& v) { return v.fire_ != nullptr; }
+    static void bike(Vehicle& v, bool bike) { v.bike_ = bike; }
+};
+
+struct PlayerTestAccess {
+    static void gait(Player& p, int frame, int level = 2, bool grounded = true) {
+        p.frameUpper_ = frame << 8; p.level_ = (uint8_t)level; p.onGround_ = grounded;
+    }
 };
 
 struct SoundTestAccess {
@@ -73,6 +81,40 @@ struct SoundTestAccess {
         sound.addEvent(loop, 0x31, 80, 400, 1);
         check(loop.s[0].sfx == 1 && loop.s[0].freq == 0 && loop.s[0].radius == 400,
               "changing a looping sample replaces its sample and pitch state");
+
+        Sound::Entity door;
+        sound.addEvent(door, 0x61, 120, 1000, -1);
+        v.uid = 3;
+        sound.playerCar(game, v, door);
+        check(std::any_of(std::begin(door.s), std::end(door.s), [](auto& s){ return s.event == 0x61; }),
+              "taking the driver's seat preserves the queued closing-door sound");
+        sound.stopLoops(door);
+        check(std::any_of(std::begin(door.s), std::end(door.s), [](auto& s){ return s.event == 0x61; }) &&
+              std::none_of(std::begin(door.s), std::end(door.s), [](auto& s){ return s.event == 0x31 || s.event == 0x32; }),
+              "leaving the driver's seat stops engine loops but preserves closing-door one-shots");
+
+        game.playerCar = -1;
+        auto footfalls = [&]() { return std::count_if(std::begin(sound.ped_.s), std::end(sound.ped_.s), [](auto& s){ return s.event == 0x35; }); };
+        PlayerTestAccess::gait(game.player, 0); sound.playerPed(game);
+        check(footfalls() == 0, "walking cycle starts before the first footfall");
+        PlayerTestAccess::gait(game.player, 6); sound.playerPed(game); sound.playerPed(game);
+        check(footfalls() == 1 && sound.ped_.s[0].volume == 0x23 && sound.ped_.s[0].radius == 200,
+              "first footfall follows the original unarmed frame, event volume and radius without repeats");
+        PlayerTestAccess::gait(game.player, 12); sound.playerPed(game);
+        check(footfalls() == 1, "first half-cycle produces one footfall");
+        PlayerTestAccess::gait(game.player, 13); sound.playerPed(game);
+        check(footfalls() == 2, "second footfall follows the second animation phase");
+        PlayerTestAccess::gait(game.player, 0); sound.playerPed(game);
+        PlayerTestAccess::gait(game.player, 7, 3); sound.playerPed(game);
+        check(footfalls() == 3, "sprinting and skipped animation frames still alternate footfalls");
+        PlayerTestAccess::gait(game.player, 14, 2, false); sound.playerPed(game);
+        check(footfalls() == 3, "airborne player does not emit footsteps");
+        PlayerTestAccess::gait(game.player, 6, 0); sound.playerPed(game);
+        check(footfalls() == 3, "stationary player does not emit footsteps");
+        game.player.attached = true; sound.playerPed(game);
+        check(footfalls() == 0, "entry animations discard pending footsteps");
+        game.player.attached = false; game.player.dead = true; sound.playerPed(game);
+        check(footfalls() == 0, "dead player does not emit footsteps");
     }
 };
 
@@ -147,6 +189,9 @@ static void fireAndCamera() {
     car.releaseEffects();
     check(!VehicleTestAccess::fire(car), "vehicle removal releases its flame emitter");
     Game game; game.freeCam.on = true; game.freeCam.cam.eye[2] = 400; game.freeCam.cam.zFar = 150;
+    check(!game.showDebug, "prototype HUD and collision diagnostics are off by default");
+    check(game.key(SDL_SCANCODE_F3) && game.showDebug, "F3 enables all debug drawing");
+    check(game.key(SDL_SCANCODE_F3) && !game.showDebug, "F3 disables all debug drawing again");
     WorldCamera cam; game.setRenderDistance(720); game.viewCamera(cam);
     check(cam.zFar > 720 && cam.zFar > game.freeCam.cam.zFar, "freecam far plane includes the requested radius and camera altitude");
     game.setRenderDistance(120); game.viewCamera(cam);
@@ -155,12 +200,28 @@ static void fireAndCamera() {
 
 struct RadioTestAccess {
     static void run() {
+        const auto dir = std::filesystem::temp_directory_path() / ("ctw-radio-audio-test-" + std::to_string(SDL_GetTicks64()));
+        std::filesystem::create_directories(dir);
+        OS_SetDocumentsRoot(dir.string().c_str());
+        // Synthetic silent MPEG-1 Layer III frames, not an extracted game recording.
+        std::vector<unsigned char> mp3Frame(417, 0);
+        mp3Frame[0] = 0xFF; mp3Frame[1] = 0xFB; mp3Frame[2] = 0x90; mp3Frame[3] = 0xC0;
+        const auto path = dir / "station.mp3";
+        {
+            std::ofstream file(path, std::ios::binary);
+            for (int i = 0; i < 100; ++i) file.write((const char*)mp3Frame.data(), mp3Frame.size());
+        }
+        AudioTrackInfo info;
+        check(Audio_Probe(path.string(), &info) && info.seconds > 2, "synthetic radio broadcast decodes");
         Game game;
         Radio& radio = game.radio;
         radio.stations_.resize(3);
         radio.stations_[0].available = true; radio.stations_[0].stream = 0;
+        radio.stations_[0].path = path.string();
         radio.stations_[1].available = false; radio.stations_[1].stream = 1;
         radio.stations_[2].available = true; radio.stations_[2].stream = -1;
+        check(!radio.key(SDL_SCANCODE_R,game) && !radio.open(), "walking player cannot open the radio");
+        check(!radio.key(SDL_SCANCODE_RIGHTBRACKET,game), "walking player cannot tune the radio");
         radio.select(2,game); radio.cycle(1,game);
         check(radio.station() == 0, "radio station selection wraps");
         radio.cycle(1,game);
@@ -173,6 +234,27 @@ struct RadioTestAccess {
         check(radio.station() == 0 && game.cars[1].radioStation == 2, "station selections stay with individual cars");
         radio.key(SDL_SCANCODE_R,game); uint32_t frame = game.frame; game.tick();
         check(radio.open() && game.frame == frame, "radio app suspends gameplay while previewing stations");
+        double before = Audio_MusicPosition();
+        radio.key(SDL_SCANCODE_SPACE,game); radio.key(SDL_SCANCODE_RETURN,game);
+        for (int i = 0; i < 50 && Audio_MusicPosition() <= before; ++i) SDL_Delay(20);
+        check(Audio_MusicPlaying() && Audio_MusicPosition() > before,
+              "Space and Enter cannot pause the broadcast while the radio menu suspends the world");
+        check(radio.key(SDL_SCANCODE_ESCAPE,game) && !radio.open(), "Escape closes the radio without quitting");
+        radio.key(SDL_SCANCODE_R,game); game.playerCar = -1; radio.update(game);
+        check(!radio.open() && radio.playing_ == -1, "leaving a car closes the selector and stops music");
+        game.playerCar = 0; game.player.dead = true;
+        check(!radio.key(SDL_SCANCODE_R,game) && !radio.open(), "dead player cannot open the radio");
+        game.player.dead = false; VehicleTestAccess::bike(game.cars[0], true);
+        check(!radio.key(SDL_SCANCODE_R,game), "bike rider cannot open the car radio");
+        VehicleTestAccess::bike(game.cars[0], false);
+        game.cars[0].infoId = 32;
+        check(radio.key(SDL_SCANCODE_R,game) && radio.open(), "vehicle model IDs are not mistaken for radio availability");
+        game.playerCar = 100; radio.update(game);
+        check(!radio.open(), "removed vehicle cannot leave the radio open");
+        game.playerCar = 0; radio.key(SDL_SCANCODE_R,game); game.cars[0].damage(255); radio.update(game);
+        check(!radio.open() && radio.playing_ == -1, "destroyed vehicle closes the radio and stops music");
+        radio.shutdown();
+        std::filesystem::remove_all(dir);
     }
 };
 
@@ -185,6 +267,14 @@ int main() {
     check(voice && Audio_SfxPlaying(voice), "sound voices survive source-bank memory replacement");
     Audio_SfxStop(voice);
     check(!Audio_SfxPlaying(voice), "stopping a voice removes playback");
+    Audio_SetSfxPaused(true);
+    source.assign(2205, 140);
+    voice = Audio_SfxPlay(source.data(), (unsigned)source.size(), 22050, 1, 0, false);
+    SDL_Delay(180);
+    check(voice && Audio_SfxPlaying(voice), "paused sound effects do not advance or finish while browsing radio");
+    Audio_SetSfxPaused(false);
+    for (int i = 0; i < 50 && Audio_SfxPlaying(voice); ++i) SDL_Delay(20);
+    check(!Audio_SfxPlaying(voice), "resumed sound effect finishes normally");
     SoundTestAccess::run(); CollisionTestAccess::run(); PropTestAccess::run();
     movingCars(); fireAndCamera(); RadioTestAccess::run();
     Audio_Shutdown();

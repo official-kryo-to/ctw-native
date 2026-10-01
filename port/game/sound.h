@@ -55,6 +55,10 @@ private:
     void processEntity(Game& g, Entity& e, bool persistent);              // ProcessStandardSfx
     void carEngine(Game& g, Vehicle& v, Entity& e);                       // ProcessEntityTypeCar
     void playerCar(Game& g, Vehicle& v, Entity& e);                       // ProcessEntityTypePlayerCar
+    void playerPed(Game& g);                                            // unarmed ProcessEntityTypePlayerPed
+    Entity ped_;
+    int lastWalkFrame_ = -1;
+    bool firstFoot_ = true;
 
     // cSoundEvents state for the player's car (+0x18 .. +0x66)
     int state_ = 0, revs_ = 0, volA_ = 0, volB_ = 0, gear_ = 0, lastRpm_ = 0;
@@ -64,6 +68,7 @@ private:
     uint32_t lastMs_ = 0;
     uint32_t playerUid_ = 0;
     void stopSlots(Entity& e, bool bankOnly = false);
+    void stopLoops(Entity& e);
     friend struct SoundTestAccess;
 };
 

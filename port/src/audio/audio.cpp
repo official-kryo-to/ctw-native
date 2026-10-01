@@ -79,8 +79,10 @@ struct SfxVoice {
 static SfxVoice g_sfx[32];
 static int g_sfxNext = 1;
 static std::atomic<float> g_sfxVolume{0.8f};
+static bool g_sfxPaused = false;   // protected by the audio device lock
 
 static void mixSfx(int16_t* out, int frames) {
+    if (g_sfxPaused) return;
     const float master = g_sfxVolume.load();
     for (SfxVoice& v : g_sfx) {
         if (!v.active) continue;
@@ -151,6 +153,13 @@ bool Audio_SfxPlaying(int h) {
 
 void Audio_SetSfxVolume(float v) { g_sfxVolume = v; }
 
+void Audio_SetSfxPaused(bool paused) {
+    if (!g_dev) return;
+    SDL_LockAudioDevice(g_dev);
+    g_sfxPaused = paused;
+    SDL_UnlockAudioDevice(g_dev);
+}
+
 static void SDLCALL mix(void*, Uint8* out8, int len) {
     int16_t* out = (int16_t*)out8;
     int frames = len / 4;
@@ -220,6 +229,7 @@ void Audio_Shutdown() {
     freeStream(detachMusic());
     SDL_CloseAudioDevice(g_dev);
     g_dev = 0;
+    g_sfxPaused = false;
     for (SfxVoice& v : g_sfx) v = SfxVoice{};
 }
 
