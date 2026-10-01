@@ -4,7 +4,7 @@
 """The Python side of the parity check (see parity.sh): prints what scripts/extract_tables.py sees, in the same
 form as `cargo run --example parity`.
 
-    parity.py tables <libGame.so>              the four tables, hex
+    parity.py tables <libGame.so>              all six tables, hex
     parity.py calls <any.so> <names file>      constant_calls for each function name (build ID not checked)
 """
 from pathlib import Path

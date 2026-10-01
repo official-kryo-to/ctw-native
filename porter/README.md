@@ -15,8 +15,15 @@ pnpm app:dev      # the app
 pnpm app:build    # the exe: target/release/ctw-native-porter.exe
 ```
 
-`app:build` packs the game from `port/build-release` (what `scripts/export_pc.py` builds; set `CTW_GAME_BUILD` to use
-another folder). Without a game build the Porter still builds, and says it has no game inside.
+`app:build` first configures and incrementally rebuilds the current game and mod kit in `port/build-release`,
+then packs them into the Porter. This needs CMake, Ninja and MinGW on your build machine. Set `CTW_GAME_BUILD`
+to use a game and mod kit you have already built (as CI does); an incomplete payload stops the build.
+Development builds can run without a game payload; Windows release builds require one.
+
+The PC game code is embedded at build time. At runtime, the Porter installs that embedded game and extracts
+the assets and lookup tables from your APK. Changing the game source therefore needs a new Porter build;
+an existing downloaded Porter keeps the game from its release. Already exported game folders keep their
+own copy too. Use a newer Porter and export to a new folder to get the newer game.
 
 ## Where things are
 
