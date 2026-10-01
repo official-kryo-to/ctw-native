@@ -3,7 +3,7 @@
 // See LICENSE in the repository root.
 //! Packs the game into the Porter: GTACTW.exe and the mod kit (mods/) from a release build of the game, zipped
 //! into OUT_DIR/payload.zip and included in the exe. The folder is CTW_GAME_BUILD, or port/build-release (what
-//! `scripts/export_pc.py` builds). Without it the Porter still builds, and says it has no game inside.
+//! `scripts/export_pc.py` builds). Development builds may omit it; Windows release builds must include it.
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -32,6 +32,17 @@ fn main() {
         .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../port/build-release"));
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("payload.zip");
     let exe = game.join("GTACTW.exe");
+    let required = std::env::var_os("CTW_GAME_BUILD").is_some()
+        || (cfg!(target_os = "windows") && std::env::var("PROFILE").as_deref() == Ok("release"));
+    if required {
+        for name in ["GTACTW.exe", "mods/ModMenu.dll", "mods/CheatExample/cheat_example.dll"] {
+            assert!(
+                game.join(name).is_file(),
+                "Missing {name} in {}. Run pnpm app:build to build and embed the game.",
+                game.display()
+            );
+        }
+    }
     println!("cargo:rerun-if-changed={}", exe.display());
     println!("cargo:rerun-if-changed={}", game.join("mods").display());
     if exe.is_file() {

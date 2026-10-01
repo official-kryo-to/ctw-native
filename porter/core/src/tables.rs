@@ -248,6 +248,21 @@ impl<'a> GameBinary<'a> {
                         }
                     }
                 }
+                "ldr" if matches!(op(0)?.kind, Arm64OperandType::Reg(r) if self.reg_name(r).is_some_and(|n| n.starts_with('d'))) =>
+                {
+                    let number = match mem(op(1)?) {
+                        Some((base, disp)) => match regs.get(&regname(base)).copied().flatten() {
+                            Some(base) => {
+                                let address = u64::try_from(base + disp as i128)
+                                    .map_err(|_| TableError("Invalid constant load address.".into()))?;
+                                Some(u64::from_le_bytes(self.read(address, 8)?.try_into().unwrap()) as i128)
+                            }
+                            None => None,
+                        },
+                        None => None,
+                    };
+                    write(&mut regs, op(0)?, number);
+                }
                 "bl" => {
                     let target = imm(op(0)?).unwrap_or(0) as u64;
                     calls.push((self.call_name(target)?, regs.clone(), stack.clone()));
@@ -378,14 +393,64 @@ impl<'a> GameBinary<'a> {
         let mut out = b"CTWGAME1".to_vec();
         out.extend(self.read(0x4872c0, 64)?);
         // The top-ratio table stores 64-bit integers even though its values fit in Q12 int32.
-        for chunk in self.read(0x487250, 48)?.chunks_exact(8) {
-            out.extend(i32_le(i64::from_le_bytes(chunk.try_into().unwrap()) as i128)?);
+        for chunk in self.read(0x487250, 48)?.as_chunks::<8>().0 {
+            out.extend(i32_le(i64::from_le_bytes(*chunk) as i128)?);
         }
         for (a, n) in [(0x481b44, 7), (0x481b4b, 7), (0x481b52, 52), (0x481b86, 52), (0x48718e, 10), (0x469dd0, 16)] {
             out.extend(self.read(a, n)?);
         }
         Ok(out)
     }
+
+    pub fn radio(&self) -> Result<Vec<u8>, TableError> {
+        let icons = self.read(0x484732, 11)?;
+        let streams = self.read(0x484740, 44)?.as_chunks::<4>().0;
+        let labels = self.read(0x48476c, 44)?.as_chunks::<4>().0;
+        let names = self.read(0x484798, 44)?.as_chunks::<4>().0;
+        let mut out = b"CTWRAD2\0".to_vec();
+        out.extend(11u32.to_le_bytes());
+        out.extend(33u32.to_le_bytes());
+        out.extend(self.read(0x484728, 10)?);
+        for i in 0..11 {
+            out.extend((icons[i] as i32).to_le_bytes());
+            out.extend(streams[i]);
+            out.extend(labels[i]);
+            out.extend(names[i]);
+        }
+        out.extend(self.read(0x480b64, 33 * 40)?);
+        Ok(out)
+    }
+
+    pub fn restart(&self) -> Result<Vec<u8>, TableError> {
+        restart_table(self.constant_calls("_ZN11CScriptMain19DefineRestartPointsEv")?)
+    }
+}
+
+fn restart_table(calls: Vec<(String, Regs, Stack)>) -> Result<Vec<u8>, TableError> {
+    let mut points = Vec::new();
+    for (name, regs, stack) in calls {
+        if !name.contains("AddHospitalRestartPoint") {
+            continue;
+        }
+        let bad = || TableError("Could not resolve hospital restart coordinates.".into());
+        let pointer = regs.get("x1").copied().flatten().ok_or_else(bad)?;
+        let packed = stack.get(&pointer).copied().flatten().ok_or_else(bad)?;
+        let packed = u64::try_from(packed).map_err(|_| bad())?.to_le_bytes();
+        let z = stack.get(&(pointer + 8)).copied().flatten().ok_or_else(bad)?;
+        let heading = regs.get("x2").copied().flatten().ok_or_else(bad)?;
+        let heading = u32::try_from(heading).map_err(|_| bad())? as i32;
+        let mut point = packed.to_vec();
+        point.extend(i32_le(z)?);
+        point.extend(heading.to_le_bytes());
+        points.push(point);
+    }
+    if points.len() != 5 {
+        return err("Unexpected hospital restart point count.");
+    }
+    let mut out = b"CTWRESP1".to_vec();
+    out.extend((points.len() as u32).to_le_bytes());
+    out.extend(points.into_iter().flatten());
+    Ok(out)
 }
 
 /// Every table, keyed by the file name it is saved as in the game's data folder.
@@ -396,6 +461,8 @@ pub fn extract_tables(binary: &[u8]) -> Result<Vec<(&'static str, Vec<u8>)>, Tab
         ("sound_tables.bin", game.sound()?),
         ("render_tables.bin", game.render()?),
         ("gameplay_tables.bin", game.gameplay()?),
+        ("radio_tables.bin", game.radio()?),
+        ("restart_tables.bin", game.restart()?),
     ])
 }
 
@@ -443,5 +510,41 @@ fn shift_value(shift: &Arm64Shift) -> u32 {
     match *shift {
         Arm64Shift::Invalid => 0,
         Arm64Shift::Lsl(v) | Arm64Shift::Msl(v) | Arm64Shift::Lsr(v) | Arm64Shift::Asr(v) | Arm64Shift::Ror(v) => v,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hospital_call() -> (String, Regs, Stack) {
+        let packed = u64::from_le_bytes([(-4096i32).to_le_bytes(), 8192i32.to_le_bytes()].concat().try_into().unwrap());
+        (
+            "AddHospitalRestartPoint".into(),
+            HashMap::from([("x1".into(), Some(SP_BASE)), ("x2".into(), Some((-90i32 as u32) as i128))]),
+            HashMap::from([(SP_BASE, Some(packed as i128)), (SP_BASE + 8, Some(123))]),
+        )
+    }
+
+    #[test]
+    fn restart_preserves_signed_coordinates_and_heading() {
+        let mut calls = vec![hospital_call(); 5];
+        calls.insert(0, ("OtherRestartPoint".into(), Regs::new(), Stack::new()));
+        let table = restart_table(calls).unwrap();
+        assert_eq!(&table[..8], b"CTWRESP1");
+        assert_eq!(&table[8..12], &5u32.to_le_bytes());
+        let point: Vec<u8> = [-4096i32, 8192, 123, -90].into_iter().flat_map(i32::to_le_bytes).collect();
+        assert_eq!(&table[12..], point.repeat(5));
+    }
+
+    #[test]
+    fn restart_requires_five_resolved_points() {
+        assert!(restart_table(vec![hospital_call(); 4]).is_err());
+        let mut calls = vec![hospital_call(); 5];
+        calls[2].1.remove("x1");
+        assert!(restart_table(calls).is_err());
+        let mut calls = vec![hospital_call(); 5];
+        calls[2].2.remove(&(SP_BASE + 8));
+        assert!(restart_table(calls).is_err());
     }
 }

@@ -84,6 +84,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: porter
+          cache-on-failure: true
       - name: Build the Porter
         working-directory: porter
         shell: bash
@@ -91,8 +92,9 @@ jobs:
           CTW_GAME_BUILD: ${{ github.workspace }}/port/build-release
         run: |
           pnpm install --frozen-lockfile
-          cargo test -p ctw-porter-core
-          pnpm app:build
+          pnpm test
+          cargo test -p ctw-porter-core --locked
+          pnpm app:build -- --locked
           cp target/release/ctw-native-porter.exe ../CTW-Native-Porter.exe
 
       - name: Release notes from the changelog

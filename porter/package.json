@@ -1,14 +1,15 @@
 {
   "name": "ctw-native-porter",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "app:dev": "tauri dev",
-    "app:build": "tauri build --no-bundle",
+    "app:build": "node scripts/build-game.mjs && tauri build --no-bundle",
+    "test": "node --test scripts/build-game.test.mjs",
     "version:check": "node scripts/check-version.mjs",
     "version:set": "node scripts/check-version.mjs",
     "tauri": "tauri"

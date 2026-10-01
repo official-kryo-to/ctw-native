@@ -4,7 +4,7 @@
 //! Prints what the table extraction sees, in the same form as `tests/parity.py` (run both with `tests/parity.sh`), so the Rust port can be
 //! compared with `scripts/extract_tables.py` on any ARM64 binary:
 //!
-//!   parity tables <libGame.so>                 the four tables, hex
+//!   parity tables <libGame.so>                 all six tables, hex
 //!   parity calls <any.so> <names file>         constant_calls for each function name (build ID not checked)
 use ctw_porter_core::tables::{extract_tables, GameBinary};
 

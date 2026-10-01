@@ -4,7 +4,7 @@
 """The Python side of the parity check (see parity.sh): prints what scripts/extract_tables.py sees, in the same
 form as `cargo run --example parity`.
 
-    parity.py tables <libGame.so>              the four tables, hex
+    parity.py tables <libGame.so>              all six tables, hex
     parity.py calls <any.so> <names file>      constant_calls for each function name (build ID not checked)
 """
 from pathlib import Path
@@ -30,7 +30,10 @@ else:
     text = lambda v: 'null' if v is None else str(v)
     for name in Path(sys.argv[3]).read_text().splitlines():
         try:
-            for call, regs, stack in game.constant_calls(name):
+            # Rust returns a Result<Vec<_>>: a failed function has no partial call list. Collect before printing
+            # so a late unreadable constant load is compared as the same failure on both sides.
+            calls = list(game.constant_calls(name))
+            for call, regs, stack in calls:
                 r = sorted(f'{k}={text(v)}' for k, v in regs.items())
                 s = sorted(f'{k}={text(v)}' for k, v in stack.items())
                 print(f"{name} -> {call} | {','.join(r)} | {','.join(s)}")

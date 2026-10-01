@@ -27,19 +27,28 @@ PY
 cp "$here"/fixture/* "$work/"
 fail=0
 compare() {  # compare <label> <python output> <rust output>
-    if [ "$(sed 's/^ERROR.*/ERROR/' "$2")" = "$(sed 's/^ERROR.*/ERROR/; s/ ERROR .*/ ERROR/' "$3")" ]; then
+    sed 's/^ERROR.*/ERROR/; s/ ERROR .*/ ERROR/' "$2" > "$work/py.normalized"
+    sed 's/^ERROR.*/ERROR/; s/ ERROR .*/ ERROR/' "$3" > "$work/rs.normalized"
+    if cmp -s "$work/py.normalized" "$work/rs.normalized"; then
         echo "same: $1 ($(wc -l < "$2") lines)"
     else
-        echo "DIFFERENT: $1"; diff "$2" "$3" | head -5 | cut -c1-200; fail=1
+        echo "DIFFERENT: $1"
+        # diff returns 1 for a mismatch; do not let pipefail stop the remaining checks or hide the final result.
+        diff -U2 "$work/py.normalized" "$work/rs.normalized" | head -25 | cut -c1-200 || true
+        fail=1
     fi
 }
 for opt in O1 O2 Os; do
     so="$work/libGame_$opt.so"
-    (cd "$work" && aarch64-linux-gnu-g++ -$opt -fPIC -shared -o "$so" game.cpp data.cpp blob.S \
+    (cd "$work" && aarch64-linux-gnu-g++ -$opt -fPIC -shared -o "$so" game.cpp data.cpp blob.S restart.S \
         -Wl,--build-id=0xa4c441f4943abbcc72e8270ec18248e4358a89e2 -Wl,--section-start=.blob=0x460000)
     python3 "$here/parity.py" tables "$so" > "$work/py.txt"
     "$rust" tables "$so" > "$work/rs.txt"
     grep -q ERROR "$work/py.txt" && { echo "fixture $opt did not extract"; fail=1; }
+    for table in population sound render gameplay radio restart; do
+        grep -q "^${table}_tables.bin " "$work/py.txt"
+        grep -q "^${table}_tables.bin " "$work/rs.txt"
+    done
     compare "tables, fixture -$opt" "$work/py.txt" "$work/rs.txt"
 done
 for lib in libc.so.6 libm.so.6 libstdc++.so.6; do
