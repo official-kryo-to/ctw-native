@@ -1,38 +1,36 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
-// Street furniture that vehicles knock over (cDynamicProp::ApplyWorldForce -> UpRoot / Smash).
-//
-// From the game: the thresholds per prop kind (gGameDir[17], see world/props.h): a prop is uprooted when the force
-// reaches its uproot force and smashed when it reaches its smash force; a smashed prop loses its lights, swaps to
-// its broken model if it has one and stops colliding (cDynamicProp::Smash, SwapModel, RemovePropLights).
-// Approximated here (the original moves loose props with the full rigid-body integrator):
-//   - the force is taken from the vehicle's speed (f = speed in units/s x 0.3), not from the contact impulse;
-//   - smashed props fall over about their base away from the vehicle, uprooted props fly off it and tumble;
-//     both settle lying on the ground, and a dust puff stands in for the debris particles;
-//   - knocked props are put back upright once the player is far away (as the game does when sectors reload).
 #pragma once
-#include "world/collision.h"
+#include "rigidbody.h"
 #include <vector>
 
 class Game;
-struct WorldCamera;
+class Vehicle;
+struct Model;
 
+// cDynamicProp::ApplyWorldForce / UpRoot / Smash / ProcessAlways, with cPhysical's full integrator.
 class PropDynamics {
 public:
-    void checkImpacts(Game& g);            // after the vehicles have moved (each game frame)
-    void update(Game& g);                  // the loose props (each game frame)
-    void render(Game& g) const;            // inside the world pass
+    void checkImpacts(Game& game);
+    void update(Game& game);
+    void render(Game& game) const;
 private:
     struct Loose {
-        int cx, cy, index;                 // where the prop lives in the collision cells
+        int cx, cy, index;
         Collision::Prop prop;
-        bool broken;                       // draw the broken model (if any)
-        float pos[3], vel[3];              // world units, units/s
-        float axis[2];                     // tip-over axis (horizontal)
-        float tilt = 0, tiltVel = 0, maxTilt = 1.53f, heightHalf = 1.f;
-        bool resting = false;
+        RigidBody body;
+        bool broken = false, uprooted = false, collidable = true;
+        int lampTimer = 0, sleepCounter = 15;
     };
-    void knock(Game& g, int cx, int cy, int index, const int32_t vel[3], bool smash);
+    Loose makeBody(Game& game, int cx, int cy, int index) const;
+    void applyForce(Game& game, Loose& prop, const int32_t point[3], const int32_t force[3]);
+    bool hit(Game& game, Vehicle& car, Loose& prop);
+    bool hit(Game& game, Loose& a, Loose& b);
+    template<class A, class B>
+    static bool contactForces(A& a, B& b, const int32_t sphereA[4], const int32_t sphereB[4],
+                              int32_t point[3], int32_t forceA[3], int32_t forceB[3]);
+    static const Model* drawnModel(Game& game, const Loose& prop);
     std::vector<Loose> loose_;
+    friend struct PropDynamicsTestAccess;
 };

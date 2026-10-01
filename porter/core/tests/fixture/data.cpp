@@ -8,5 +8,6 @@ unsigned char gGears[20 * 48] = {4, 5};
 unsigned char gCarCollisionEventsLow[12] = {6};
 unsigned char gCarCollisionEventsMed[12] = {7};
 unsigned char gCarCollisionEventsHigh[12] = {8};
+unsigned char gPropSfx[57 * 4] = {11, 12, 13};
 unsigned char TextColours[92] = {9, 10, 11};
 }

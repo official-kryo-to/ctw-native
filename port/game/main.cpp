@@ -52,7 +52,7 @@ int main(int argc, char** argv) {
     std::vector<XC> extraCars;
     float hour = -1;
     for (int i = 1; i < argc; ++i) {
-        if (!strcmp(argv[i], "--collision")) { TheGame().showCollision = true; continue; }
+        if (!strcmp(argv[i], "--collision")) { TheGame().showDebug = true; continue; }
         if (!strcmp(argv[i], "--trace")) { trace = true; continue; }
         const char* option = argv[i];
         int values = 1;

@@ -58,7 +58,7 @@ int main() {
     append(bytes, fixture.revAfterShift, sizeof fixture.revAfterShift);
     save(path, bytes);
     SoundTables sound;
-    check(sound.load(path.string()) && sound.gears[1].horn == 9, "sound fixture decodes");
+    check(sound.load(path.string()) && sound.gears[1].horn == 9 && !sound.hasPropSfx, "legacy sound fixture decodes without inventing prop samples");
     bytes.push_back(0);
     save(path, bytes);
     check(!sound.load(path.string()) && sound.gears[1].horn == 0, "extra sound data rejected and state cleared");
@@ -66,6 +66,17 @@ int main() {
     bytes[8 + 4] = 0;
     save(path, bytes);
     check(!sound.load(path.string()), "invalid event mode rejected");
+    bytes[8 + 4] = 2;
+    bytes[6] = '2';
+    fixture.propSfx[4] = {17, 91, 0};
+    append(bytes, fixture.propSfx, sizeof fixture.propSfx);
+    save(path, bytes);
+    check(sound.load(path.string()) && sound.hasPropSfx && sound.propSfx[4].sample == 17 && sound.propSfx[4].volume == 91,
+          "version 2 sound fixture retains the object's sample and volume mapping");
+    bytes.pop_back(); save(path, bytes);
+    check(!sound.load(path.string()) && !sound.hasPropSfx, "truncated prop mapping rejected and state cleared");
+    bytes.push_back(0); bytes[bytes.size() - sizeof fixture.propSfx + 2] = 128; save(path, bytes);
+    check(!sound.load(path.string()), "invalid prop volume rejected");
 
     GameplayTables gameFixture;
     for (int32_t& top : gameFixture.topRatio) top = 1;

@@ -30,12 +30,12 @@ private:
     unsigned texture_ = 0;
     int textureW_ = 0, textureH_ = 0;
     int selected_ = 0, playing_ = -1, volume_ = 8;
-    bool open_ = false, paused_ = false;
-    float carousel_ = 0;
+    bool open_ = false;
     uint32_t carUid_ = 0;
     void select(int station, Game& game);
     void cycle(int step, Game& game);
     void sync(Game& game);
+    void setOpen(bool open, Game& game);
     void remember();
     void volume(int step);
     void sprite(int id, float x, float y, float size = 1, float alpha = 1) const;

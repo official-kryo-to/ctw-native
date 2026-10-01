@@ -29,6 +29,8 @@ public:
     void doorEvent(const Vehicle& v, bool open);                 // cVehicle::OpenDoor / SetDoorClosed
     void collision(const Vehicle& v, int strength);              // cAudioManager::AddCollision
     int explosion(Game& game, const int32_t pos[3]);              // cExplosionBigVehicle::PlayScriptSfx
+    void propSmash(const int32_t pos[3], int effect);              // cAudioManager::AddPropCollision
+    void propSmash(const int32_t pos[3], int effect, int radius);
     bool horn = false;                                           // the player holds the horn
     bool ok() const { return !res_.data.empty(); }
 
@@ -55,6 +57,11 @@ private:
     void processEntity(Game& g, Entity& e, bool persistent);              // ProcessStandardSfx
     void carEngine(Game& g, Vehicle& v, Entity& e);                       // ProcessEntityTypeCar
     void playerCar(Game& g, Vehicle& v, Entity& e);                       // ProcessEntityTypePlayerCar
+    void playerPed(Game& g);                                            // unarmed ProcessEntityTypePlayerPed
+    Entity ped_;
+    Entity script_[8];   // original PlayScriptSfx pool: eight positional one-shots
+    int lastWalkFrame_ = -1;
+    bool firstFoot_ = true;
 
     // cSoundEvents state for the player's car (+0x18 .. +0x66)
     int state_ = 0, revs_ = 0, volA_ = 0, volB_ = 0, gear_ = 0, lastRpm_ = 0;
@@ -64,6 +71,7 @@ private:
     uint32_t lastMs_ = 0;
     uint32_t playerUid_ = 0;
     void stopSlots(Entity& e, bool bankOnly = false);
+    void stopLoops(Entity& e);
     friend struct SoundTestAccess;
 };
 

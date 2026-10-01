@@ -30,3 +30,4 @@ void Audio_SfxSet(int voice, float volume, float pan, float pitch);
 void Audio_SfxStop(int voice);
 bool Audio_SfxPlaying(int voice);
 void Audio_SetSfxVolume(float v);        // master 0..1
+void Audio_SetSfxPaused(bool paused);    // suspend voices without advancing their samples

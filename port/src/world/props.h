@@ -6,13 +6,13 @@
 // Placement: section 6 of each world.bin collision cell (cWorldSector +0x120), u32 count then 20-byte
 //   sPackedPropData {u16 prop, u16 kind, i16 heading, u16 state (runtime), i32 x, y, z}.
 // Definitions: gGameDir[16] (cDynamicPropManager::LoadPropsData), one per prop until 0xDEADBEEF:
-//   u16 model (resource id), u16 broken model (0xFFFF = none), u16 0xDEAD, u8 flags, u8 shape count, then shapes
+//   u16 model (resource id), u16 broken model (0xFFFF = keep model, 0xFFFE = remove), u16 0xDEAD, u8 flags, u8 shape count, then shapes
 //   {u32 type, ...}: 1 box {offset x y z (bottom centre), size x y z}, 2 cylinder {offset (base), radius, height},
 //   3 sphere {offset (centre), radius}, 4 mesh header, 5 mesh vertex, 6 mesh triangle (16 bytes each).
 // Lights: gGameDir[19] (cLightManager::LoadDynamicLightData), 28 bytes each {u16 prop, u8 type, u8,
 //   offset x y z, u32 size, u32 RGB555 colour, u32}; AddPropLights adds every entry whose prop matches.
-// Kinds (ePropDef, the `kind` of a placement): gGameDir[17], 16 bytes each until 0xDEAD at +14 {u8 smash type
-//   (which of cDynamicProp::Smash1..4), u8, u8 health, u8 x5 flags, i16, i16 smash force, i16 uproot force, 0xDEAD};
+// Kinds (ePropDef, the `kind` of a placement): gGameDir[17], 16 bytes each until 0xDEAD at +14 {u8 hit effect,
+//   u8 smash effect (selects a case in Smash1..4 and gPropSfx), u8 health, u8 x5 flags, i16, i16 smash force, i16 uproot force, 0xDEAD};
 //   forces are 20.12, negative = never. cDynamicProp::ApplyWorldForce: f = |force| * 0x111 >> 12; the prop is
 //   uprooted when f >= uproot force and smashed when f >= smash force.
 // All values are 20.12 fixed point; a prop is rotated about z by its heading (65536 = full turn).
@@ -38,10 +38,20 @@ public:
     static void drawModel(const Model& m, const float matrix[16]);   // any model at a column-major matrix
     float radius(int prop);                                // for visibility tests, world units
     const Model* brokenModel(int prop);                    // the model cDynamicProp::SwapModel uses, or nullptr
-    struct Kind { uint8_t smashType, health; float smashForce, uprootForce; };   // forces < 0: never
+    const Model* smashedModel(int prop);                   // SwapModel's replacement, retention or removal
+    struct Kind {   // forces < 0: never; preserve the old fields and their order
+        union { uint8_t hitEffect; uint8_t smashType; };   // smashType was the old name for the hit effect
+        uint8_t health;
+        float smashForce, uprootForce;
+        uint8_t smashEffect = 0;
+        int32_t mass = 4096;               // kind +8; -4096 is infinite mass
+        bool planar = false;              // kind +7: keep the object upright
+    };
     const Kind* kind(int k) const { return k >= 0 && k < (int)kinds_.size() ? &kinds_[k] : nullptr; }
     // Footprint for impact tests: radius around the position and height, world units (0 = not solid).
     void footprint(int prop, float& radius, float& height) const;
+    struct Physics { int32_t half[3], centre[3], cg[3]; };
+    bool physics(int prop, Physics& out) const;  // SetupDynamimcPropData's first primitive, local Q12
 private:
     struct Shape { uint32_t type; int32_t v[6]; };
     struct Def { uint16_t model, broken; uint8_t flags; std::vector<Shape> shapes; };

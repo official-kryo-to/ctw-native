@@ -23,7 +23,7 @@ std::istringstream openTable(const std::string& path) {
 }
 
 // The supported host is little-endian x64. Assert the disk record layout used by setup.
-static_assert(sizeof(ZoneSetup) == 40 && sizeof(EventInfo) == 16 && sizeof(GearSound) == 48);
+static_assert(sizeof(ZoneSetup) == 40 && sizeof(EventInfo) == 16 && sizeof(GearSound) == 48 && sizeof(SoundTables::PropSfx) == 4);
 
 bool PopulationTables::load(const std::string& path) {
     zones.clear();
@@ -54,10 +54,16 @@ bool SoundTables::load(const std::string& path) {
     *this = SoundTables{};
     std::istringstream file = openTable(path);
     SoundTables next;
-    if (!magic(file, "CTWSND1") || !read(file, next.events, sizeof next.events) ||
+    char header[8];
+    if (!read(file, header, sizeof header)) return false;
+    next.hasPropSfx = std::memcmp(header, "CTWSND2", 8) == 0;
+    if ((!next.hasPropSfx && std::memcmp(header, "CTWSND1", 8) != 0) || !read(file, next.events, sizeof next.events) ||
             !read(file, next.gears, sizeof next.gears) || !read(file, next.collisionLow, sizeof next.collisionLow) ||
             !read(file, next.collisionMed, sizeof next.collisionMed) || !read(file, next.collisionHigh, sizeof next.collisionHigh) ||
-            !read(file, next.revAfterShift, sizeof next.revAfterShift) || !end(file)) return false;
+            !read(file, next.revAfterShift, sizeof next.revAfterShift) ||
+            (next.hasPropSfx && !read(file, next.propSfx, sizeof next.propSfx)) || !end(file)) return false;
+    for (const auto& prop : next.propSfx)
+        if (prop.volume > 127) return false;
     for (const EventInfo& event : next.events)
         if (event.bank < 0 || event.bank > 3 || (event.mode != 1 && event.mode != 2) ||
                 event.pan < -1 || event.pan > 127) return false;
