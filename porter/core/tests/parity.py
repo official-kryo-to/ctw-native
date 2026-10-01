@@ -30,7 +30,10 @@ else:
     text = lambda v: 'null' if v is None else str(v)
     for name in Path(sys.argv[3]).read_text().splitlines():
         try:
-            for call, regs, stack in game.constant_calls(name):
+            # Rust returns a Result<Vec<_>>: a failed function has no partial call list. Collect before printing
+            # so a late unreadable constant load is compared as the same failure on both sides.
+            calls = list(game.constant_calls(name))
+            for call, regs, stack in calls:
                 r = sorted(f'{k}={text(v)}' for k, v in regs.items())
                 s = sorted(f'{k}={text(v)}' for k, v in stack.items())
                 print(f"{name} -> {call} | {','.join(r)} | {','.join(s)}")

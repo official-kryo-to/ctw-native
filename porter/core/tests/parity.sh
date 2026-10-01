@@ -27,10 +27,15 @@ PY
 cp "$here"/fixture/* "$work/"
 fail=0
 compare() {  # compare <label> <python output> <rust output>
-    if [ "$(sed 's/^ERROR.*/ERROR/' "$2")" = "$(sed 's/^ERROR.*/ERROR/; s/ ERROR .*/ ERROR/' "$3")" ]; then
+    sed 's/^ERROR.*/ERROR/; s/ ERROR .*/ ERROR/' "$2" > "$work/py.normalized"
+    sed 's/^ERROR.*/ERROR/; s/ ERROR .*/ ERROR/' "$3" > "$work/rs.normalized"
+    if cmp -s "$work/py.normalized" "$work/rs.normalized"; then
         echo "same: $1 ($(wc -l < "$2") lines)"
     else
-        echo "DIFFERENT: $1"; diff "$2" "$3" | head -5 | cut -c1-200; fail=1
+        echo "DIFFERENT: $1"
+        # diff returns 1 for a mismatch; do not let pipefail stop the remaining checks or hide the final result.
+        diff -U2 "$work/py.normalized" "$work/rs.normalized" | head -25 | cut -c1-200 || true
+        fail=1
     fi
 }
 for opt in O1 O2 Os; do
