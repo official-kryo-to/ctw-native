@@ -30,6 +30,7 @@ public:
     void collision(const Vehicle& v, int strength);              // cAudioManager::AddCollision
     int explosion(Game& game, const int32_t pos[3]);              // cExplosionBigVehicle::PlayScriptSfx
     void propSmash(const int32_t pos[3], int effect);              // cAudioManager::AddPropCollision
+    void propSmash(const int32_t pos[3], int effect, int radius);
     bool horn = false;                                           // the player holds the horn
     bool ok() const { return !res_.data.empty(); }
 

@@ -9,12 +9,13 @@ compatibility with the original.
   street furniture, street lights, steam vents and fountains.
 - **On foot:** the player character with movement, sprinting and collision.
 - **Vehicles:** cars and bikes with the game's handling, getting in and out, damage, lights, skidmarks and sounds.
-  Street furniture gets knocked over or swaps to its original broken model; anchored remnants stay at their placement.
+  Street furniture uses the original mass, inertia, force thresholds and Q12 rigid-body integration. Loose props
+  tumble, collide with the world, cars and other props, and settle; anchored broken remnants keep their placement.
 - **Traffic:** parked cars and cars driving the roads.
 - **Sound:** engines, horns, doors, impacts, object smashing, explosions, animation-timed player footsteps and music.
-- **Radio:** the original station artwork, car-specific tuning and volume controls. Press **R** in a car;
-  use Left/Right or the mouse wheel to tune, Up/Down for volume, and R/Esc to return to driving. Stations cannot
-  be paused; select the radio-off station to switch it off.
+- **Radio:** the original station artwork, car-specific tuning and volume controls in a compact PC overlay.
+  Press **R** in a car; use Left/Right or the mouse wheel to tune, Up/Down for volume, and R/Esc to dismiss.
+  The world and broadcast keep running, and WASD still drives. Select the radio-off station to switch it off.
 - **Mods:** the mod menu (F4), texture mods and code mods. See the [modding guide](ctw-modkit/README.md).
 - **Tools:** the Porter, which makes the game from your APK, and a showcase viewer for the game's assets.
 
@@ -25,9 +26,9 @@ The original gameplay HUD is not ported yet. Mods can still draw their own UI.
 
 - Missions, save games, combat, wanted levels and pedestrians.
 - Traffic is cars only.
-- Loose street furniture uses its rotated model geometry to stay above terrain, but its impact forces and tumbling
-  still approximate the original rigid-body integrator. It does not collide with other moving objects. Debris,
-  object-specific explosions and splash effects remain unported.
+- Object debris, object-specific explosions, buoyancy and splash effects remain unported.
+- The PC radio overlay deliberately replaces the original full-screen PDA layout and touch buttons; the rest of
+  the game's original UI remains work in progress.
 
 ## Supported copy
 

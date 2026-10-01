@@ -31,7 +31,6 @@ private:
     int textureW_ = 0, textureH_ = 0;
     int selected_ = 0, playing_ = -1, volume_ = 8;
     bool open_ = false;
-    float carousel_ = 0;
     uint32_t carUid_ = 0;
     void select(int station, Game& game);
     void cycle(int step, Game& game);

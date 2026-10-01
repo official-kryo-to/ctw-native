@@ -63,12 +63,35 @@ bool PropLibrary::load() {
             uint16_t end;
             memcpy(&end, &d[at + 14], 2);
             if (end != 0xDEAD) break;
-            int16_t smash, uproot;
+            int16_t smash, uproot, mass;
+            memcpy(&mass, &d[at + 8], 2);
             memcpy(&smash, &d[at + 10], 2);
             memcpy(&uproot, &d[at + 12], 2);
-            kinds_.push_back({d[at], d[at + 2], smash / 4096.f, uproot / 4096.f, d[at + 1]});
+            kinds_.push_back({d[at], d[at + 2], smash / 4096.f, uproot / 4096.f, d[at + 1], mass, d[at + 7] != 0});
         }
     return !defs_.empty();
+}
+
+bool PropLibrary::physics(int prop, Physics& out) const {
+    out = {};
+    if (prop < 0 || prop >= (int)defs_.size() || defs_[prop].shapes.empty()) return false;
+    const Shape& s = defs_[prop].shapes[0];
+    if (s.type < 1 || s.type > 3) return false;  // mesh-only definitions have no dynamic primitive
+    for (int i = 0; i < 3; ++i) out.centre[i] = out.cg[i] = s.v[i];
+    if (s.type == 1) {
+        for (int i = 0; i < 3; ++i) out.half[i] = s.v[i + 3] >> 1;
+        out.centre[2] += s.v[5] / 2;
+        out.cg[2] = out.centre[2];
+    } else if (s.type == 2) {
+        out.half[0] = out.half[1] = s.v[3];
+        out.half[2] = s.v[4] >> 1;
+        out.centre[2] += s.v[4] / 2;
+        out.cg[2] = out.centre[2];
+    } else {
+        // The original passes the sphere radius as each full box dimension.
+        for (int i = 0; i < 3; ++i) out.half[i] = s.v[3] >> 1;
+    }
+    return true;
 }
 
 const Model* PropLibrary::brokenModel(int prop) {

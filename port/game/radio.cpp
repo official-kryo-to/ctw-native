@@ -66,6 +66,7 @@ bool Radio::init(const std::string& dir) {
         if (def.stream >= 14) {
             station.name = tables_.streams[def.stream];
             auto dot = station.name.rfind('.'); if (dot != std::string::npos) station.name.resize(dot);
+            if (station.name == "Chinese") station.name = "SinoWav FM"; // Name on the original station artwork.
             station.label = station.name;
         }
         if (station.duration > 0) station.position = Rand32Critical(1000000) / 1000000.0 * std::max(1.0, station.duration - 15);
@@ -75,7 +76,6 @@ bool Radio::init(const std::string& dir) {
     stations_.push_back(off);
     selected_ = 0; playing_ = -1; volume_ = 8; open_ = false; carUid_ = 0;
     loadSave();
-    carousel_ = (float)selected_;
     Audio_Init();
     volume(0);
     return true;
@@ -96,7 +96,7 @@ void Radio::shutdown() {
 
 void Radio::sync(Game& game) {
     bool enabled = inCar(game);
-    Audio_SetSfxPaused(open_ && enabled);
+    Audio_SetSfxPaused(false);
     if (!enabled || stations_.empty() || !stations_[selected_].available || stations_[selected_].stream < 0) {
         remember(); Audio_StopMusic(); playing_ = -1; return;
     }
@@ -123,15 +123,11 @@ void Radio::update(Game& game) {
     if (uid && uid != carUid_) {
         int& saved = game.cars[game.playerCar].radioStation;
         if (saved < 0 || saved >= (int)stations_.size()) saved = selected_;
-        selected_ = saved; carousel_ = (float)selected_;
+        selected_ = saved;
     }
     carUid_ = uid;
     sync(game);
     if (playing_ >= 0 && Audio_MusicPlaying()) stations_[playing_].listened += 1.0 / 30;
-    float distance = selected_ - carousel_, count = (float)stations_.size();
-    if (distance > count / 2) distance -= count;
-    if (distance < -count / 2) distance += count;
-    carousel_ = std::fmod(carousel_ + distance * 0.25f + count, count);
 }
 
 void Radio::select(int index, Game& game) {
@@ -169,11 +165,11 @@ bool Radio::key(int k, Game& game) {
         if (k == SDL_SCANCODE_RIGHTBRACKET) { cycle(1, game); return true; }
         return false;
     }
-    if (k == SDL_SCANCODE_LEFT || k == SDL_SCANCODE_A) cycle(-1, game);
-    if (k == SDL_SCANCODE_RIGHT || k == SDL_SCANCODE_D) cycle(1, game);
-    if (k == SDL_SCANCODE_UP || k == SDL_SCANCODE_EQUALS) volume(1);
-    if (k == SDL_SCANCODE_DOWN || k == SDL_SCANCODE_MINUS) volume(-1);
-    return true;
+    if (k == SDL_SCANCODE_LEFT) { cycle(-1, game); return true; }
+    if (k == SDL_SCANCODE_RIGHT) { cycle(1, game); return true; }
+    if (k == SDL_SCANCODE_UP || k == SDL_SCANCODE_EQUALS) { volume(1); return true; }
+    if (k == SDL_SCANCODE_DOWN || k == SDL_SCANCODE_MINUS) { volume(-1); return true; }
+    return false;
 }
 
 void Radio::sprite(int id, float x, float y, float scale, float alpha) const {
@@ -193,47 +189,40 @@ void Radio::sprite(int id, float x, float y, float scale, float alpha) const {
 void Radio::render(int W, int H, Game& game) {
     if (!open_ || stations_.empty() || W <= 0 || H <= 0) return;
     if (!inCar(game)) { setOpen(false, game); return; }
-    float scale = std::min(W / 480.f, H / 448.f), ox = (W - 480 * scale) / 2, oy = (H - 448 * scale) / 2;
-    int mx, my; Host_GetMouse(&mx, &my);
-    float x = (mx - ox) / scale, y = (my - oy) / scale;
+    const float scale = std::min(W / 480.f, H / 448.f);
+    const float ox = (W - 360 * scale) / 2, oy = 20 * scale;
     while (int notch = Host_PopWheel()) cycle(notch > 0 ? -1 : 1, game);
-    if ((Host_PopClicks() & 1) && x >= 0 && x <= 480 && y >= 0 && y <= 448) {
-        if (y >= 270 && y <= 335 && x >= 160 && x <= 207) volume(-1);
-        else if (y >= 270 && y <= 335 && x >= 270 && x <= 319) volume(1);
-        else if (y >= 70 && y <= 220) { if (x < 170) cycle(-1, game); else if (x > 310) cycle(1, game); }
-        else if (y >= 396) setOpen(false, game);
-    }
-    // This screen replaces the world draw. Clear the colour buffer on every frame, including while animating.
-    // HUD colours are RRGGBBAA, so FF000000 was transparent red and retained all previous station icons.
-    glClearColor(0, 0, 0, 1);
-    glClear(GL_COLOR_BUFFER_BIT);
-    Hud_Rect(0, 0, (float)W, (float)H, 0x000000FF);
+    Host_PopClicks();
+    // PC selector: original artwork and labels over the freshly rendered world. Each logo owns a fixed slot,
+    // so rapid tuning cannot pile up icons; touch controls and the fullscreen PDA background are omitted.
     glPushMatrix(); glTranslatef(ox, oy, 0); glScalef(scale, scale, 1);
-    Hud_Text(240 - Hud_TextWidth("Radio", 1.5f) / 2, 22, 1.5f, 0xFFFFFFFF, "Radio");
-    const float count = (float)stations_.size();
-    for (size_t i = 0; i < stations_.size(); ++i) {
-        float d = (float)i - carousel_;
-        if (d > count / 2) d -= count;
-        if (d < -count / 2) d += count;
-        float px = 240 - 63 + d * 167;
-        if (px > 480 || px < -127) continue;
-        float alpha = std::max(0.f, 1 - std::abs(d * 167) / 240);
-        if (!stations_[i].available) alpha *= 0.3f;
-        sprite(stations_[i].icon, px, 85, 1, alpha);
+    Hud_Rect(0, 0, 360, 112, 0x00000090);
+    const int count = (int)stations_.size();
+    auto neighbour = [&](int step) {
+        int index = selected_;
+        for (int i = 0; i < count; ++i) {
+            index = (index + step + count) % count;
+            if (stations_[index].available) return index;
+        }
+        return selected_;
+    };
+    for (int slot = -1; slot <= 1; ++slot) {
+        const int index = slot ? neighbour(slot) : selected_;
+        if (slot && index == selected_) continue;
+        const auto& station = stations_[index];
+        const float size = slot ? 0.35f : 0.5f;
+        auto def = std::find_if(sprites_.sprites().begin(), sprites_.sprites().end(),
+                               [&](const SpriteDef& s) { return s.id == station.icon; });
+        if (def == sprites_.sprites().end()) continue;
+        sprite(station.icon, 180 + slot * 96.f - def->w * size / 2,
+               38 - def->h * size / 2, size, slot ? 0.45f : 1.f);
     }
     const Station& s = stations_[selected_];
-    float labelScale = std::min(1.f, 440.f / std::max(1.f, Hud_TextWidth(s.label, 1)));
-    Hud_Text(240 - Hud_TextWidth(s.label, labelScale) / 2, 222, labelScale, 0xFFFFFFFF, s.label);
-    sprite(17, 181, 246, 2.35f);
-    if (s.stream >= 0 && s.listened > 0) {
-        int rank = 0; for (const auto& other : stations_) if (other.listened > s.listened) ++rank;
-        for (int i = 0; i < std::max(0, 5 - rank); ++i) sprite(7, 273 - i * 26.f, 250);
-    }
-    sprite(13, 176, 288); sprite(15, 272, 288); sprite(20, 208, 270);
-    if (volume_ > 0) sprite(tables_.volumeSprites[volume_ - 1], 208, 270);
-    sprite(1, 110, 139); sprite(2, 357, 139);
-    Hud_Rect(0, 396, 480, 52, 0x202020FF);
-    Hud_Text(240 - Hud_TextWidth("Back", 1) / 2, 414, 1, 0xFFFFFFFF, "Back");
+    const std::string& label = s.name.empty() ? s.label : s.name;
+    const float labelScale = std::min(0.65f, 336.f / std::max(1.f, Hud_TextWidth(label, 1)));
+    Hud_Text(180 - Hud_TextWidth(label, labelScale) / 2, 73, labelScale, 0xFFFFFFFF, label);
+    sprite(20, 166, 91, 0.3f);
+    if (volume_ > 0) sprite(tables_.volumeSprites[volume_ - 1], 166, 91, 0.3f);
     glPopMatrix();
 }
 

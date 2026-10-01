@@ -468,7 +468,6 @@ void Game::updateDeath() {
 
 void Game::tick() {
     radio.update(*this);
-    if (radio.open()) return;   // the original PDA radio app suspends the world simulation
     ++frame;
     if (!player.dead && deathFrames_ >= 72 && deathFrames_ < 84) ++deathFrames_;
     player.speedScale = speedScale;
@@ -502,9 +501,11 @@ void Game::tick() {
         Vehicle::Controls dc;
         if (Plugins_GameInput()) {
             const Uint8* ks = SDL_GetKeyboardState(nullptr);
-            bool gas = ks[SDL_SCANCODE_W] || ks[SDL_SCANCODE_UP], brake = ks[SDL_SCANCODE_S] || ks[SDL_SCANCODE_DOWN];
+            bool gas = ks[SDL_SCANCODE_W] || (!radio.open() && ks[SDL_SCANCODE_UP]);
+            bool brake = ks[SDL_SCANCODE_S] || (!radio.open() && ks[SDL_SCANCODE_DOWN]);
             if (gas != brake) dc.throttle = gas ? 0x1000 : -0x1000;
-            bool l = ks[SDL_SCANCODE_A] || ks[SDL_SCANCODE_LEFT], r = ks[SDL_SCANCODE_D] || ks[SDL_SCANCODE_RIGHT];
+            bool l = ks[SDL_SCANCODE_A] || (!radio.open() && ks[SDL_SCANCODE_LEFT]);
+            bool r = ks[SDL_SCANCODE_D] || (!radio.open() && ks[SDL_SCANCODE_RIGHT]);
             if (l != r) dc.steer = l ? -0x1000 : 0x1000;
             dc.handbrake = ks[SDL_SCANCODE_SPACE];
             TheSound().horn = ks[SDL_SCANCODE_H] || ks[SDL_SCANCODE_LALT];
@@ -623,12 +624,6 @@ void Game::tick() {
 }
 
 void Game::render(int W, int H) {
-    if (radio.open()) {
-        Hud_Begin(W, H);
-        radio.render(W, H, *this);
-        Hud_End();
-        return;
-    }
     WorldCamera cam;
     viewCamera(cam);
     if (freeCam.on) world.stream(cam.eye[0], cam.eye[1], 2);   // also while the game is paused
@@ -681,6 +676,7 @@ void Game::render(int W, int H) {
         int alpha = deathFrames_ < 72 ? (deathFrames_ - 60) * 255 / 12 : (84 - deathFrames_) * 255 / 12;
         Hud_Rect(0, 0, (float)W, (float)H, (uint32_t)alpha);   // RRGGBBAA: black with the fade alpha
     }
+    radio.render(W, H, *this);
     Hud_End();
 }
 
@@ -715,7 +711,7 @@ void Game::run() {
 
 bool Game::key(int k) {
     if (k == SDL_SCANCODE_F3) { showDebug = !showDebug; return true; }
-    if (radio.open()) return radio.key(k, *this);
+    if (radio.open() && radio.key(k, *this)) return true;
     if (Plugins_Key(k)) return true;
     return Plugins_GameInput() && radio.key(k, *this);
 }

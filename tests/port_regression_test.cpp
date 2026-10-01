@@ -154,6 +154,7 @@ struct CollisionTestAccess {
         Collision::Prop p{}; p.x = -2475 * 4096; p.y = -1475 * 4096; p.z = height;
         g.player.pos[0] = p.x; g.player.pos[1] = p.y; g.player.pos[2] = p.z;
         auto cell = std::make_unique<Collision::Cell>(); cell->loaded = true;
+        g.collision.world_.assign(10000*4,0);
         cell->groundMap.assign(400, 0x55); // synthetic land
         if (height > 0) cell->boxes.push_back({p.x,p.y,height/2,24*4096,24*4096,height/2,0,0});
         cell->props.push_back(p);
@@ -166,6 +167,11 @@ struct CollisionTestAccess {
         g.collision.cells_[2020] = std::move(cell);
     }
     static bool solid(const Game& g) { return g.collision.cells_.at(2020)->propShapes[0].solid; }
+    static void wall(Game& g) {
+        const auto& p=g.collision.cells_.at(2020)->props[0];
+        g.collision.setPropSolid(20,20,0,false);
+        g.collision.cells_.at(2020)->boxes.push_back({p.x+5*4096,p.y,6*4096,4096,12*4096,6*4096,0,0});
+    }
     static void run() {
         Collision col;
         int32_t p[3] = {-0xDAC000 + 20 * 0x32000 - 500, -0x9C4000 + 20 * 0x32000 + 1000, 4096};
@@ -202,6 +208,7 @@ struct PropTestAccess {
         g.props.models_[100] = cuboid(16, 0.25f);
         g.props.models_[101] = cuboid(4, 0.25f);
     }
+    static void movable(Game& g) { g.props.kinds_[0].smashForce=-1; g.props.kinds_[0].uprootForce=.1f; }
     static void run() {
         PropLibrary lib;
         PropLibrary::Def def{};
@@ -232,55 +239,126 @@ struct PropTestAccess {
 };
 
 struct PropDynamicsTestAccess {
-    static float lowest(const PropDynamics::Loose& l) {
-        float M[16]; PropDynamics::matrix(l, M);
-        float z = 1e9f;
-        for (const auto& p : l.support) z = std::min(z, M[2]*p[0] + M[6]*p[1] + M[10]*p[2] + l.pos[2]);
+    static int32_t lowest(const RigidBody& body) {
+        int32_t vertices[8][3]; body.bboxVerts(vertices);
+        int32_t z = INT32_MAX;
+        for (auto& v : vertices) z = std::min(z, v[2]);
         return z;
     }
     static void run() {
-        const int32_t velocity[3] = {30*4096,0,0};
-        Game g; PropTestAccess::furniture(g, 36); CollisionTestAccess::propScene(g);
+        const int32_t force[3] = {200*4096,0,0};
+        Game g; PropTestAccess::furniture(g,36); CollisionTestAccess::propScene(g);
         auto& dynamics = g.propDynamics;
-        dynamics.knock(g, 20,20,0, velocity, true,false);
-        auto& anchored = dynamics.loose_[0];
-        check(anchored.resting && anchored.tilt == 0 && anchored.support.size() == 8,
-              "anchored replacement retains its model's node-transformed geometry without a made-up fall");
-        const float z = anchored.pos[2];
-        for (int i = 0; i < 90; ++i) dynamics.update(g);
-        check(anchored.pos[2] == z && anchored.tilt == 0, "anchored broken model stays at the original placement");
+        auto anchored = dynamics.makeBody(g,20,20,0);
+        const int32_t point[3] = {anchored.prop.x,anchored.prop.y,anchored.prop.z+4096};
+        dynamics.applyForce(g,anchored,point,force);
+        check(anchored.broken && !anchored.uprooted && !anchored.body.active(),
+              "smashing alone preserves anchored remnants instead of giving them a made-up impulse");
+        dynamics.loose_.push_back(anchored);
+        const int32_t z = anchored.body.pos[2];
+        for (int i=0;i<90;++i) dynamics.update(g);
+        check(dynamics.loose_[0].body.pos[2] == z, "anchored broken model keeps its placement");
         check(!CollisionTestAccess::solid(g) && (*g.collision.props(20,20))[0].state != 0,
-              "broken prop loses the standing collision and light/render state");
+              "broken prop loses its standing collision and light/render state");
+        check(PropDynamics::drawnModel(g,anchored) == g.props.brokenModel(0), "broken-model state is preserved");
 
-        Game lamp; PropTestAccess::furniture(lamp, 7, 0xFFFF); CollisionTestAccess::propScene(lamp);
-        lamp.propDynamics.knock(lamp,20,20,0,velocity,true,false);
-        auto& falling = lamp.propDynamics.loose_[0];
-        float initialTilt = falling.tilt;
-        for (int i = 0; i < 60; ++i) lamp.propDynamics.update(lamp);
-        check(falling.tilt == initialTilt && falling.fallDelay == 0, "lamp preserves the original 60-frame delay before falling");
+        Game lamp; PropTestAccess::furniture(lamp,7,0xFFFF); CollisionTestAccess::propScene(lamp);
+        auto falling = lamp.propDynamics.makeBody(lamp,20,20,0);
+        int32_t at[3]={falling.prop.x,falling.prop.y,falling.prop.z+4096};
+        lamp.propDynamics.applyForce(lamp,falling,at,force);
+        lamp.propDynamics.loose_.push_back(falling);
+        for (int i=0;i<7;++i) lamp.propDynamics.update(lamp);
+        auto& post = lamp.propDynamics.loose_[0];
+        check(post.lampTimer == 53 && !post.body.active(), "lamp bends during the original countdown before enabling physics at 53");
         lamp.propDynamics.update(lamp);
-        check(falling.tilt > initialTilt, "lamp starts falling after its delay");
+        check(post.lampTimer == 52 && post.body.active(), "lamp enters full physics at the original countdown phase");
+        for (int i=0;i<60;++i) lamp.propDynamics.update(lamp);
+        check(!post.lampTimer && !post.body.active(), "lamp fall window ends instead of integrating forever");
 
-        Game loose; PropTestAccess::furniture(loose, 0, 0xFFFF); CollisionTestAccess::propScene(loose);
-        loose.propDynamics.knock(loose,20,20,0,velocity,false,true);
-        auto& object = loose.propDynamics.loose_[0];
-        object.prop.heading = 0x2000; object.tilt = object.maxTilt; object.tiltVel = 0;
-        object.vel[0] = object.vel[1] = object.vel[2] = 0;
-        loose.propDynamics.update(loose);
-        check(lowest(object) >= -0.001f && lowest(object) < 0.002f && object.pos[2] > 0.4f,
-              "lying rotated object rests on its geometry rather than clipping half its width into the road");
-        check(object.resting, "geometry-supported loose object can settle above its origin");
+        PropLibrary::Physics shape{}; shape.half[0]=2048; shape.half[1]=4096; shape.half[2]=8192;
+        shape.centre[2]=shape.cg[2]=8192;
+        Collision::Prop placement{}; placement.z=10*4096;
+        RigidBody light,heavy;
+        light.init(placement,shape,4096,false); heavy.init(placement,shape,8192,false);
+        light.setToPhysics(true); heavy.setToPhysics(true);
+        const int32_t push[3]={30*4096,0,0}; int32_t cg[3]; light.worldCG(cg);
+        light.applyWorldForce(cg,push); heavy.applyWorldForce(cg,push);
+        light.recalcKinematics(); heavy.recalcKinematics();
+        check(light.vel[0] == 4080 && heavy.vel[0] == 2040, "original reciprocal mass and 17/512 frame step control acceleration");
+        int32_t offset[3]={cg[0]+4096,cg[1]+4096,cg[2]+4096};
+        const int32_t twist[3]={0,40*4096,20*4096};
+        light.applyWorldForce(offset,twist); light.recalcKinematics();
+        check(light.angVel[0] && light.angVel[1] && light.angVel[2], "off-centre forces rotate the object about all three axes");
+        const int32_t before=light.pos[0]; light.integrateStep(4096);
+        check(light.pos[0] != before, "rigid-body velocity moves its centre of gravity");
+        RigidBody fixed; fixed.init(placement,shape,-4096,false); fixed.setToPhysics(true);
+        fixed.applyWorldForce(offset,twist); fixed.recalcKinematics();
+        check(!fixed.active() && fixed.vel[0] == 0, "infinite-mass props cannot be uprooted by ordinary forces");
+        RigidBody planar; planar.init(placement,shape,4096,true); planar.setToPhysics(true);
+        planar.angVel[0]=planar.angVel[1]=planar.angVel[2]=4096;
+        planar.integrateStep(4096); planar.damp();
+        check(planar.up[0] == 0 && planar.up[1] == 0 && planar.angVel[0] == 0 && planar.angVel[1] == 0 && planar.angVel[2] != 0,
+              "kind's planar flag preserves upright props while allowing yaw");
+        light.vel[0]=1000*4096; light.recalcKinematics();
+        check(light.speed() < 90*4096, "dynamic prop speed uses the original cap");
 
-        Game bridge; PropTestAccess::furniture(bridge, 0); CollisionTestAccess::propScene(bridge, 3*4096);
-        bridge.propDynamics.knock(bridge,20,20,0,velocity,true,true);
-        auto& remnant = bridge.propDynamics.loose_[0];
-        remnant.tilt = remnant.maxTilt; remnant.tiltVel = 0;
-        remnant.vel[0] = remnant.vel[1] = 0; remnant.vel[2] = -120;
-        bridge.propDynamics.update(bridge);
-        check(lowest(remnant) >= 3.f - 0.001f && lowest(remnant) < 3.002f,
-              "fast falling broken geometry stays on the raised road instead of tunnelling below it");
-        check(PropDynamics::drawnModel(bridge,remnant) == bridge.props.brokenModel(0),
-              "ground support and rendering use the same broken model");
+        RigidBody rotation; rotation.init(placement,shape,4096,false); rotation.setToPhysics(true);
+        const int32_t quaternion[4]={100,-200,300,4079},angular[3]={4096,-2048,1024};
+        const int32_t centre[3]={12345,-23456,34567},velocity[3]={4096,-8192,12288};
+        std::copy(quaternion,quaternion+4,rotation.q_); std::copy(angular,angular+3,rotation.angVel);
+        std::copy(centre,centre+3,rotation.cgWorld_); std::copy(velocity,velocity+3,rotation.vel);
+        rotation.integrateStep(4096);
+        const int32_t expectedQuat[4]={169,-230,319,4073},expectedCG[3]={12481,-23728,34975};
+        check(std::equal(rotation.q_,rotation.q_+4,expectedQuat) && std::equal(rotation.cgWorld_,rotation.cgWorld_+3,expectedCG),
+              "quaternion normalisation and Q12 frame arithmetic retain original numerical results");
+
+        Game bridge; PropTestAccess::furniture(bridge,0,0xFFFF); CollisionTestAccess::propScene(bridge,3*4096);
+        placement.x=bridge.player.pos[0]; placement.y=bridge.player.pos[1]; placement.z=8*4096;
+        RigidBody body; body.init(placement,shape,4096,false);
+        const int32_t axis[3]={0,4096,0}; body.rotate(axis,0x4000); body.setToPhysics(true); body.vel[2]=-80*4096;
+        bool roadContact=false;
+        for (int i=0;i<4;++i) { body.process(bridge.collision); roadContact |= body.contact(); }
+        check(lowest(body) >= 3*4096-16, "swept box corners prevent fast falls through an elevated road");
+        check(roadContact, "raised-road collision is reported to settling logic");
+
+        Game wall; PropTestAccess::furniture(wall,0,0xFFFF); CollisionTestAccess::propScene(wall);
+        CollisionTestAccess::wall(wall);
+        placement.x=wall.player.pos[0]; placement.y=wall.player.pos[1]; placement.z=3*4096;
+        RigidBody sliding; sliding.init(placement,shape,4096,false); sliding.setToPhysics(true); sliding.vel[0]=80*4096;
+        bool wallContact=false;
+        for(int i=0;i<6;++i) {
+            sliding.process(wall.collision); wallContact |= sliding.contact();
+            int32_t vertices[8][3]; sliding.bboxVerts(vertices);
+            for(auto& v:vertices) check(v[0] <= placement.x+4*4096+16, "fast prop remains on the approach side of a wall");
+        }
+        check(wallContact, "rigid prop hits world geometry on horizontal axes as well as the ground");
+
+        Game impacts; PropTestAccess::furniture(impacts,0,0xFFFF); CollisionTestAccess::propScene(impacts);
+        PropTestAccess::movable(impacts);
+        auto prop=impacts.propDynamics.makeBody(impacts,20,20,0);
+        VehicleInfo info{};
+        auto put16=[&](int off,int v){info.raw[off]=(uint8_t)v;info.raw[off+1]=(uint8_t)(v>>8);};
+        put16(0x28,4096); put16(0x2A,8192); put16(0x2C,4096);
+        const int32_t mass=2*4096; std::memcpy(info.raw+0x50,&mass,4);
+        int32_t startPos[3]={prop.prop.x-4096,prop.prop.y,0};
+        Vehicle car; car.init(info,0,startPos,0,0);
+        car.vel[0]=-20*4096; car.vel[1]=0;
+        impacts.propDynamics.hit(impacts,car,prop);
+        check(!prop.uprooted, "motion away from a prop cannot break it using total vehicle speed");
+        car.vel[0]=20*4096; car.vel[1]=0;
+        check(impacts.propDynamics.hit(impacts,car,prop) && prop.uprooted && prop.body.active(),
+              "contact impulse uproots the prop and activates full rigid-body physics");
+        check(car.vel[0] < 20*4096 && prop.body.vel[0] > 0, "car and loose prop exchange reciprocal collision impulses");
+
+        auto moving=impacts.propDynamics.makeBody(impacts,20,20,0),standing=moving;
+        moving.uprooted=true; moving.body.setToPhysics(true);
+        moving.body.cgWorld_[0]-=4096; moving.body.syncFromIntegrator(); moving.body.vel[0]=20*4096;
+        check(impacts.propDynamics.hit(impacts,moving,standing) && standing.uprooted && standing.body.active(),
+              "loose furniture can uproot another prop instead of passing through it");
+        check(moving.body.vel[0] < 20*4096 && standing.body.vel[0] > 0,
+              "prop pairs exchange mass and inertia based contact forces");
+        moving.body.vel[0]=-20*4096; standing.body.vel[0]=20*4096;
+        check(!impacts.propDynamics.hit(impacts,moving,standing), "separating props do not receive another collision impulse");
     }
 };
 
@@ -366,12 +444,12 @@ struct RadioTestAccess {
         radio.update(game);
         check(radio.station() == 0 && game.cars[1].radioStation == 2, "station selections stay with individual cars");
         radio.key(SDL_SCANCODE_R,game); uint32_t frame = game.frame; game.tick();
-        check(radio.open() && game.frame == frame, "radio app suspends gameplay while previewing stations");
+        check(radio.open() && game.frame == frame+1, "PC radio selector keeps gameplay running while tuning");
         double before = Audio_MusicPosition();
         radio.key(SDL_SCANCODE_SPACE,game); radio.key(SDL_SCANCODE_RETURN,game);
         for (int i = 0; i < 50 && Audio_MusicPosition() <= before; ++i) SDL_Delay(20);
         check(Audio_MusicPlaying() && Audio_MusicPosition() > before,
-              "Space and Enter cannot pause the broadcast while the radio menu suspends the world");
+              "Space and Enter cannot pause the broadcast while the radio selector is open");
         check(radio.key(SDL_SCANCODE_ESCAPE,game) && !radio.open(), "Escape closes the radio without quitting");
         radio.key(SDL_SCANCODE_R,game); game.playerCar = -1; radio.update(game);
         check(!radio.open() && radio.playing_ == -1, "leaving a car closes the selector and stops music");
@@ -384,7 +462,8 @@ struct RadioTestAccess {
         check(radio.key(SDL_SCANCODE_R,game) && radio.open(), "vehicle model IDs are not mistaken for radio availability");
         game.playerCar = 100; radio.update(game);
         check(!radio.open(), "removed vehicle cannot leave the radio open");
-        game.playerCar = 0; radio.key(SDL_SCANCODE_R,game); game.cars[0].damage(255); radio.update(game);
+        game.playerCar = 0; radio.key(SDL_SCANCODE_R,game);
+        game.cars[0].act(Vehicle::Controls{},false,nullptr); game.cars[0].damage(255); radio.update(game);
         check(!radio.open() && radio.playing_ == -1, "destroyed vehicle closes the radio and stops music");
         radio.shutdown();
         std::filesystem::remove_all(dir);

@@ -52,7 +52,7 @@ if(MINGW)   # windres run from the build folder with relative names (it breaks o
         DEPENDS ${CMAKE_BINARY_DIR}/gtactw.rc)
     set(CTW_RES ${CMAKE_BINARY_DIR}/gtactw_res.o)
 endif()
-add_library(ctw_gameplay STATIC game/game.cpp game/followcam.cpp game/player.cpp game/hud.cpp game/plugins.cpp game/vehicle.cpp game/carcam.cpp game/cargens.cpp game/roads.cpp game/aispline.cpp game/traffic.cpp game/particles.cpp game/sound.cpp game/skidmarks.cpp game/lookups.cpp game/watercannon.cpp game/propdynamics.cpp game/radio.cpp)
+add_library(ctw_gameplay STATIC game/game.cpp game/followcam.cpp game/player.cpp game/hud.cpp game/plugins.cpp game/vehicle.cpp game/carcam.cpp game/cargens.cpp game/roads.cpp game/aispline.cpp game/traffic.cpp game/particles.cpp game/sound.cpp game/skidmarks.cpp game/lookups.cpp game/watercannon.cpp game/propdynamics.cpp game/rigidbody.cpp game/radio.cpp)
 target_include_directories(ctw_gameplay PUBLIC game)
 target_link_libraries(ctw_gameplay PUBLIC ctw_engine)
 add_executable(ctw_game game/main.cpp ${CTW_RES})

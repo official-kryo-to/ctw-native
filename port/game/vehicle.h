@@ -247,4 +247,5 @@ private:
     void updateDoors();
     void setDoorClosed(int seat);
     friend struct VehicleTestAccess;
+    friend class PropDynamics;
 };

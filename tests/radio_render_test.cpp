@@ -41,7 +41,11 @@ struct RadioTestAccess {
         radio.textureW_ = radio.textureH_ = 1;
         radio.key(SDL_SCANCODE_R, game);
 
-        auto draw = [&]() { Hud_Begin(640,448); radio.render(640,448,game); Hud_End(); };
+        auto draw = [&]() {
+            // The world is rendered each frame before the overlay.
+            glClearColor(1,0,1,1); glClear(GL_COLOR_BUFFER_BIT);
+            Hud_Begin(640,448); radio.render(640,448,game); Hud_End();
+        };
         auto pixels = [&]() {
             std::vector<uint8_t> out(640 * 448 * 3);
             glReadPixels(0,0,640,448,GL_RGB,GL_UNSIGNED_BYTE,out.data());
@@ -51,8 +55,8 @@ struct RadioTestAccess {
         draw();
         auto image = pixels();
         const size_t margin = (200 * 640 + 10) * 3;
-        check(image[margin] == 0 && image[margin+1] == 0 && image[margin+2] == 0,
-              "radio paints an opaque background including wide-window margins");
+        check(image[margin] == 255 && image[margin+1] == 0 && image[margin+2] == 255,
+              "compact selector preserves the game view outside its own overlay");
         for (int frame = 0; frame < 30; ++frame) {
             if (frame % 4 == 0) radio.key(SDL_SCANCODE_RIGHT, game);
             radio.update(game); draw();
@@ -69,12 +73,18 @@ struct RadioTestAccess {
         Host_TestMouse(320,150,1,0); draw();
         check(radio.open() && radio.station() == selected, "clicking station artwork does not pause the radio");
         Host_TestMouse(10,420,1,0); draw();
-        check(radio.open(), "clicks in a letterbox margin do not activate Back");
+        check(radio.open(), "clicks outside the overlay have no hidden Back action");
         int volume = radio.volume_;
         Host_TestMouse(260,300,1,0); draw();
-        check(radio.volume_ == volume - 1, "scaled mouse coordinates activate volume down");
+        check(radio.volume_ == volume, "removed touch buttons cannot change volume");
+        radio.key(SDL_SCANCODE_DOWN,game);
+        check(radio.volume_ == volume - 1, "arrow keys adjust the original volume levels");
         Host_TestMouse(320,420,1,0); draw();
-        check(!radio.open(), "Back returns to driving");
+        check(radio.open(), "removed Back button does not leave an invisible click target");
+        check(!radio.key(SDL_SCANCODE_A,game) && !radio.key(SDL_SCANCODE_D,game),
+              "radio leaves WASD driving controls available");
+        radio.key(SDL_SCANCODE_ESCAPE,game);
+        check(!radio.open(), "Escape dismisses the compact selector");
         radio.shutdown();
     }
 };

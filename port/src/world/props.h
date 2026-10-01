@@ -44,10 +44,14 @@ public:
         uint8_t health;
         float smashForce, uprootForce;
         uint8_t smashEffect = 0;
+        int32_t mass = 4096;               // kind +8; -4096 is infinite mass
+        bool planar = false;              // kind +7: keep the object upright
     };
     const Kind* kind(int k) const { return k >= 0 && k < (int)kinds_.size() ? &kinds_[k] : nullptr; }
     // Footprint for impact tests: radius around the position and height, world units (0 = not solid).
     void footprint(int prop, float& radius, float& height) const;
+    struct Physics { int32_t half[3], centre[3], cg[3]; };
+    bool physics(int prop, Physics& out) const;  // SetupDynamimcPropData's first primitive, local Q12
 private:
     struct Shape { uint32_t type; int32_t v[6]; };
     struct Def { uint16_t model, broken; uint8_t flags; std::vector<Shape> shapes; };

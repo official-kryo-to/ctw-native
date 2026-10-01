@@ -223,6 +223,10 @@ int Sound::explosion(Game& game, const int32_t pos[3]) {
 }
 
 void Sound::propSmash(const int32_t pos[3], int effect) {
+    propSmash(pos, effect, 300);
+}
+
+void Sound::propSmash(const int32_t pos[3], int effect, int radius) {
     if (!ok() || !tables_.hasPropSfx || effect < 0 || effect >= 57) return;
     // Smash uses the kind's smash effect (gGameDir[17] +1), not its hit effect or model id.
     // AddPropCollision passes gPropSfx's resident sample/volume to PlayScriptSfx with squared radius 300.
@@ -230,7 +234,7 @@ void Sound::propSmash(const int32_t pos[3], int effect) {
         if (e.s[0].event != 0x9C) continue;
         std::copy(pos, pos + 3, e.pos);
         const auto& sfx = tables_.propSfx[effect];
-        addEvent(e, 0x30, sfx.volume, 300, sfx.sample);
+        addEvent(e, 0x30, sfx.volume, radius, sfx.sample);
         return;
     }
 }
