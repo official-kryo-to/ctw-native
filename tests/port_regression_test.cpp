@@ -115,10 +115,57 @@ struct SoundTestAccess {
         check(footfalls() == 0, "entry animations discard pending footsteps");
         game.player.attached = false; game.player.dead = true; sound.playerPed(game);
         check(footfalls() == 0, "dead player does not emit footsteps");
+
+        // Arbitrary synthetic mapping and PCM, not the game's sound table or recordings.
+        sound.res_.data.resize(0x20 + 2048, 128);
+        const uint32_t length = 2048, rate = 22050;
+        std::memcpy(sound.res_.data.data() + 4, &length, 4);
+        std::memcpy(sound.res_.data.data() + 0x14, &rate, 4);
+        sound.res_.entries.resize(18);
+        sound.res_.entries[17] = {0, 0x20 + length, rate};
+        sound.tables_.propSfx[4] = {17, 91, 0};
+        const int32_t at[3] = {0, 0, 0};
+        std::copy(at, at + 3, game.player.pos);
+        sound.propSmash(at, 4);
+        check(sound.script_[0].s[0].event == 0x9C, "older setups cannot substitute an unrelated object sound");
+        sound.tables_.hasPropSfx = true;
+        sound.propSmash(at, -1); sound.propSmash(at, 57);
+        check(sound.script_[0].s[0].event == 0x9C, "invalid smash effects do not index the sound table");
+        sound.propSmash(at, 4);
+        const auto& smash = sound.script_[0].s[0];
+        check(smash.event == 0x30 && smash.sfx == 17 && smash.volume == 91 && smash.radius == 300,
+              "object smash uses its mapped resident sample, volume and original positional event");
+        for (int i = 0; i < 9; ++i) sound.propSmash(at, 4);
+        check(std::count_if(std::begin(sound.script_), std::end(sound.script_), [](auto& e){ return e.s[0].event == 0x30; }) == 8,
+              "simultaneous object sounds occupy the original eight one-shot entities without overwriting");
+        Audio_SetSfxPaused(true);
+        game.cars.clear(); sound.update(game);
+        check(std::all_of(std::begin(sound.script_), std::end(sound.script_), [](auto& e){ return e.s[0].voice && Audio_SfxPlaying(e.s[0].voice); }),
+              "object sounds start from resident PCM and survive without any vehicle entity");
+        for (auto& e : sound.script_) sound.stopSlots(e);
+        sound.propSmash(at, 4); sound.script_[0].pos[0] = 1000 * 4096; sound.update(game);
+        check(sound.script_[0].s[0].event == 0x9C, "distant object sounds expire and release their script slot");
+        Audio_SetSfxPaused(false);
     }
 };
 
 struct CollisionTestAccess {
+    static void propScene(Game& g, int32_t height = 0) {
+        Collision::Prop p{}; p.x = -2475 * 4096; p.y = -1475 * 4096; p.z = height;
+        g.player.pos[0] = p.x; g.player.pos[1] = p.y; g.player.pos[2] = p.z;
+        auto cell = std::make_unique<Collision::Cell>(); cell->loaded = true;
+        cell->groundMap.assign(400, 0x55); // synthetic land
+        if (height > 0) cell->boxes.push_back({p.x,p.y,height/2,24*4096,24*4096,height/2,0,0});
+        cell->props.push_back(p);
+        Collision::Cell::PropShapes shapes;
+        shapes.box0 = (uint32_t)cell->boxes.size();
+        g.props.shapes(p, cell->boxes, cell->cyls, cell->meshes);
+        shapes.boxes = (uint32_t)cell->boxes.size() - shapes.box0;
+        shapes.cyls = (uint32_t)cell->cyls.size(); shapes.meshes = (uint32_t)cell->meshes.size();
+        cell->propShapes.push_back(shapes);
+        g.collision.cells_[2020] = std::move(cell);
+    }
+    static bool solid(const Game& g) { return g.collision.cells_.at(2020)->propShapes[0].solid; }
     static void run() {
         Collision col;
         int32_t p[3] = {-0xDAC000 + 20 * 0x32000 - 500, -0x9C4000 + 20 * 0x32000 + 1000, 4096};
@@ -136,6 +183,25 @@ struct CollisionTestAccess {
 };
 
 struct PropTestAccess {
+    static std::unique_ptr<Model> cuboid(int top, float nodeZ = 0) {
+        auto m = std::make_unique<Model>(); m->scale = 0.25f;
+        NodeMatrix node{}; node.r[0][0] = node.r[1][1] = node.r[2][2] = 1; node.t[2] = nodeZ;
+        m->world.push_back(node);
+        for (int x : {-2,2}) for (int y : {-4,4}) for (int z : {0,top}) {
+            ModelVertex v{}; v.x = (int16_t)x; v.y = (int16_t)y; v.z = (int16_t)z;
+            m->verts.push_back(v);
+        }
+        ModelBatch batch{}; batch.count = 8; m->batches.push_back(batch);
+        return m;
+    }
+    static void furniture(Game& g, int effect, uint16_t broken = 101) {
+        PropLibrary::Def def{}; def.model = 100; def.broken = broken;
+        def.shapes = {{1,{0,0,0,4096,8192,16384}}};
+        g.props.defs_.push_back(def);
+        g.props.kinds_.push_back({1,15,5,-1,(uint8_t)effect});
+        g.props.models_[100] = cuboid(16, 0.25f);
+        g.props.models_[101] = cuboid(4, 0.25f);
+    }
     static void run() {
         PropLibrary lib;
         PropLibrary::Def def{};
@@ -148,6 +214,73 @@ struct PropTestAccess {
         check(boxes.size() == 1 && boxes[0].cz == 4096 && boxes[0].hz == 4096, "prop boxes retain the resource's bottom-centre convention");
         check(meshes.size() == 1 && meshes[0].tris.size() == 1 && meshes[0].verts[0] == 8192 && meshes[0].tris[0].v[2] == 2,
               "prop mesh offset, vertices and one-based triangle indices are preserved");
+        float radius, height; lib.footprint(0, radius, height);
+        check(std::abs(radius - 3.f) < 0.001f && height == 2.f, "impact footprint includes the mesh header's offset");
+        def.shapes = {{3,{0,0,8192,4096}}}; lib.defs_[0] = def;
+        lib.footprint(0, radius, height);
+        check(radius == 1.f && height == 3.f, "sphere footprint ends one radius above its centre");
+
+        Game g; furniture(g, 36);
+        check(g.props.smashedModel(0) == g.props.brokenModel(0), "valid broken model is selected");
+        g.props.defs_[0].broken = 0xFFFE;
+        check(!g.props.smashedModel(0), "remove-model sentinel cannot fall back to the intact model");
+        g.props.defs_[0].broken = 0xFFFF;
+        check(g.props.smashedModel(0) == g.props.model(0), "retain-model sentinel preserves the original mesh");
+        g.props.defs_[0].broken = 102; g.props.models_[102].reset();
+        check(!g.props.smashedModel(0), "failed replacement does not resurrect the undamaged object");
+    }
+};
+
+struct PropDynamicsTestAccess {
+    static float lowest(const PropDynamics::Loose& l) {
+        float M[16]; PropDynamics::matrix(l, M);
+        float z = 1e9f;
+        for (const auto& p : l.support) z = std::min(z, M[2]*p[0] + M[6]*p[1] + M[10]*p[2] + l.pos[2]);
+        return z;
+    }
+    static void run() {
+        const int32_t velocity[3] = {30*4096,0,0};
+        Game g; PropTestAccess::furniture(g, 36); CollisionTestAccess::propScene(g);
+        auto& dynamics = g.propDynamics;
+        dynamics.knock(g, 20,20,0, velocity, true,false);
+        auto& anchored = dynamics.loose_[0];
+        check(anchored.resting && anchored.tilt == 0 && anchored.support.size() == 8,
+              "anchored replacement retains its model's node-transformed geometry without a made-up fall");
+        const float z = anchored.pos[2];
+        for (int i = 0; i < 90; ++i) dynamics.update(g);
+        check(anchored.pos[2] == z && anchored.tilt == 0, "anchored broken model stays at the original placement");
+        check(!CollisionTestAccess::solid(g) && (*g.collision.props(20,20))[0].state != 0,
+              "broken prop loses the standing collision and light/render state");
+
+        Game lamp; PropTestAccess::furniture(lamp, 7, 0xFFFF); CollisionTestAccess::propScene(lamp);
+        lamp.propDynamics.knock(lamp,20,20,0,velocity,true,false);
+        auto& falling = lamp.propDynamics.loose_[0];
+        float initialTilt = falling.tilt;
+        for (int i = 0; i < 60; ++i) lamp.propDynamics.update(lamp);
+        check(falling.tilt == initialTilt && falling.fallDelay == 0, "lamp preserves the original 60-frame delay before falling");
+        lamp.propDynamics.update(lamp);
+        check(falling.tilt > initialTilt, "lamp starts falling after its delay");
+
+        Game loose; PropTestAccess::furniture(loose, 0, 0xFFFF); CollisionTestAccess::propScene(loose);
+        loose.propDynamics.knock(loose,20,20,0,velocity,false,true);
+        auto& object = loose.propDynamics.loose_[0];
+        object.prop.heading = 0x2000; object.tilt = object.maxTilt; object.tiltVel = 0;
+        object.vel[0] = object.vel[1] = object.vel[2] = 0;
+        loose.propDynamics.update(loose);
+        check(lowest(object) >= -0.001f && lowest(object) < 0.002f && object.pos[2] > 0.4f,
+              "lying rotated object rests on its geometry rather than clipping half its width into the road");
+        check(object.resting, "geometry-supported loose object can settle above its origin");
+
+        Game bridge; PropTestAccess::furniture(bridge, 0); CollisionTestAccess::propScene(bridge, 3*4096);
+        bridge.propDynamics.knock(bridge,20,20,0,velocity,true,true);
+        auto& remnant = bridge.propDynamics.loose_[0];
+        remnant.tilt = remnant.maxTilt; remnant.tiltVel = 0;
+        remnant.vel[0] = remnant.vel[1] = 0; remnant.vel[2] = -120;
+        bridge.propDynamics.update(bridge);
+        check(lowest(remnant) >= 3.f - 0.001f && lowest(remnant) < 3.002f,
+              "fast falling broken geometry stays on the raised road instead of tunnelling below it");
+        check(PropDynamics::drawnModel(bridge,remnant) == bridge.props.brokenModel(0),
+              "ground support and rendering use the same broken model");
     }
 };
 
@@ -275,7 +408,7 @@ int main() {
     Audio_SetSfxPaused(false);
     for (int i = 0; i < 50 && Audio_SfxPlaying(voice); ++i) SDL_Delay(20);
     check(!Audio_SfxPlaying(voice), "resumed sound effect finishes normally");
-    SoundTestAccess::run(); CollisionTestAccess::run(); PropTestAccess::run();
+    SoundTestAccess::run(); CollisionTestAccess::run(); PropTestAccess::run(); PropDynamicsTestAccess::run();
     movingCars(); fireAndCamera(); RadioTestAccess::run();
     Audio_Shutdown();
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;

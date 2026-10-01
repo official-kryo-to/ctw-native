@@ -3,7 +3,7 @@
 // See LICENSE in the repository root.
 #include "propdynamics.h"
 #include "game.h"
-#include "particles.h"
+#include "sound.h"
 #include <algorithm>
 #include <cmath>
 
@@ -47,13 +47,13 @@ void PropDynamics::checkImpacts(Game& g) {
                         const float sz = spheres[s][2] / 4096.f, sr = spheres[s][3] / 4096.f;
                         hit = sx * sx + sy * sy < (sr + r + 0.2f) * (sr + r + 0.2f) && sz + sr > pz && sz - sr < pz + std::max(h, 0.5f);
                     }
-                    if (hit) knock(g, ccx + dx, ccy + dy, i, car.vel, smash);
+                    if (hit) knock(g, ccx + dx, ccy + dy, i, car.vel, smash, uproot);
                 }
             }
     }
 }
 
-void PropDynamics::knock(Game& g, int cx, int cy, int index, const int32_t v[3], bool smash) {
+void PropDynamics::knock(Game& g, int cx, int cy, int index, const int32_t v[3], bool smash, bool uproot) {
     const Collision::Prop p = (*g.collision.props(cx, cy))[index];
     g.collision.setPropState(cx, cy, index, kKnocked);
     g.collision.setPropSolid(cx, cy, index, false);   // cSimpleMover::ClearCollideAgainstFlags
@@ -68,21 +68,87 @@ void PropDynamics::knock(Game& g, int cx, int cy, int index, const int32_t v[3],
     float r, h;
     g.props.footprint(p.prop, r, h);
     l.heightHalf = std::max(0.3f, h * 0.5f);
-    if (smash) {   // falls over about its base
+    if (!uproot) {
+        // Smash is separate from UpRoot in ApplyWorldForce. Most broken models stay anchored.
+        const auto* kind = g.props.kind(p.kind);
+        const int effect = kind ? kind->smashEffect : 0;
+        if (effect == 7) {
+            // Smash1 bends a lamp slightly, then Process waits 60 frames before enabling physics.
+            l.tilt = 0x16C * 3.14159265f / 32768.f;
+            l.fallDelay = 60;
+        } else {
+            if (effect == 8) l.tilt = 0x3C72 * 3.14159265f / 32768.f;
+            else if (effect == 15 || effect == 25 || effect == 31) l.tilt = 0x1555 * 3.14159265f / 32768.f;
+            l.resting = true;
+        }
+        l.vel[0] = l.vel[1] = l.vel[2] = 0;
+    } else if (smash) {
         l.vel[0] = vx * 0.1f; l.vel[1] = vy * 0.1f; l.vel[2] = 0;
         l.tiltVel = 0.8f + sp * 0.03f;
     } else {       // uprooted: thrown off the vehicle
         l.vel[0] = vx * 0.8f; l.vel[1] = vy * 0.8f; l.vel[2] = 2.f + sp * 0.1f;
         l.tiltVel = 1.5f + sp * 0.15f;
     }
-    loose_.push_back(l);
-    int32_t at[3] = {p.x, p.y, p.z + 0x800};   // a dust puff instead of the debris particles
-    SmokeEmitter* dust = TheParticles().add<SmokeEmitter>(at, 8);
-    for (int k = 0; k < 6; ++k) {
-        const int32_t puff[3] = {(int32_t)(v[0] * 0.05f) + (k - 3) * 0x400, (int32_t)(v[1] * 0.05f), 0x800};
-        dust->addParticle(puff, 0);
+    const Model* model = drawnModel(g, l);
+    if (model) supportPoints(l, *model);
+    else l.resting = true;
+    loose_.push_back(std::move(l));
+    if (smash) {
+        const auto* kind = g.props.kind(p.kind);
+        if (kind) {
+            const int32_t at[3] = {p.x, p.y, p.z};
+            TheSound().propSmash(at, kind->smashEffect);
+        }
     }
-    TheParticles().remove(dust);
+}
+
+const Model* PropDynamics::drawnModel(Game& g, const Loose& l) {
+    // 0xFFFF retains the model; 0xFFFE removes it. An unavailable replacement must not restore an intact prop.
+    return l.broken ? g.props.smashedModel(l.prop.prop) : g.props.model(l.prop.prop);
+}
+
+void PropDynamics::matrix(const Loose& l, float M[16]) {
+    // Rodrigues tilt after the placement's heading, shared by rendering and ground contact.
+    const float h = l.prop.heading * 3.14159265f / 32768.f, ch = std::cos(h), sh = std::sin(h);
+    const float c = std::cos(l.tilt), s = std::sin(l.tilt), t = 1 - c, x = l.axis[0], y = l.axis[1];
+    const float T[3][3] = {{t * x * x + c, t * x * y, s * y}, {t * x * y, t * y * y + c, -s * x}, {-s * y, s * x, c}};
+    const float H[3][3] = {{ch, -sh, 0}, {sh, ch, 0}, {0, 0, 1}};
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) M[j * 4 + i] = T[i][0] * H[0][j] + T[i][1] * H[1][j] + T[i][2] * H[2][j];
+    M[3] = M[7] = M[11] = 0;
+    M[12] = l.pos[0]; M[13] = l.pos[1]; M[14] = l.pos[2]; M[15] = 1;
+}
+
+void PropDynamics::supportPoints(Loose& l, const Model& m) {
+    for (const ModelBatch& b : m.batches) {
+        const NodeMatrix& node = m.world[b.node];
+        for (uint32_t i = b.firstVertex; i < b.firstVertex + b.count; ++i) {
+            const ModelVertex& v = m.verts[i];
+            const float p[3] = {v.x * m.scale, v.y * m.scale, v.z * m.scale};
+            std::array<float, 3> q;
+            for (int k = 0; k < 3; ++k) q[k] = node.r[k][0] * p[0] + node.r[k][1] * p[1] + node.r[k][2] * p[2] + node.t[k];
+            l.support.push_back(q);
+        }
+    }
+    std::sort(l.support.begin(), l.support.end());
+    l.support.erase(std::unique(l.support.begin(), l.support.end()), l.support.end());
+}
+
+bool PropDynamics::meetGround(Game& g, Loose& l, float previousZ) {
+    float M[16]; matrix(l, M);
+    float lift = 0;
+    bool contact = false;
+    for (const auto& p : l.support) {
+        const float x = M[0] * p[0] + M[4] * p[1] + M[8] * p[2] + l.pos[0];
+        const float y = M[1] * p[0] + M[5] * p[1] + M[9] * p[2] + l.pos[1];
+        const float z = M[2] * p[0] + M[6] * p[1] + M[10] * p[2] + l.pos[2];
+        // Probe from the previous placement height, so a fast downward step cannot tunnel through a road.
+        // Using each vertex's height here would pull tall props onto unrelated roofs above their base.
+        const Collision::Ground ground = g.collision.ground(x, y, previousZ + 1.f);
+        if (z <= ground.z + 0.001f) { contact = true; lift = std::max(lift, ground.z - z); }
+    }
+    l.pos[2] += lift;
+    return contact;
 }
 
 void PropDynamics::update(Game& g) {
@@ -97,21 +163,22 @@ void PropDynamics::update(Game& g) {
             it = loose_.erase(it);
             continue;
         }
+        if (l.fallDelay > 0) { --l.fallDelay; ++it; continue; }
         if (!l.resting) {
             // tipping: gravity pulls a tilted prop further over (a rod about its end), stops lying down
             l.tiltVel += 1.5f * kGravity * std::sin(std::max(l.tilt, 0.05f)) / (2.f * l.heightHalf) * kDt;
             l.tilt += l.tiltVel * kDt;
             if (l.tilt >= l.maxTilt) { l.tilt = l.maxTilt; l.tiltVel = 0; }
+            const float previousZ = l.pos[2];
             for (int k = 0; k < 3; ++k) l.pos[k] += l.vel[k] * kDt;
             l.vel[2] -= kGravity * kDt;
-            const Collision::Ground gr = g.collision.ground(l.pos[0], l.pos[1], l.pos[2] + 1.f);
-            if (l.pos[2] <= gr.z) {
-                l.pos[2] = gr.z;
+            const bool contact = meetGround(g, l, previousZ);
+            if (contact) {
                 l.vel[2] = 0;
                 l.vel[0] *= 0.85f;
                 l.vel[1] *= 0.85f;
             }
-            if (l.tilt >= l.maxTilt && l.pos[2] <= gr.z + 0.01f && l.vel[0] * l.vel[0] + l.vel[1] * l.vel[1] < 0.05f)
+            if (l.tilt >= l.maxTilt && contact && l.vel[0] * l.vel[0] + l.vel[1] * l.vel[1] < 0.05f)
                 l.resting = true;
         }
         ++it;
@@ -120,19 +187,9 @@ void PropDynamics::update(Game& g) {
 
 void PropDynamics::render(Game& g) const {
     for (const Loose& l : loose_) {
-        const Model* m = l.broken ? g.props.brokenModel(l.prop.prop) : nullptr;
-        if (!m) m = g.props.model(l.prop.prop);
+        const Model* m = drawnModel(g, l);
         if (!m) continue;
-        // rotation: tilt about the horizontal axis (Rodrigues) after the prop's heading
-        const float h = l.prop.heading * 3.14159265f / 32768.f, ch = std::cos(h), sh = std::sin(h);
-        const float c = std::cos(l.tilt), s = std::sin(l.tilt), t = 1 - c, x = l.axis[0], y = l.axis[1];
-        const float T[3][3] = {{t * x * x + c, t * x * y, s * y}, {t * x * y, t * y * y + c, -s * x}, {-s * y, s * x, c}};
-        const float H[3][3] = {{ch, -sh, 0}, {sh, ch, 0}, {0, 0, 1}};
-        float R[3][3];
-        for (int i = 0; i < 3; ++i)
-            for (int j = 0; j < 3; ++j) R[i][j] = T[i][0] * H[0][j] + T[i][1] * H[1][j] + T[i][2] * H[2][j];
-        const float M[16] = {R[0][0], R[1][0], R[2][0], 0, R[0][1], R[1][1], R[2][1], 0, R[0][2], R[1][2], R[2][2], 0,
-                             l.pos[0], l.pos[1], l.pos[2], 1};
+        float M[16]; matrix(l, M);
         PropLibrary::drawModel(*m, M);
     }
 }

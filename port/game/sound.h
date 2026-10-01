@@ -29,6 +29,7 @@ public:
     void doorEvent(const Vehicle& v, bool open);                 // cVehicle::OpenDoor / SetDoorClosed
     void collision(const Vehicle& v, int strength);              // cAudioManager::AddCollision
     int explosion(Game& game, const int32_t pos[3]);              // cExplosionBigVehicle::PlayScriptSfx
+    void propSmash(const int32_t pos[3], int effect);              // cAudioManager::AddPropCollision
     bool horn = false;                                           // the player holds the horn
     bool ok() const { return !res_.data.empty(); }
 
@@ -57,6 +58,7 @@ private:
     void playerCar(Game& g, Vehicle& v, Entity& e);                       // ProcessEntityTypePlayerCar
     void playerPed(Game& g);                                            // unarmed ProcessEntityTypePlayerPed
     Entity ped_;
+    Entity script_[8];   // original PlayScriptSfx pool: eight positional one-shots
     int lastWalkFrame_ = -1;
     bool firstFoot_ = true;
 

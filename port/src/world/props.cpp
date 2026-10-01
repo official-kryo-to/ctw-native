@@ -66,13 +66,13 @@ bool PropLibrary::load() {
             int16_t smash, uproot;
             memcpy(&smash, &d[at + 10], 2);
             memcpy(&uproot, &d[at + 12], 2);
-            kinds_.push_back({d[at], d[at + 2], smash / 4096.f, uproot / 4096.f});
+            kinds_.push_back({d[at], d[at + 2], smash / 4096.f, uproot / 4096.f, d[at + 1]});
         }
     return !defs_.empty();
 }
 
 const Model* PropLibrary::brokenModel(int prop) {
-    if (prop < 0 || prop >= (int)defs_.size() || defs_[prop].broken == 0xFFFF) return nullptr;
+    if (prop < 0 || prop >= (int)defs_.size() || defs_[prop].broken >= 0xFFFE) return nullptr;
     const int id = defs_[prop].broken;
     auto it = models_.find(id);
     if (it != models_.end()) return it->second.get();
@@ -82,21 +82,28 @@ const Model* PropLibrary::brokenModel(int prop) {
     return (models_[id] = std::move(m)).get();
 }
 
+const Model* PropLibrary::smashedModel(int prop) {
+    if (prop < 0 || prop >= (int)defs_.size()) return nullptr;
+    return defs_[prop].broken == 0xFFFF ? model(prop) : brokenModel(prop);
+}
+
 void PropLibrary::footprint(int prop, float& radius, float& height) const {
     radius = height = 0.f;
     if (prop < 0 || prop >= (int)defs_.size()) return;
+    int32_t meshOffset[3]{};
     for (const Shape& s : defs_[prop].shapes) {
-        if (s.type == 4 || s.type == 6) continue;
+        if (s.type == 4) { std::copy(s.v, s.v + 3, meshOffset); continue; }
+        if (s.type == 6) continue;
         if (s.type == 5) {
-            radius = std::max(radius, std::hypot(s.v[0] / 4096.f, s.v[1] / 4096.f));
-            height = std::max(height, s.v[2] / 4096.f);
+            radius = std::max(radius, std::hypot((s.v[0] + meshOffset[0]) / 4096.f, (s.v[1] + meshOffset[1]) / 4096.f));
+            height = std::max(height, (s.v[2] + meshOffset[2]) / 4096.f);
             continue;
         }
         const float off = std::sqrt((float)s.v[0] * s.v[0] + (float)s.v[1] * s.v[1]) / 4096.f;
         float r, h;
         if (s.type == 1) { r = std::sqrt((float)s.v[3] * s.v[3] + (float)s.v[4] * s.v[4]) / 8192.f; h = s.v[5] / 4096.f; }
         else if (s.type == 2) { r = s.v[3] / 4096.f; h = s.v[4] / 4096.f; }
-        else { r = s.v[3] / 4096.f; h = 2 * r; }
+        else { r = s.v[3] / 4096.f; h = r; }   // sphere offset is its centre
         radius = std::max(radius, off + r);
         height = std::max(height, s.v[2] / 4096.f + h);
     }

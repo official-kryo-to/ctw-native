@@ -55,6 +55,7 @@ bool Sound::Bank::sample(int i, const uint8_t*& pcm, uint32_t& len, uint32_t& ra
 bool Sound::init(const std::string& dataDir) {
     for (auto& item : ents_) stopSlots(item.second);
     stopSlots(ped_);
+    for (Entity& e : script_) stopSlots(e);
     lastWalkFrame_ = -1; firstFoot_ = true;
     ents_.clear();
     car_ = Bank{}; carBankEnum_ = -1; playerUid_ = 0;
@@ -219,6 +220,19 @@ int Sound::explosion(Game& game, const int32_t pos[3]) {
     int voice = Audio_SfxPlay(pcm, len, (int)rate, volume, pan, false);
     if (getenv("CTW_SNDDBG")) printf("explosion: resident sample 466 -> voice %d\n", voice);
     return voice;
+}
+
+void Sound::propSmash(const int32_t pos[3], int effect) {
+    if (!ok() || !tables_.hasPropSfx || effect < 0 || effect >= 57) return;
+    // Smash uses the kind's smash effect (gGameDir[17] +1), not its hit effect or model id.
+    // AddPropCollision passes gPropSfx's resident sample/volume to PlayScriptSfx with squared radius 300.
+    for (Entity& e : script_) {
+        if (e.s[0].event != 0x9C) continue;
+        std::copy(pos, pos + 3, e.pos);
+        const auto& sfx = tables_.propSfx[effect];
+        addEvent(e, 0x30, sfx.volume, 300, sfx.sample);
+        return;
+    }
 }
 
 void Sound::carEngine(Game& g, Vehicle& v, Entity& e) {   // cSoundEvents::ProcessEntityTypeCar
@@ -396,6 +410,7 @@ void Sound::update(Game& g) {
     if (skidCount_ > 0) --skidCount_;
     playerPed(g);
     processEntity(g, ped_, false);
+    for (Entity& e : script_) processEntity(g, e, false);
     for (auto& [uid, e] : ents_) e.seen = false;
     for (int i = 0; i < (int)g.cars.size(); ++i) {
         Vehicle& v = g.cars[i];
