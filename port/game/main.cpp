@@ -9,6 +9,7 @@
 #include "hud.h"
 #include "plugins.h"
 #include "os/os.h"
+#include "audio/audio.h"
 #include "os/license.h"
 #include "gfx/assets.h"
 #include <SDL.h>   // SDL_main
@@ -51,6 +52,7 @@ int main(int argc, char** argv) {
     struct XC { float x, y, h; int id = 0; };
     std::vector<XC> extraCars;
     float hour = -1;
+    int forceWeather = -1;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--collision")) { TheGame().showDebug = true; continue; }
         if (!strcmp(argv[i], "--trace")) { trace = true; continue; }
@@ -61,7 +63,8 @@ int main(int argc, char** argv) {
         else if (!strcmp(option, "--veh")) values = 4;
         else if (strcmp(option, "--data") && strcmp(option, "--mods") && strcmp(option, "--shot") &&
                  strcmp(option, "--frames") && strcmp(option, "--keys") && strcmp(option, "--export-textures") && strcmp(option, "--ui") && strcmp(option, "--state") &&
-                 strcmp(option, "--enter") && strcmp(option, "--handbrake") && strcmp(option, "--hour")) {
+                 strcmp(option, "--enter") && strcmp(option, "--handbrake") && strcmp(option, "--hour") &&
+                 strcmp(option, "--weather")) {
             fprintf(stderr, "Unknown option: %s\n", option);
             return 4;
         }
@@ -99,6 +102,7 @@ int main(int argc, char** argv) {
         if (!strcmp(argv[i], "--veh") && i + 4 < argc)   // testing: an extra vehicle of this info id (id x y heading-degrees)
             extraCars.push_back({(float)atof(argv[i + 2]), (float)atof(argv[i + 3]), (float)atof(argv[i + 4]), atoi(argv[i + 1])});
         if (!strcmp(argv[i], "--hour")) hour = (float)atof(argv[i + 1]);   // testing: start at this time of day
+        if (!strcmp(argv[i], "--weather")) forceWeather = atoi(argv[i + 1]);   // testing: ForceWeather(0..7)
         if (!strcmp(argv[i], "--pos") && i + 2 < argc) {        // start position (testing)
             TheGame().player.pos[0] = (int32_t)(atof(argv[i + 1]) * 4096.0);
             TheGame().player.pos[1] = (int32_t)(atof(argv[i + 2]) * 4096.0);
@@ -138,6 +142,7 @@ int main(int argc, char** argv) {
         game.world.timeCycle().setTime((uint32_t)(hour * 4096.f));
         game.world.timeCycle().evaluate();
     }
+    if (forceWeather >= 0) game.weather.force(game, forceWeather & 7);
     for (const XC& c : extraCars) {
         int32_t at[3] = {(int32_t)(c.x * 4096), (int32_t)(c.y * 4096), 0};
         game.spawnCar(c.id, at, (int16_t)(c.h * 65536 / 360));
@@ -184,6 +189,15 @@ int main(int argc, char** argv) {
             printf("cars %zu:", game.cars.size());
             for (const Vehicle& c : game.cars) printf(" [%s %.1f %.1f]", game.vehicleInfos[c.infoId].name().c_str(), c.pos[0] / 4096.f, c.pos[1] / 4096.f);
             printf("\n");
+        }
+        if (trace) {
+            printf("music playing %d at %.1f s, ", Audio_MusicPlaying() ? 1 : 0, Audio_MusicPosition());
+            printf("peds %zu (max %d):", game.peds.peds.size(), game.peds.maxPeds);
+            for (const Pedestrians::Ped& p : game.peds.peds)
+                printf(" [type %d/%d %.1f %.1f -> %.1f %.1f node %d,%d:%d%s]", p.type, p.subtype, p.body.pos[0] / 4096.f,
+                       p.body.pos[1] / 4096.f, p.target[0] / 4096.f, p.target[1] / 4096.f, p.cur.cx, p.cur.cy, p.cur.index,
+                       p.deadFrames >= 0 ? " down" : "");
+            printf("%c", 10);
         }
         if (trace) printf("world blocks loaded: %zu\n", game.world.stats().blocks);
         bool ok = saveBmp(shot);

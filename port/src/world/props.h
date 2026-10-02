@@ -4,14 +4,15 @@
 // Street furniture: lamp posts, bins, benches, hydrants, signs ... (cDynamicPropManager, cLightManager::AddPropLights).
 //
 // Placement: section 6 of each world.bin collision cell (cWorldSector +0x120), u32 count then 20-byte
-//   sPackedPropData {u16 prop, u16 kind, i16 heading, u16 state (runtime), i32 x, y, z}.
+//   sPackedPropData {u16 prop, u16 kind (1 = garage door), i16 heading, u16 state (runtime), i32 x, y, z}.
+//   SpawnProp handles kind 1 specially; SetupDynamimcPropData reads the canonical kind from the definition.
 // Definitions: gGameDir[16] (cDynamicPropManager::LoadPropsData), one per prop until 0xDEADBEEF:
-//   u16 model (resource id), u16 broken model (0xFFFF = keep model, 0xFFFE = remove), u16 0xDEAD, u8 flags, u8 shape count, then shapes
+//   u16 model (resource id), u16 broken model (0xFFFF = keep model, 0xFFFE = remove), u16 0xDEAD, i8 kind, u8 shape count, then shapes
 //   {u32 type, ...}: 1 box {offset x y z (bottom centre), size x y z}, 2 cylinder {offset (base), radius, height},
 //   3 sphere {offset (centre), radius}, 4 mesh header, 5 mesh vertex, 6 mesh triangle (16 bytes each).
 // Lights: gGameDir[19] (cLightManager::LoadDynamicLightData), 28 bytes each {u16 prop, u8 type, u8,
 //   offset x y z, u32 size, u32 RGB555 colour, u32}; AddPropLights adds every entry whose prop matches.
-// Kinds (ePropDef, the `kind` of a placement): gGameDir[17], 16 bytes each until 0xDEAD at +14 {u8 hit effect,
+// Kinds (ePropDef, definition byte +6): gGameDir[17], 16 bytes each until 0xDEAD at +14 {u8 hit effect,
 //   u8 smash effect (selects a case in Smash1..4 and gPropSfx), u8 health, u8 x5 flags, i16, i16 smash force, i16 uproot force, 0xDEAD};
 //   forces are 20.12, negative = never. cDynamicProp::ApplyWorldForce: f = |force| * 0x111 >> 12; the prop is
 //   uprooted when f >= uproot force and smashed when f >= smash force.
@@ -48,13 +49,16 @@ public:
         bool planar = false;              // kind +7: keep the object upright
     };
     const Kind* kind(int k) const { return k >= 0 && k < (int)kinds_.size() ? &kinds_[k] : nullptr; }
+    const Kind* kindForProp(int prop) const {
+        return prop >= 0 && prop < (int)defs_.size() ? kind(defs_[prop].kind) : nullptr;
+    }
     // Footprint for impact tests: radius around the position and height, world units (0 = not solid).
     void footprint(int prop, float& radius, float& height) const;
     struct Physics { int32_t half[3], centre[3], cg[3]; };
     bool physics(int prop, Physics& out) const;  // SetupDynamimcPropData's first primitive, local Q12
 private:
     struct Shape { uint32_t type; int32_t v[6]; };
-    struct Def { uint16_t model, broken; uint8_t flags; std::vector<Shape> shapes; };
+    struct Def { uint16_t model, broken; int8_t kind = 0; std::vector<Shape> shapes; };
     struct Light { uint16_t prop; uint8_t type; int32_t offset[3]; int32_t size; uint16_t colour; };
     std::vector<Def> defs_;
     std::vector<Light> lights_;

@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 #include "particles.h"
-#include "cargens.h"   // Rand32Critical
+#include "random.h"
 #include "gfx/assets.h"
 #include "world/worldrenderer.h"
 #include <glad/gl.h>
@@ -13,7 +13,144 @@
 static Particles g_particles;
 Particles& TheParticles() { return g_particles; }
 
-static uint32_t randNC(uint32_t n) { return Rand32Critical(n); }   // Rand32NonCritical
+static uint32_t randNC(uint32_t n) { return Rand32NonCritical(n); }
+
+GarbageEmitter::GarbageEmitter(const int32_t at[3], int16_t size, bool attached)
+    : Emitter(at, attached ? 12 : 8, 0x4000, 19, false), size_(size), attached_(attached) {
+    if (!attached) dying = true;
+}
+
+void GarbageEmitter::create(uint32_t hours) {
+    // brightness: 0.4 from 22:00 to 05:00, rising to 1.0 by 09:00, falling again from 18:00
+    uint32_t bright = 0x1000;
+    if (hours - 0x16001u < 0xFFFEEFFFu) bright = 0x666;
+    else if (hours > 0x12000) bright = 0x1000 - (uint32_t)((((hours - 0x12000) >> 2) * 0x999ull) >> 12);
+    else if ((hours >> 12) <= 8) bright = (uint32_t)((((hours - 0x5000) >> 2) * 0x999ull) >> 12) + 0x666;
+    static const uint8_t colours[6][3] = {{80, 115, 135}, {90, 90, 90}, {150, 130, 130}, {100, 90, 10}, {85, 85, 0}, {43, 60, 0}};
+    Particle p{};
+    p.angle = (uint16_t)Rand16NonCritical(0xFFFF);
+    const uint8_t* c = colours[Rand16NonCritical(6)];
+    p.colour = (uint16_t)(((c[0] * bright) >> 15) | (((c[1] * bright) >> 10) & 0xFFE0) | (((c[2] * bright) >> 5) & 0xFC00));
+    p.v[0] = (int16_t)(randNC(0x1EA) - 0xF5);
+    p.v[1] = (int16_t)(randNC(0x1EA) - 0xF5);
+    p.p[0] = (int16_t)(randNC(0x800) - 0x400);
+    p.p[1] = (int16_t)(randNC(0x800) - 0x400);
+    p.p[2] = 0x800;
+    p.v[2] = (int16_t)(randNC(0xA4) + 0x199);
+    p.size = (int16_t)(size_ + (int)randNC(0x198) - 0xCC);
+    p.spin = 3000;
+    p.grow = -8;
+    p.life = 30;
+    p.alpha = 31;
+    addFromData(p);
+}
+
+void GarbageEmitter::process(uint32_t hours) {   // cParticleEmitterGarbage::Process
+    if (attached_) {
+        if (frames_ == 0) for (int i = 0; i < 4; ++i) create(hours);
+        else if (!(frames_ & 1) && speed2_ >= 0x4000001) create(hours);
+    } else if (frames_ == 0) for (int i = 0; i < 8; ++i) create(hours);
+    Emitter::process(hours);
+    if (frames_ < 0xFF35) ++frames_;
+}
+
+void GarbageEmitter::updateParticle(Particle& p) {
+    Emitter::updateParticle(p);
+    p.v[2] = (int16_t)std::max(-0x800, (int)p.v[2] - 0x51);
+    if (p.p[2] <= -0x3801) p.p[2] = (int16_t)0xC800;
+}
+
+static uint16_t propColour(uint32_t colour, bool tint, uint32_t ambient) {
+    uint16_t rgb555 = 0;
+    for (int i = 0; i < 3; ++i) {
+        const int base = (colour >> (i*8)) & 0xF8;
+        const int light = (ambient >> (i*8)) & 0xFF;
+        const int value = tint ? base + (int)(((int64_t)(light-base)*0x999000) >> 24) : base;
+        rgb555 |= (uint16_t)(((value >> 3) & 31) << (i*5));
+    }
+    return rgb555;
+}
+
+PaperEmitter::PaperEmitter(const int32_t at[3], int count, int16_t size, uint32_t colourA, uint32_t colourB,
+                           bool textured, uint32_t ambient) : Emitter(at, count, 0x4000, textured ? 9 : 255, false),
+    colours_{propColour(colourA,true,ambient),propColour(colourB,true,ambient)}, count_(count), size_(size) {
+    dying = true;
+}
+
+void PaperEmitter::process(uint32_t hours) {
+    if (!emitted_) for (int i = 0; i < count_; ++i) {
+        Particle p{};
+        p.angle = (uint16_t)Rand16NonCritical(0xFFFF); p.colour = colours_[Rand16NonCritical(2)];
+        p.v[0] = (int16_t)(randNC(0x332)-0x199); p.v[1] = (int16_t)(randNC(0x332)-0x199);
+        p.p[0] = (int16_t)(randNC(0x800)-0x400); p.p[1] = (int16_t)(randNC(0x800)-0x400);
+        p.p[2] = 0x800; p.v[2] = (int16_t)(randNC(0xCD)+0x266);
+        p.spin = 0x7D0; p.size = size_; p.life = 0x78; p.alpha = sprite_ == 9 ? 31 : 15;
+        addFromData(p);
+    }
+    emitted_ = true;
+    Emitter::process(hours);
+}
+
+void PaperEmitter::updateParticle(Particle& p) {
+    Emitter::updateParticle(p);
+    p.v[2] = (int16_t)std::max((int)p.v[2]-0x51,-0x199);
+}
+
+WoodEmitter::WoodEmitter(const int32_t at[3], int16_t vx, int16_t vy, int32_t strength,
+                         uint32_t colourA, uint32_t colourB, bool tint, uint32_t ambient)
+    : Emitter(at,12,0x4000,19,false), moving_(vx != 0 || vy != 0) {
+    const uint16_t colours[2] = {propColour(colourA,tint,ambient),propColour(colourB,tint,ambient)};
+    const int count = std::clamp(strength >> 10,0,12);
+    const int spread = (int)(((int64_t)strength*0xA3) >> 12);
+    for (int i = 0; i < count; ++i) {
+        Particle p{};
+        p.colour = colours[Rand16NonCritical(2)]; p.angle = (uint16_t)Rand16NonCritical(0xFFFF);
+        p.v[0] = (int16_t)(vx + (int)randNC(spread*2) - spread);
+        p.v[1] = (int16_t)(vy + (int)randNC(spread*2) - spread);
+        p.p[0] = (int16_t)(randNC(0x800)-0x400); p.p[1] = (int16_t)(randNC(0x800)-0x400);
+        p.p[2] = 0x800; p.v[2] = (int16_t)(randNC(0xA4)+0x199);
+        p.spin = 3000; p.size = 0x4CC; p.grow = -40; p.life = 120; p.alpha = 31;
+        addFromData(p);
+    }
+    dying = true;
+}
+
+void WoodEmitter::updateParticle(Particle& p) {
+    Emitter::updateParticle(p);
+    p.v[2] = (int16_t)std::max((int)p.v[2]-40,-0x800);
+    p.p[2] = (int16_t)std::max((int)p.p[2],-0x7000);
+    p.size = (int16_t)std::max((int)p.size,0);
+    if (moving_) for (int k = 0; k < 2; ++k) p.v[k] = (int16_t)((p.v[k]*0xF33) >> 12);
+}
+
+void GlassEmitter::process(uint32_t hours) {
+    if (!emitted_) {
+        // The reference has a separate dawn/dusk brightness curve, independent of ambient tint.
+        int light = 0x1000;
+        if (hours < (5u << 12) || hours > (22u << 12)) light = 0x666;
+        else if (hours > (18u << 12)) light -= (int)((((hours-(18u << 12)) >> 2)*0x999u) >> 12);
+        else if ((hours >> 12) <= 8) light = 0x666 + (int)((((hours-(5u << 12)) >> 2)*0x999u) >> 12);
+        const uint16_t colour = (uint16_t)(((170*light >> 15) & 31) |
+            (((212*light >> 15) & 31) << 5) | (((255*light >> 15) & 31) << 10));
+        for (int i = 0; i < 2; ++i) {
+            Particle p{};
+            p.spin = (int16_t)(Rand16NonCritical(0xFA0)+0x7D0); p.angle = (uint16_t)Rand16NonCritical(0xFFFF);
+            p.colour = colour; p.alpha = 22;
+            p.v[0] = (int16_t)(randNC(0x1EA)-0xF5); p.v[1] = (int16_t)(randNC(0x1EA)-0xF5);
+            p.p[0] = (int16_t)(randNC(0x800)-0x400); p.p[1] = (int16_t)(randNC(0x800)-0x400);
+            p.p[2] = 0x999; p.v[2] = (int16_t)(randNC(0x52)+0xA3);
+            p.size = 0x4CC; p.grow = -40; p.life = 60;
+            addFromData(p);
+        }
+        emitted_ = true;
+    }
+    Emitter::process(hours);
+}
+
+void GlassEmitter::updateParticle(Particle& p) {
+    Emitter::updateParticle(p);
+    p.v[2] -= 40;
+}
 
 ExplosionFlash::ExplosionFlash(const int32_t at[3]) : Emitter(at, 2, 0x4000, 5, true) {
     Particle p{};
@@ -132,7 +269,7 @@ void Emitter::updateParticle(Particle& q) {   // cParticleEmitterBase::UpdatePar
     }
 }
 
-void Emitter::process() {   // Process -> ParticleUpdateLoop(true)
+void Emitter::process(uint32_t) {   // Process -> ParticleUpdateLoop(true)
     if (moved_[0] || moved_[1] || moved_[2]) {
         for (int k = 0; k < 3; ++k) pos[k] += moved_[k];
     }
@@ -149,11 +286,11 @@ void Emitter::process() {   // Process -> ParticleUpdateLoop(true)
 
 void Emitter::render(const WorldCamera& cam) const {   // cParticleEmitterBase::ManagedRender
     if (!alive_) return;
-    int texture; uint16_t r[4];
-    if (!Assets_EffectSprite(sprite_, texture, r)) return;
-    GLuint tex = Assets_Texture(texture);
+    int texture = 0; uint16_t r[4] = {0,0,1,1};
+    if (sprite_ != 255 && !Assets_EffectSprite(sprite_, texture, r)) return;
+    GLuint tex = sprite_ == 255 ? 0 : Assets_Texture(texture);
     int tw = 256, th = 256;
-    Assets_TextureSize(texture, &tw, &th);
+    if (sprite_ != 255) Assets_TextureSize(texture, &tw, &th);
     float u0 = r[0] / (float)tw, v0 = r[1] / (float)th, u1 = (r[0] + r[2]) / (float)tw, v1 = (r[1] + r[3]) / (float)th;
     if (tex) { glEnable(GL_TEXTURE_2D); glBindTexture(GL_TEXTURE_2D, tex); } else glDisable(GL_TEXTURE_2D);
     float R = range_ / 4096.f;
@@ -290,14 +427,73 @@ void Particles::remove(const Emitter* e) {
         if (p.get() == e) p->dying = true;
 }
 
-void Particles::update(uint32_t frame) {
+void Particles::update(uint32_t frame, uint32_t hours) {
     for (auto& e : emitters_) {
         if (!e->dying)
             if (auto* steam = dynamic_cast<SteamEmitter*>(e.get())) steam->tick(frame);
-        e->process();
+        e->process(hours);
     }
     emitters_.erase(std::remove_if(emitters_.begin(), emitters_.end(), [](const std::unique_ptr<Emitter>& e) { return e->finished(); }),
                     emitters_.end());
+}
+
+void RainEmitter::addDrops(unsigned n, uint16_t cameraYaw) {   // cParticleEmitterRain::AddParticle(uint)
+    if (!init_) {
+        init_ = true;
+        tmpl_ = Particle{};
+        tmpl_.life = 30;                     // SetStandardDataLifeTime(0x1E)
+        tmpl_.spin = 0;
+        tmpl_.colour = 0x7FFF;
+        tmpl_.grow = 0;
+        tmpl_.alpha = 15;
+        tmpl_.size = (int16_t)(4 * inv_);
+    }
+    tmpl_.v[2] = (int16_t)((n < 5 ? -2 : -3) * inv_);
+    for (; n; --n) {
+        const uint32_t x = Rand32NonCritical(0x22000) + 0x0FFEF000u, y = Rand32NonCritical(0x22000);
+        tmpl_.p[0] = (int16_t)((uint32_t)(inv_ * x) >> 12);
+        tmpl_.p[1] = (int16_t)((uint32_t)(inv_ * (y + 0x0FFEF000u)) >> 12);
+        tmpl_.angle = (uint16_t)-cameraYaw;
+        tmpl_.p[2] = (int16_t)(25 * inv_);
+        addFromData(tmpl_);
+    }
+}
+
+void RainEmitter::updateParticle(Particle& q) {   // cParticleEmitterRain::UpdateParticle
+    Emitter::updateParticle(q);
+    for (int k = 0; k < 2; ++k) {
+        if (q.p[k] > 14336) q.p[k] = (int16_t)(q.p[k] - 28672);
+        else if (q.p[k] <= -14337) q.p[k] = (int16_t)(q.p[k] + 28672);
+    }
+    q.life = q.p[2] > 0 ? 6 : 0;
+}
+
+void RainEmitter::render(const WorldCamera&) const {   // cParticleEmitterRain::ManagedRender
+    if (!alive_) return;
+    int texture = 0;
+    uint16_t r[4] = {0, 0, 1, 1};
+    if (!Assets_EffectSprite(sprite_, texture, r)) return;
+    const GLuint tex = Assets_Texture(texture);
+    if (!tex) return;
+    int tw = 256, th = 256;
+    Assets_TextureSize(texture, &tw, &th);
+    const float u = (r[0] + r[2] / 2) / (float)tw, vTop = (r[1] + r[3]) / (float)th, vBottom = r[1] / (float)th;
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glColor4ub((GLubyte)tint, (GLubyte)(tint >> 8), (GLubyte)(tint >> 16), 0x70);
+    const float R = range_ / 4096.f, w = 327.f / 4096.f;
+    glBegin(GL_QUADS);
+    for (const Particle& q : parts_) {
+        if (!q.active) continue;
+        const float a = q.angle * 9.587378e-05f, c = cosf(a) * w, s = sinf(a) * w;
+        const float x = pos[0] / 4096.f + q.p[0] / 4096.f * R, y = pos[1] / 4096.f + q.p[1] / 4096.f * R;
+        const float top = pos[2] / 4096.f + q.p[2] / 4096.f * R, bottom = pos[2] / 4096.f + (q.p[2] - q.size) / 4096.f * R;
+        glTexCoord2f(u, vTop); glVertex3f(x + c, y + s, top);
+        glTexCoord2f(u, vTop); glVertex3f(x - c, y - s, top);
+        glTexCoord2f(u, vBottom); glVertex3f(x - c, y - s, bottom);
+        glTexCoord2f(u, vBottom); glVertex3f(x + c, y + s, bottom);
+    }
+    glEnd();
 }
 
 void Particles::render(const WorldCamera& cam) const {

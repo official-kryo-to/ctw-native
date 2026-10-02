@@ -198,7 +198,10 @@ bool Host_PumpEvents() {
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) return false;
-        if (e.type == SDL_MOUSEWHEEL && e.wheel.y != 0) g_wheel.push_back(e.wheel.y > 0 ? 1 : -1);
+        if (e.type == SDL_MOUSEWHEEL) {
+            const int direction = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1;
+            for (int i = 0; i < std::abs(e.wheel.y); ++i) g_wheel.push_back((e.wheel.y > 0 ? 1 : -1) * direction);
+        }
         if (e.type == SDL_KEYDOWN && !e.key.repeat) g_keys.push_back((int)e.key.keysym.scancode);
         if (e.type == SDL_KEYDOWN && e.key.keysym.scancode == SDL_SCANCODE_BACKSPACE) g_text += '\b';
         if (e.type == SDL_TEXTINPUT) g_text += e.text.text;

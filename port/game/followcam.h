@@ -15,6 +15,7 @@
 //   - Projection: vertical half-angle 0x1555 (30°), near 0.4, far 150 (cBaseCam::cBaseCam).
 #pragma once
 #include <cstdint>
+#include "cameraobstruction.h"
 
 class Collision;
 struct WorldCamera;
@@ -33,9 +34,11 @@ public:
 
     void position(float out[3]) const;
     void position(int32_t out[3]) const { for (int i = 0; i < 3; ++i) out[i] = pos_[i]; }
-    void inherit(const int32_t pos[3], uint16_t angle, uint16_t pitch) {
+    uint32_t blockedFrames() const { return obstruction_.blockedFrames(); }
+    void inherit(const int32_t pos[3], uint16_t angle, uint16_t pitch, uint32_t blockedFrames = 0) {
         for (int i = 0; i < 3; ++i) { pos_[i] = pos[i]; vel_[i] = 0; }
         yaw = angle; pitch_ = pitch; pitchVel_ = 0;
+        obstruction_.reset(blockedFrames);
     }
 private:
     bool canSeeTarget(Collision* col) const;
@@ -45,4 +48,5 @@ private:
     int32_t target_[3] = {0, 0, 0};                     // +0x128
     uint16_t pitch_ = 55000;                            // +0xE4
     int32_t pitchVel_ = 0;                              // +0x140
+    CameraObstruction obstruction_;
 };

@@ -52,12 +52,20 @@ public:
     const std::vector<CarGen>* carGens(int cx, int cy);   // the car generators of a 50-unit cell (nullptr: none)
     static void cellOfPos(int32_t x, int32_t y, int& cx, int& cy);
 
-    struct Prop { uint16_t prop, kind; int16_t heading; uint16_t state; int32_t x, y, z; };   // sPackedPropData
+    struct Prop { uint16_t prop, kind; int16_t heading; uint16_t state; int32_t x, y, z; };   // sPackedPropData; kind 1 uses the garage controller
     static_assert(sizeof(Prop) == 20, "sPackedPropData");
     const std::vector<Prop>* props(int cx, int cy);        // the props of a 50-unit cell (nullptr: none)
     struct CityEmitter { uint8_t type, pad[3]; int32_t x, y, z; };                     // sSectorEmitterData
     static_assert(sizeof(CityEmitter) == 16, "sSectorEmitterData");
     const std::vector<CityEmitter>* emitters(int cx, int cy);
+    // cSectorNodeData (sector chunk 3): the pavement network peds wander on. Nodes use the cBaseNode layout of the
+    // road network (positions in 1/8 units, z in 1/2 units, links in links[first .. first + count)). Bridge nodes
+    // (flag bit 7) sit on the sector edge; bridges lists {node, neighbouring sector index (y * 140 + x)} and the
+    // neighbour has a bridge node at the same 2D position (cSectorNodeData::ResolveBridgeNodeId).
+    struct PathNode { uint16_t first, flags; int16_t x, y; int8_t z; uint8_t cover; };
+    static_assert(sizeof(PathNode) == 10, "cBaseNode");
+    struct PedPaths { std::vector<PathNode> nodes; std::vector<uint16_t> links; std::vector<std::pair<uint16_t, uint16_t>> bridges; };
+    const PedPaths* pedPaths(int cx, int cy);   // nullptr: no pavement nodes in this 50-unit cell
     void setPropLibrary(const class PropLibrary* library) { propLibrary_ = library; }
     // Runtime state of a prop (0 = standing; the game sets others when one is knocked over or smashed). A prop that
     // is not solid keeps its shapes aside until it is made solid again.
@@ -99,8 +107,15 @@ public:
     // cPhysicalIntegrator::IsMeshNear: any collision mesh of the cell within r of (x, y).
     bool meshNear(const int32_t p[3], int32_t r);
 
-    // CCollision::GetLineCollision against boxes (flag 0x200); skipFlagged ignores boxes with flag bit 1 (0x2000).
+    // Box-only boolean query; skipFlagged excludes box flag 2. Cameras use staticLine's original filter rules.
     bool lineHitsBoxes(const int32_t a[3], const int32_t b[3], bool skipFlagged);
+    // GetLineIntersectWithStatics: boxes 0x200, cylinders 0x400, meshes 0x100, ground 0x800;
+    // 0x1000 excludes box flag 4. 0x2000 gates each cell on an unflagged box hit,
+    // ending the query if the gate fails (including any pending nearest result).
+    // 0x80000000 stops at the first hit; 0x40000000 selects the nearest one. Without either,
+    // the result retains the last visited hit, including the box HandleStuckCam inspects.
+    struct LineHit { int32_t point[3]{}, normal[3]{}, fraction = 0; Box box{}; bool isBox = false; };
+    bool staticLine(const int32_t a[3], const int32_t b[3], uint32_t flags, LineHit* hit = nullptr);
     // CCollision::GetSphereCollision against boxes (flags 0x40000200): the first box a sphere moving a -> b hits.
     bool sweptSphereHitsBoxes(const int32_t a[3], const int32_t b[3], int32_t r, int32_t contact[3], int32_t n[3]);
 
@@ -118,6 +133,7 @@ private:
                             std::vector<Box> savedBoxes; std::vector<Cyl> savedCyls; bool solid = true; };
         std::vector<PropShapes> propShapes;   // per prop: its shapes in boxes / cyls
         std::vector<CityEmitter> emitters;
+        PedPaths pedPaths;
         bool loaded = false;              // false = no data (off-map)
     };
     const Cell* cell(int cx, int cy);

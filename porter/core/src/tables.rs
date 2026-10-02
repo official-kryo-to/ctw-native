@@ -422,6 +422,14 @@ impl<'a> GameBinary<'a> {
         Ok(out)
     }
 
+    /// cTimeCycle::msWeatherChanceTable (8 weathers x 8 percentages) and UpdateLightning's five thunder sounds.
+    pub fn weather(&self) -> Result<Vec<u8>, TableError> {
+        let mut out = b"CTWWTHR1".to_vec();
+        out.extend(self.read(0x48702c, 64)?);
+        out.extend(self.read(0x48706c, 20)?);
+        Ok(out)
+    }
+
     pub fn restart(&self) -> Result<Vec<u8>, TableError> {
         restart_table(self.constant_calls("_ZN11CScriptMain19DefineRestartPointsEv")?)
     }
@@ -464,6 +472,7 @@ pub fn extract_tables(binary: &[u8]) -> Result<Vec<(&'static str, Vec<u8>)>, Tab
         ("gameplay_tables.bin", game.gameplay()?),
         ("radio_tables.bin", game.radio()?),
         ("restart_tables.bin", game.restart()?),
+        ("weather_tables.bin", game.weather()?),
     ])
 }
 

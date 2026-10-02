@@ -2,10 +2,11 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 /*
- * Cheat Example - a code mod showing most of the mod API:
- *   - vehicle spawner (F7)
- *   - free camera (F8)
- *   - speed, time speed and render distance (in the F4 menu)
+ * Cheat Example - cheats, and a tour of the C API:
+ *   - vehicle spawner (F7) and free camera (F8)
+ *   - vehicle cheats: repair, invincibility, nitro (hold Shift while driving), flip upright, new paint
+ *   - world cheats: time of day, frozen clock, weather, traffic and pedestrian density, clearing the area
+ *   - speed, time speed and render distance
  * Uses ctw_ui.h for the window, the search field and the scrolling list.
  */
 #include "ctw_mod.h"
@@ -27,6 +28,7 @@ static const CtwApi* api;
 static float speed_scale = 1.f, applied_speed = 1.f;
 static float game_speed = 1.f, applied_game_speed = 1.f;
 static float render_distance = 120.f, applied_render_distance = 120.f;
+static float ped_density = 1.f, applied_ped_density = 1.f;   /* needs a version 5 game */
 
 /* ---- free camera -------------------------------------------------------------------------------------- */
 static int cam_on = 0, cam_was_on = 0;
@@ -72,6 +74,109 @@ static void say(const char* text) {
     message_until = api->frame_count() + 75;
 }
 
+/* ---- cheats ----------------------------------------------------------------------------------------------- */
+static int invincible = 0, nitro = 0, freeze_clock = 0, applied_freeze = 0, weather = 0, applied_weather = -1;
+static float time_of_day = 12.f, applied_time = -1.f, traffic_density = 1.f, applied_traffic = 1.f;
+static const char* const weather_names[] = {"1", "2", "3", "4", "5", "6", "7", "8"};
+
+static int has_gameplay(void) { return CTW_MOD_HAS(api, get_player_state) && CTW_MOD_HAS(api, get_vehicle_state); }
+
+/* The vehicle the player drives, 0 when on foot. */
+static CtwVehicle driven(void) {
+    CtwPlayerState p = {0};
+    p.size = sizeof p;
+    return has_gameplay() && api->get_player_state(&p) && (p.flags & CTW_PLAYER_IN_VEHICLE) ? p.vehicle : 0;
+}
+
+static void repair_button(void* user) {
+    (void)user;
+    const CtwVehicle v = driven();
+    say(v && api->repair_vehicle(v) ? "Vehicle repaired" : "Get in a vehicle first");
+}
+
+static void flip_button(void* user) {   /* upright where it is, a little above the ground */
+    (void)user;
+    const CtwVehicle v = driven();
+    CtwVehicleState s = {0};
+    s.size = sizeof s;
+    if (!v || !api->get_vehicle_state(v, &s)) { say("Get in a vehicle first"); return; }
+    s.position[2] += 1.f;
+    api->set_vehicle_transform(v, s.position, s.heading);
+    say("Back on its wheels");
+}
+
+static void paint_button(void* user) {
+    (void)user;
+    const CtwVehicle v = driven();
+    CtwVehicleState s = {0};
+    s.size = sizeof s;
+    if (!v || !api->get_vehicle_state(v, &s)) { say("Get in a vehicle first"); return; }
+    api->set_vehicle_palette(v, (s.palette + 1 + (int)(api->frame_count() % 25)) % 27);
+    say("Fresh paint");
+}
+
+static void clear_area_button(void* user) {   /* every car but the player's that can be removed */
+    (void)user;
+    const CtwVehicle mine = driven();
+    int removed = 0;
+    if (!has_gameplay()) return;
+    for (int i = api->live_vehicle_count() - 1; i >= 0; --i) {
+        const CtwVehicle v = api->live_vehicle_at(i);
+        if (v && v != mine && api->remove_vehicle(v)) ++removed;
+    }
+    char text[64];
+    snprintf(text, sizeof text, "Cleared %d vehicles", removed);
+    say(text);
+}
+
+static void explode_button(void* user) {   /* wreck every car within 40 units, except the player's */
+    (void)user;
+    CtwPlayerState p = {0};
+    int wrecked = 0;
+    p.size = sizeof p;
+    if (!has_gameplay() || !api->get_player_state(&p)) return;
+    for (int i = 0; i < api->live_vehicle_count(); ++i) {
+        CtwVehicleState s = {0};
+        s.size = sizeof s;
+        const CtwVehicle v = api->live_vehicle_at(i);
+        if (!v || v == p.vehicle || !api->get_vehicle_state(v, &s) || (s.flags & CTW_VEHICLE_DEAD)) continue;
+        const float dx = s.position[0] - p.position[0], dy = s.position[1] - p.position[1];
+        if (dx * dx + dy * dy < 40.f * 40.f && api->damage_vehicle(v, 255)) ++wrecked;
+    }
+    char text[64];
+    snprintf(text, sizeof text, "Boom: %d vehicles", wrecked);
+    say(text);
+}
+
+static void cheat_tick(void) {
+    const CtwVehicle v = driven();
+    if (v && invincible) {   /* keep the driven vehicle at full health */
+        CtwVehicleState s = {0};
+        s.size = sizeof s;
+        if (api->get_vehicle_state(v, &s) && s.health < 255 && !(s.flags & CTW_VEHICLE_DEAD)) api->repair_vehicle(v);
+    }
+    if (v && nitro && api->key_down(SC_LSHIFT)) {   /* push along the direction of travel, up to 60 units/s */
+        CtwVehicleState s = {0};
+        s.size = sizeof s;
+        if (api->get_vehicle_state(v, &s)) {
+            const float sp = sqrtf(s.velocity[0] * s.velocity[0] + s.velocity[1] * s.velocity[1]);
+            if (sp > 2.f && sp < 60.f) {
+                const float k = (sp + 1.2f) / sp;
+                const float vel[3] = {s.velocity[0] * k, s.velocity[1] * k, s.velocity[2]};
+                api->set_vehicle_velocity(v, vel);
+            }
+        }
+    }
+    if (time_of_day != applied_time) { api->set_time_of_day(time_of_day); applied_time = time_of_day; }
+    if (freeze_clock != applied_freeze) { api->set_clock_running(!freeze_clock); applied_freeze = freeze_clock; }
+    if (!freeze_clock) time_of_day = applied_time = api->get_time_of_day();   /* the slider follows the clock */
+    if (weather != applied_weather) { api->set_weather(weather); applied_weather = weather; }
+    if (traffic_density != applied_traffic && CTW_MOD_HAS(api, set_traffic_density)) {
+        api->set_traffic_density(traffic_density);
+        applied_traffic = traffic_density;
+    }
+}
+
 static void spawn(int id) {
     const char* name = api->vehicle_name(id);
     char text[96];
@@ -95,6 +200,9 @@ static void reset_button(void* user) {
     speed_scale = 1.f;
     game_speed = 1.f;
     render_distance = 120.f;
+    ped_density = 1.f;
+    traffic_density = 1.f;
+    invincible = nitro = freeze_clock = 0;
     cam_on = 0;
 }
 
@@ -169,6 +277,11 @@ static void tick(void* user) {
     (void)user;
     if (speed_scale != applied_speed) { api->set_speed_scale(speed_scale); applied_speed = speed_scale; }
     if (game_speed != applied_game_speed) { api->set_game_speed(game_speed); applied_game_speed = game_speed; }
+    if (has_gameplay()) cheat_tick();
+    if (ped_density != applied_ped_density && CTW_MOD_HAS(api, set_ped_density)) {
+        api->set_ped_density(ped_density);
+        applied_ped_density = ped_density;
+    }
 }
 
 static void apply_render_distance(void) {   /* also while the game is paused: called every drawn frame */
@@ -230,20 +343,21 @@ static void draw_spawner(void) {
 }
 
 /* The free camera's keys, at the bottom above the game's help line. Only while nothing else is open: with a
- * window open the camera does not move anyway. */
+ * window open the camera does not move anyway. Same rounded panel style as the mod menu. */
 static void draw_camera_help(void) {
-    const float W = (float)api->screen_width(), bottom = ctw_ui_screen_bottom(api), w = W - 2.f * CTW_UI_GAP - 28.f;
+    const float W = (float)api->screen_width(), bottom = ctw_ui_screen_bottom(api);
+    const float x = CTW_UI_GAP, bw = W - 2.f * CTW_UI_GAP, w = bw - 40.f;
     char speeds[128];
     snprintf(speeds, sizeof speeds, "Wheel: speed %.0f      Page Up / Page Down: render distance %.0f", cam_speed, render_distance);
     const char* keys = "Mouse: look      WASD: fly      Space / Ctrl: up and down      Shift: faster      F8: back";
     const float h1 = ctw_ui_lh(&ui, 1.1f), h2 = ctw_ui_text_wrap(&ui, 0, 0, 0.9f, 0, keys, w, 0);
     const float h3 = ctw_ui_text_wrap(&ui, 0, 0, 0.9f, 0, speeds, w, 0), h = 12.f + h1 + 6.f + h2 + h3 + 12.f;
     const float y = bottom - h;
-    api->draw_rect(CTW_UI_GAP, y, W - 2.f * CTW_UI_GAP, h, 0x0E0E12D0u);
-    api->draw_rect(CTW_UI_GAP, y, 3.f, h, CTW_UI_ACCENT);
-    api->draw_text(CTW_UI_GAP + 14.f, y + 12.f, 1.1f, CTW_UI_ACCENT, "FREE CAMERA");
-    ctw_ui_text_wrap(&ui, CTW_UI_GAP + 14.f, y + 18.f + h1, 0.9f, CTW_UI_TEXT, keys, w, 1);
-    ctw_ui_text_wrap(&ui, CTW_UI_GAP + 14.f, y + 18.f + h1 + h2, 0.9f, CTW_UI_DIM, speeds, w, 1);
+    ctw_ui_round_rect(api, x, y, bw, h, 12.f, CTW_UI_PANEL);
+    api->draw_rect(x + 12.f, y, bw - 24.f, 2.f, CTW_UI_ACCENT);
+    api->draw_text(x + 20.f, y + 12.f, 1.1f, CTW_UI_TEXT, "FREE CAMERA");
+    ctw_ui_text_wrap(&ui, x + 20.f, y + 18.f + h1, 0.9f, CTW_UI_TEXT, keys, w, 1);
+    ctw_ui_text_wrap(&ui, x + 20.f, y + 18.f + h1 + h2, 0.9f, CTW_UI_DIM, speeds, w, 1);
 }
 
 static void hud(void* user) {
@@ -263,14 +377,38 @@ static void hud(void* user) {
 
 CTW_MOD_EXPORT int ctw_mod_init(CtwMod* mod, const CtwApi* a) {
     api = a;
-    if (api->version < 3 || api->size < sizeof(CtwApi)) {
+    if (api->version < 3 || !CTW_MOD_HAS(api, get_render_distance)) {
         api->log(mod, "needs a newer game");
         return 1;
     }
     speed_scale = applied_speed = api->get_speed_scale();
     render_distance = applied_render_distance = api->get_render_distance();
     game_speed = applied_game_speed = api->get_game_speed();
+    weather = applied_weather = api->get_weather();
+    time_of_day = applied_time = api->get_time_of_day();
+    const int labels = CTW_MOD_HAS(api, menu_add_label), choices = CTW_MOD_HAS(api, menu_add_choice);
+    if (labels) api->menu_add_label(mod, "VEHICLES");
     api->menu_add_button(mod, "Vehicle spawner (F7)", open_spawner_button, 0);
+    if (has_gameplay()) {
+        api->menu_add_button(mod, "Repair vehicle", repair_button, 0);
+        api->menu_add_button(mod, "Flip vehicle upright", flip_button, 0);
+        api->menu_add_button(mod, "New paint job", paint_button, 0);
+        api->menu_add_toggle(mod, "Invincible vehicle", &invincible);
+        api->menu_add_toggle(mod, "Nitro (hold Shift)", &nitro);
+    }
+    if (labels) api->menu_add_label(mod, "WORLD");
+    api->menu_add_slider(mod, "Time of day", &time_of_day, 0.f, 23.75f, 0.25f);
+    api->menu_add_toggle(mod, "Freeze clock", &freeze_clock);
+    if (choices) api->menu_add_choice(mod, "Weather", &weather, weather_names, 8);
+    if (CTW_MOD_HAS(api, set_traffic_density))
+        api->menu_add_slider(mod, "Traffic density", &traffic_density, 0.f, 4.f, 0.25f);
+    if (CTW_MOD_HAS(api, set_ped_density))
+        api->menu_add_slider(mod, "Pedestrian density", &ped_density, 0.f, 4.f, 0.25f);
+    if (has_gameplay()) {
+        api->menu_add_button(mod, "Clear all other vehicles", clear_area_button, 0);
+        api->menu_add_button(mod, "Wreck nearby vehicles", explode_button, 0);
+    }
+    if (labels) api->menu_add_label(mod, "PLAYER AND CAMERA");
     api->menu_add_toggle(mod, "Free camera (F8)", &cam_on);
     api->menu_add_slider(mod, "Speed multiplier", &speed_scale, 0.25f, 10.f, 0.25f);
     api->menu_add_slider(mod, "Time speed multiplier", &game_speed, 0.f, 8.f, 0.25f);
@@ -287,6 +425,7 @@ CTW_MOD_EXPORT void ctw_mod_shutdown(void) {
     api->set_speed_scale(1.f);
     api->set_game_speed(1.f);
     api->set_render_distance(120.f);
+    if (CTW_MOD_HAS(api, set_ped_density)) api->set_ped_density(1.f);
     api->set_free_camera(0, 0, 0.f, 0.f);
     api->set_mouse_captured(0);
     api->set_game_input(1);

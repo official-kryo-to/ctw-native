@@ -178,6 +178,15 @@ void Vehicle::placeOnRail(int32_t x, int32_t y, int32_t z, const int32_t dir[2],
     angVel[0] = angVel[1] = angVel[2] = 0;
 }
 
+void Vehicle::teleport(const int32_t p[3], int16_t heading) {
+    // placeUpright must run with physics off, otherwise syncFromIntegrator restores the old centre of gravity.
+    setToPhysics(false);
+    simple_ = false;
+    for (int k = 0; k < 3; ++k) vel[k] = angVel[k] = force_[k] = torque_[k] = 0;
+    placeUpright(p, heading);
+    setToPhysics(true);
+}
+
 int16_t Vehicle::heading() const { return (int16_t)-atan2q(-fwd[0], fwd[1]); }
 int32_t Vehicle::speed() const { return (int32_t)isqrt((int64_t)vel[0] * vel[0] + (int64_t)vel[1] * vel[1] + (int64_t)vel[2] * vel[2]); }
 
@@ -344,6 +353,8 @@ int32_t Vehicle::impactTerm(const int32_t n[3], const int32_t r[3]) const {   //
 void Vehicle::act(const Controls& yIn, bool playerDriving, Collision* col) {
     playerDriving_ = playerDriving;
     Controls y = dead_ ? Controls{} : yIn;   // a wreck does not drive
+    // Engine-off mods retain steering and braking, but cannot apply propulsion in either gear direction.
+    if (!engineOn && ((gear_ >= 1 && y.throttle > 0) || (gear_ < 1 && y.throttle < 0))) y.throttle = 0;
     b64_ &= 0xFFF9;   // this frame's brake / reverse
     if (physicsActive()) { railBraking = false; indicators = 0; }   // (a simulated car is not on rails any more)
     // cWheeledVehicle::Act (the driver's controls)
@@ -1424,6 +1435,15 @@ void Vehicle::damage(int amount) {   // cVehicle::Damage (collision damage, 100 
         if (health_ > 0x1E) burnTimer_ = 0x1E0;   // cVehicle::SetHealth
     }
     if (health_ < 0x1E && playerDriving_) health_ = 0x1E;
+}
+
+bool Vehicle::repair() {
+    if (dead_) return false;
+    health_ = 0xFF;
+    burnTimer_ = 0x1E0;
+    tyre_[0].burst = tyre_[1].burst = false;
+    releaseEffects();
+    return true;
 }
 
 Vehicle::SoundState Vehicle::soundState() const {

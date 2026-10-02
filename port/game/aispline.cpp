@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 #include "aispline.h"
+#include "fixedmath.h"
 #include "lookups.h"
 #include "roads.h"
 #include "cargens.h"   // Rand32Critical
@@ -10,17 +11,8 @@
 
 static inline int32_t mulq(int64_t a, int64_t b) { return (int32_t)((a * b) >> 12); }
 static int32_t isqrt64(int64_t v) { return v <= 0 ? 0 : (int32_t)std::sqrt((double)v); }
-static void normalise2(int32_t v[2]) {   // Normalise(tv2d)
-    double l = std::sqrt((double)v[0] * v[0] + (double)v[1] * v[1]);
-    if (l <= 0) return;
-    v[0] = (int32_t)std::lround(v[0] / l * 4096.0);
-    v[1] = (int32_t)std::lround(v[1] / l * 4096.0);
-}
-static void normalise3(int32_t v[3]) {
-    double l = std::sqrt((double)v[0] * v[0] + (double)v[1] * v[1] + (double)v[2] * v[2]);
-    if (l <= 0) return;
-    for (int i = 0; i < 3; ++i) v[i] = (int32_t)std::lround(v[i] / l * 4096.0);
-}
+static void normalise2(int32_t v[2]) { Normalise2(v); }
+static void normalise3(int32_t v[3]) { Normalise3(v); }
 static uint32_t rand16(uint32_t n) { return Rand32Critical(n); }
 
 // ============================================================================================== cTarget

@@ -20,7 +20,8 @@ void Audio_SetMusicVolume(float v);      // 0..1
 struct AudioTrackInfo { int sampleRate = 0, channels = 0; double seconds = 0; };
 bool Audio_Probe(const std::string& path, AudioTrackInfo* out);   // reads header/length without playing
 double Audio_MusicPosition();            // seconds into the current track
-float Audio_MusicLevel();                // recent peak level 0..1 (for a simple meter)
+float Audio_MusicLevel();
+void Audio_MusicBands(float out[8]);      // band energies of the playing music (the radio app's equaliser)                // recent peak level 0..1 (for a simple meter)
 
 // Sound effects: the game's samples are 8-bit unsigned mono PCM (cAudioBaseOAL plays them as AL_FORMAT_MONO8).
 // A voice plays one sample (optionally looping) at volume 0..1, pan -1 (left) .. 1 (right) and a pitch factor.
@@ -31,3 +32,5 @@ void Audio_SfxStop(int voice);
 bool Audio_SfxPlaying(int voice);
 void Audio_SetSfxVolume(float v);        // master 0..1
 void Audio_SetSfxPaused(bool paused);    // suspend voices without advancing their samples
+int Audio_SfxActive();                   // voices playing (the debug overlay)
+bool Audio_SfxPaused();

@@ -37,6 +37,7 @@ compile_commands.json
 **/saves/
 **/mods/log.txt
 **/mods/enabled.ini
+**/mods/*/settings.ini
 **/__pycache__/
 *.py[cod]
 .venv/

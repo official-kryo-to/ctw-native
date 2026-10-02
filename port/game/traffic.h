@@ -30,13 +30,22 @@ class Vehicle;
 class Traffic {
 public:
     bool init(const std::string& dataDir);
+    bool ok() const { return !makeups_.empty(); }
     void update(Game& g);   // once per game frame, before the vehicles act
 
-    struct ZoneInfo { int fields[20]; int pedMakeup, vehMakeup, pedDensity, carDensity; };
+    struct ZoneInfo { int fields[20]; int pedMakeup, vehMakeup, pedDensity, carDensity, sex = 0; };   // sex: 1 male, 2 female
     const ZoneInfo* zoneAt(int32_t x, int32_t y, bool night) const;
     std::string zoneName(int32_t x, int32_t y) const;
     int maxCars = 0;          // for the HUD / tests
     int count() const { return (int)drivers_.size(); }
+    float densityScale = 1.f; // PC mod API: scales the target moving-car population; original default is 1
+    void forget(uint32_t uid) { drivers_.erase(uid); }
+    bool firedThisFrame = false;   // the vehicle schedule fired: cPopulationManager::Update skips peds this frame
+    const ZoneInfo& zoneOrDefault(int32_t x, int32_t y, bool night) const;   // cPopulationZones::Info
+    // popinfo.bin ped makeups: weighted pedinfo.bin record indices (cPopInfoManager::GetSubType)
+    const std::vector<std::pair<uint16_t, uint16_t>>* pedMakeup(int makeup) const {
+        return makeup >= 0 && makeup < (int)pedMakeups_.size() ? &pedMakeups_[makeup] : nullptr;
+    }
 
 private:
     struct Driver {           // cWanderRoads
@@ -56,6 +65,7 @@ private:
     std::vector<std::vector<uint8_t>> lists_;
     struct Makeup { std::vector<std::pair<uint16_t, uint16_t>> entries; uint8_t sea = 0, land = 0; };
     std::vector<Makeup> makeups_;
+    std::vector<std::vector<std::pair<uint16_t, uint16_t>>> pedMakeups_;
     uint32_t linkCursor_ = 0;
 
     int vehicleFromMakeup(const Game& g, int makeup, int limit) const;   // cPopInfoManager::GetVehicleId

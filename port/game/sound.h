@@ -5,7 +5,7 @@
 //
 // Data (ROM.WAD): resbnk.bin - the resident bank, u32 count + count x {u32 offset, u32 size, u32 rate} and the
 // samples; each sample = 32-byte header (+4 length, +0x14 rate) + 8-bit unsigned mono PCM. carbnkN.bin - a car's
-// own engine bank (same layout), loaded into RAM bank 1 for the car the player drives (gGears[type].bank).
+// own engine bank (same layout). The port caches these at startup, selecting the driver's bank without file IO.
 //
 // Every entity has 5 sound slots (sEventItem). A sound event (gEventInfo: bank, loop / one shot, sample, priority,
 // fixed pan) is added to a slot with a volume (0..127) and a radius (squared units); looping events must be added
@@ -21,6 +21,7 @@
 
 class Game;
 class Vehicle;
+class GameFs;
 
 class Sound {
 public:
@@ -31,6 +32,8 @@ public:
     int explosion(Game& game, const int32_t pos[3]);              // cExplosionBigVehicle::PlayScriptSfx
     void propSmash(const int32_t pos[3], int effect);              // cAudioManager::AddPropCollision
     void propSmash(const int32_t pos[3], int effect, int radius);
+    void pedDeath(const int32_t pos[3], bool male, bool inWater);   // cAudioManager::PlayDeathSound
+    void playResident(int sample, int volume);                     // cAudioManager::PlaySfx: not positional
     bool horn = false;                                           // the player holds the horn
     bool ok() const { return !res_.data.empty(); }
 
@@ -39,10 +42,12 @@ private:
         std::vector<uint8_t> data;
         struct Entry { uint32_t offset, size, rate; };
         std::vector<Entry> entries;
-        bool load(const std::string& dataDir, const char* name);
+        bool load(GameFs& fs, const char* name);
         bool sample(int i, const uint8_t*& pcm, uint32_t& len, uint32_t& rate) const;
     };
     Bank res_, car_;
+    std::map<std::string, Bank> carBanks_;
+    const Bank* activeCarBank_ = nullptr;
     SoundTables tables_;
     int carBankEnum_ = -1;
 

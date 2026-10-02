@@ -45,6 +45,23 @@ struct Stream {
 static Stream* g_music = nullptr;   // owned; swapped under the device lock, never moved/copied
 static std::atomic<float> g_volume{0.8f};
 static std::atomic<float> g_level{0.f};
+// cRadioApp::InitFilters / ProcessFilters: nine one-pole low-passes at 20, 50, 100, 200, 400, 1000, 3000, 8000 and
+// 21000 Hz; band i is the difference of filters i and i + 1, its energy smoothed (0.99902 per analysed sample, the
+// original analysing 256 samples a 30 Hz frame). Run on every sample here with the same time constant.
+struct BandFilters {
+    float lp[9] = {}, energy[8] = {}, a[9] = {}, decay = 0.f;
+    void init(int rate) {
+        static const float freq[9] = {20, 50, 100, 200, 400, 1000, 3000, 8000, 21000};
+        for (int k = 0; k < 9; ++k) a[k] = std::exp(-6.2831855f * std::min(freq[k], rate * 0.45f) / (float)rate);
+        decay = std::pow(0.99902f, 256.f * 30.f / (float)rate);
+    }
+    void add(float x) {
+        for (int k = 0; k < 9; ++k) lp[k] = a[k] * lp[k] + (1.f - a[k]) * x;
+        for (int b = 0; b < 8; ++b) { const float d = lp[b + 1] - lp[b]; energy[b] = decay * energy[b] + (1.f - decay) * d * d; }
+    }
+};
+static BandFilters g_bands;
+static std::atomic<float> g_bandOut[8];
 
 // Pull more source frames into s.buf. Returns false at end of stream (after looping if enabled).
 static bool refill(Stream& s) {
@@ -153,6 +170,23 @@ bool Audio_SfxPlaying(int h) {
 
 void Audio_SetSfxVolume(float v) { g_sfxVolume = v; }
 
+bool Audio_SfxPaused() {
+    if (!g_dev) return false;
+    SDL_LockAudioDevice(g_dev);
+    const bool paused = g_sfxPaused;
+    SDL_UnlockAudioDevice(g_dev);
+    return paused;
+}
+
+int Audio_SfxActive() {
+    if (!g_dev) return 0;
+    SDL_LockAudioDevice(g_dev);
+    int n = 0;
+    for (const SfxVoice& v : g_sfx) n += v.active ? 1 : 0;
+    SDL_UnlockAudioDevice(g_dev);
+    return n;
+}
+
 void Audio_SetSfxPaused(bool paused) {
     if (!g_dev) return;
     SDL_LockAudioDevice(g_dev);
@@ -165,7 +199,12 @@ static void SDLCALL mix(void*, Uint8* out8, int len) {
     int frames = len / 4;
     memset(out8, 0, (size_t)len);
     struct SfxAfter { int16_t* o; int f; ~SfxAfter() { mixSfx(o, f); } } sfxAfter{out, frames};
-    if (!g_music || !g_music->open || g_music->paused) { g_level = 0.f; return; }
+    if (!g_music || !g_music->open || g_music->paused) {
+        g_level = 0.f;
+        for (auto& b : g_bandOut) b = 0.f;
+        return;
+    }
+    if (g_bands.decay == 0.f) g_bands.init(kOutRate);
     Stream& s = *g_music;
     const double step = (double)s.rate / kOutRate;
     const float vol = g_volume.load();
@@ -181,19 +220,23 @@ static void SDLCALL mix(void*, Uint8* out8, int len) {
         }
         size_t i1 = std::min(i0 + 1, s.bufFrames - 1);
         float t = (float)(s.pos - (double)i0);
+        float mono = 0.f;
         for (int c = 0; c < 2; ++c) {
             int sc = s.channels == 1 ? 0 : c;
             float a = s.buf[i0 * s.channels + sc], b = s.buf[i1 * s.channels + sc];
+            mono += (a + (b - a) * t) * (0.5f / 32768.f);
             float v = (a + (b - a) * t) * vol;
             v = std::max(-32768.f, std::min(32767.f, v));
             out[i * 2 + c] = (int16_t)v;
             peak = std::max(peak, std::fabs(v) / 32768.f);
         }
+        g_bands.add(mono);
         s.pos += step;
         s.bufStart = (size_t)s.pos > 0 ? (size_t)s.pos - 1 : 0;   // frames before this can be dropped
         s.framesPlayed++;
     }
     g_level = peak;
+    for (int b = 0; b < 8; ++b) g_bandOut[b] = g_bands.energy[b];
 }
 
 bool Audio_Init() {
@@ -283,6 +326,7 @@ bool Audio_MusicPlaying() {
 
 void Audio_SetMusicVolume(float v) { g_volume = std::max(0.f, std::min(1.f, v)); }
 float Audio_MusicLevel() { return g_level.load(); }
+void Audio_MusicBands(float out[8]) { for (int b = 0; b < 8; ++b) out[b] = g_bandOut[b].load(); }
 
 double Audio_MusicPosition() {
     if (!g_dev) return 0;

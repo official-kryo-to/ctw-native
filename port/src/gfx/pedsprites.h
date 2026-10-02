@@ -38,6 +38,7 @@ class PedSprites {
 public:
     bool init();   // loads the animation table and palettes (needs Assets_Open)
     bool ok() const { return !anims_.empty(); }
+    int paletteCount() const { return (int)(palettes_.size() / 32); }
 
     int numFrames(int anim) const;
     int rate(int anim) const;               // 24.8

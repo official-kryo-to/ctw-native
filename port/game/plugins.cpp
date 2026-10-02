@@ -3,6 +3,7 @@
 // See LICENSE in the repository root.
 #include "plugins.h"
 #include "ctw_plugin.h"
+#include "gameplayapi.h"
 #include "game.h"
 #include "hud.h"
 #include "gfx/assets.h"
@@ -26,8 +27,11 @@ std::string g_modsDir;
 FILE* g_log = nullptr;
 struct Hook { CtwCallback fn; void* user; };
 struct KeyHook { CtwKeyCallback fn; void* user; };
-std::vector<Hook> g_tick, g_hud;
+std::vector<Hook> g_tick, g_hud, g_frame;
 std::vector<KeyHook> g_keys;
+struct EventHook { CtwGameEventCallback fn; void* user; };
+std::vector<EventHook> g_events;
+std::vector<CtwGameEvent> g_pendingEvents;
 std::vector<uint8_t> g_prevKeys, g_curKeys;
 bool g_gameInput = true;
 int g_w = 1280, g_h = 720;
@@ -36,6 +40,7 @@ int g_clicks = 0;
 float g_wheel = 0, g_dx = 0, g_dy = 0;
 std::string g_text;
 bool g_captured = false;
+bool g_wheelConsumed = false;
 float g_clip[4] = {0, 0, 0, 0};   // the mods' clip rectangle (w <= 0: none)
 
 const char* h_mods_dir() { return g_modsDir.c_str(); }
@@ -49,11 +54,9 @@ void h_set_time(float h) {
 }
 int h_get_clock() { return TheGame().clockRunning ? 1 : 0; }
 void h_set_clock(int r) { TheGame().clockRunning = r != 0; }
-int h_get_weather() { return TheGame().weather; }
-void h_set_weather(int w) {
-    TheGame().weather = w & 7;
-    TheGame().world.timeCycle().setWeather(w & 7);
-    TheGame().world.timeCycle().evaluate();
+int h_get_weather() { return TheGame().world.timeCycle().weather(); }
+void h_set_weather(int w) {   // ForceWeather(w, true)
+    TheGame().weather.force(TheGame(), w & 7);
 }
 void h_get_pos(float o[3]) { TheGame().player.posf(o); }
 void h_set_pos(const float p[3]) {
@@ -229,9 +232,10 @@ void h_get_camera(float eye[3], float* yaw, float* pitch) {
 void h_on_tick(CtwCallback fn, void* u) { if (fn) g_tick.push_back({fn, u}); }
 void h_on_hud(CtwCallback fn, void* u) { if (fn) g_hud.push_back({fn, u}); }
 void h_on_key(CtwKeyCallback fn, void* u) { if (fn) g_keys.push_back({fn, u}); }
+void h_on_event(CtwGameEventCallback fn, void* u) { if (fn) g_events.push_back({fn, u}); }
 void h_game_input(int on) { g_gameInput = on != 0; }
 
-const CtwHostApi g_host = {
+CtwHostApi g_host = {
     CTW_PLUGIN_API_VERSION, sizeof(CtwHostApi),
     h_mods_dir, h_log, h_frame,
     h_get_time, h_set_time, h_get_clock, h_set_clock, h_get_weather, h_set_weather,
@@ -249,6 +253,20 @@ const CtwHostApi g_host = {
 };
 }  // namespace
 
+const CtwHostApi& Plugins_HostApi() {
+    static const bool filled = [] {
+        GameplayApi_Fill(g_host); g_host.on_game_event = h_on_event;
+        g_host.consume_mouse_wheel = [] { g_wheelConsumed = true; };
+        g_host.on_frame_begin = [](CtwCallback fn, void* u) { if (fn) g_frame.push_back({fn, u}); };
+        return true;
+    }();
+    (void)filled;
+    return g_host;
+}
+
+void Plugins_EmitEvent(uint32_t type, CtwVehicle vehicle, int modelId, int value) {
+    if (!g_events.empty()) g_pendingEvents.push_back({sizeof(CtwGameEvent), type, vehicle, modelId, value});
+}
 
 void Plugins_Log(const std::string& line) {
     if (!g_log) g_log = fopen((fs::path(g_modsDir) / "log.txt").string().c_str(), "w");   // only once there is something to say
@@ -272,8 +290,14 @@ void Plugins_Init(const std::string& modsDir) {
         auto init = (CtwPluginInitFn)SDL_LoadFunction(pl.lib, "ctw_plugin_init");
         pl.shutdown = (CtwPluginShutdownFn)SDL_LoadFunction(pl.lib, "ctw_plugin_shutdown");
         if (!init) { Plugins_Log(pl.name + " is not a plugin (no ctw_plugin_init)"); SDL_UnloadObject(pl.lib); continue; }
-        int r = init(&g_host);
-        if (r != 0) { Plugins_Log(pl.name + " refused to load (" + std::to_string(r) + ")"); SDL_UnloadObject(pl.lib); continue; }
+        const size_t ticks = g_tick.size(), huds = g_hud.size(), keys = g_keys.size(), events = g_events.size(),
+                     frames = g_frame.size();
+        int r = init(&Plugins_HostApi());
+        if (r != 0) {
+            // Hooks registered during a failed init must not outlive the unloaded DLL.
+            g_tick.resize(ticks); g_hud.resize(huds); g_keys.resize(keys); g_events.resize(events); g_frame.resize(frames);
+            Plugins_Log(pl.name + " refused to load (" + std::to_string(r) + ")"); SDL_UnloadObject(pl.lib); continue;
+        }
         Plugins_Log("loaded plugin " + pl.name);
         g_plugins.push_back(pl);
     }
@@ -286,7 +310,11 @@ void Plugins_Shutdown() {
     }
     g_plugins.clear();
     g_previews.clear();
-    g_tick.clear(); g_hud.clear(); g_keys.clear();
+    g_tick.clear(); g_hud.clear(); g_keys.clear(); g_frame.clear();
+    g_events.clear(); g_pendingEvents.clear();
+    g_gameInput = true; g_captured = false; Host_SetRelativeMouse(false);
+    Game& g = TheGame();   // nothing a plugin changed about the camera outlives it
+    g.freeCam.on = false; g.controlYaw.on = false; g.fovOverride = 0.f; g.renderStyle = {};
     if (g_log) fclose(g_log);
     g_log = nullptr;
 }
@@ -298,22 +326,40 @@ void Plugins_BeginFrameInput() {
     g_curKeys.assign(ks, ks + n);
 }
 
-void Plugins_Tick() { for (auto& h : g_tick) h.fn(h.user); }
+void Plugins_Tick() {
+    // Callbacks may register hooks or mutate vehicles. Snapshot both hooks and queued events;
+    // events produced during this dispatch wait for the following tick.
+    std::vector<CtwGameEvent> events;
+    events.swap(g_pendingEvents);
+    const auto eventHooks = g_events;
+    for (const auto& event : events) for (const auto& hook : eventHooks) hook.fn(&event, hook.user);
+    const auto ticks = g_tick;
+    for (const auto& h : ticks) h.fn(h.user);
+}
 
-void Plugins_DrawHud(int w, int h) {
+void Plugins_BeginFrame(int w, int h) {
     g_w = w; g_h = h;
     g_clicks = Host_PopClicks();
     g_wheel = 0;
+    g_wheelConsumed = false;
     while (int notch = Host_PopWheel()) g_wheel += (float)notch;
     g_text = Host_PopText();
     Host_PopMouseDelta(&g_dx, &g_dy);
-    for (auto& k : g_hud) k.fn(k.user);
+    const auto frames = g_frame;
+    for (const auto& f : frames) f.fn(f.user);
+}
+
+void Plugins_DrawHud(int w, int h) {
+    g_w = w; g_h = h;
+    const auto huds = g_hud;
+    for (const auto& k : huds) k.fn(k.user);
     g_clip[2] = 0;
     glDisable(GL_SCISSOR_TEST);
 }
 
 bool Plugins_Key(int sc) {
-    for (auto& k : g_keys)
+    const auto keys = g_keys;
+    for (const auto& k : keys)
         if (k.fn(sc, k.user)) return true;
     return false;
 }

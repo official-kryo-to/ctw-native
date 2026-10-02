@@ -154,6 +154,10 @@ void RigidBody::matrix(float M[16]) const {
     for(int k=0;k<3;++k) { M[k]=right[k]/4096.f; M[4+k]=fwd[k]/4096.f; M[8+k]=up[k]/4096.f; M[12+k]=pos[k]/4096.f; }
     M[3]=M[7]=M[11]=0; M[15]=1;
 }
+void RigidBody::worldPosition(const int32_t local[3], int32_t out[3]) const {
+    for (int k = 0; k < 3; ++k) out[k] = pos[k] + (int32_t)(
+        ((int64_t)local[0]*right[k] + (int64_t)local[1]*fwd[k] + (int64_t)local[2]*up[k]) >> 12);
+}
 void RigidBody::spheres(int32_t out[6][4], int& count) const {
     count=sphereCount_;
     int32_t first[3], step[3];

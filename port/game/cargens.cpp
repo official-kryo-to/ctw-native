@@ -7,12 +7,6 @@
 #include <cmath>
 #include <cstdio>
 
-uint32_t Rand32Critical(uint32_t n) {
-    static uint32_t s = 0x1234567u;
-    s ^= s << 13; s ^= s >> 17; s ^= s << 5;
-    return n ? s % n : 0;
-}
-
 void CarGenManager::reset() {
     for (Slot& s : slots_) s.used = false;
     sectors_.clear();

@@ -20,8 +20,7 @@
 //                  (1.5 units), and is pushed out of overlaps; then GetGround decides on-ground / gravity
 //                  (-0x1ED0 per frame).
 //   AnimateWalkRunCycle - the sprite pair for the level, stepped by CurrentSpeed x 0x88 >> 16.
-// Not ported: swimming (the player won't step into water), jumping/diving, weapons, other peds and vehicles as
-// obstacles.
+// Not ported: swimming (the player won't step into water), jumping/diving, weapons and other peds.
 #pragma once
 #include <cstdint>
 #include <vector>

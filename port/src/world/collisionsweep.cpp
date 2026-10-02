@@ -484,6 +484,75 @@ bool Collision::lineHitsBoxes(const int32_t a[3], const int32_t b[3], bool skipF
     return false;
 }
 
+bool Collision::staticLine(const int32_t a[3], const int32_t b[3], uint32_t flags, LineHit* out) {
+    std::vector<std::pair<int, int>> cells;
+    cellsNearSegment(a, b, cells);
+    LineHit best;
+    int32_t nearest = INT32_MAX;
+    bool found = false;
+    auto record = [&](const int32_t p[3], const int32_t n[3], int32_t t, const Box* box) {
+        if ((flags & 0x40000000) && t >= nearest) return;
+        nearest = t; found = true;
+        std::copy(p, p + 3, best.point); std::copy(n, n + 3, best.normal);
+        best.fraction = t; best.isBox = box != nullptr;
+        best.box = box ? *box : Box{};
+    };
+    // The original pops the cell list from the end, then visits each shape list in order.
+    for (auto it = cells.rbegin(); it != cells.rend(); ++it) {
+        const Cell* c = cell(it->first, it->second);
+        if (!c) continue;
+        int32_t p[3], n[3], t;
+        bool boxes = (flags & 0x200) != 0;
+        if (boxes && (flags & 0x2000)) {
+            boxes = false;
+            for (const Box& box : c->boxes)
+                if (!(box.flags & 2) && sweptVertVBox(a, b, box, p, n, t)) { boxes = true; break; }
+            // The reference exits the entire query if this prepass has no hit. In nearest mode
+            // its pending result is only published after all cells have been visited.
+            if (!boxes) {
+                const bool reported = found && !(flags & 0x40000000);
+                if (out) *out = reported ? best : LineHit{};
+                return reported;
+            }
+        }
+        if (boxes) {
+            for (const Box& box : c->boxes) {
+                if ((flags & 0x1000) && (box.flags & 4)) continue;
+                if (!sweptVertVBox(a, b, box, p, n, t)) continue;
+                record(p, n, t, &box);
+                if ((flags & 0xC0000000) == 0x80000000) { if (out) *out = best; return true; }
+            }
+            // GetLineIntersectWithStatics tests the ground slab only when the segment crosses z=0.
+            if ((flags & 0x800) && ((a[2] < 0) != (b[2] < 0))) {
+                const int64_t fraction = -(int64_t)a[2] * 4096 / ((int64_t)b[2] - a[2]);
+                int32_t at[3];
+                for (int k = 0; k < 3; ++k) at[k] = a[k] + (int32_t)(((int64_t)b[k] - a[k]) * fraction >> 12);
+                Ground g = ground(at[0]/4096.f, at[1]/4096.f, 50.f);
+                if (g.surface == 0) {
+                    Box slab = {at[0],at[1],(int32_t)lroundf(g.z*4096.f)-0x800,0x64000,0x64000,0x800,0,0x20};
+                    if (sweptVertVBox(a, b, slab, p, n, t)) {
+                        record(p, n, t, &slab);
+                        if ((flags & 0xC0000000) == 0x80000000) { if (out) *out = best; return true; }
+                    }
+                }
+            }
+        }
+        if (flags & 0x400) for (const Cyl& cyl : c->cyls) {
+            if (!sweptVertVCylinder(a, b, cyl, p, n, t)) continue;
+            record(p, n, t, nullptr);
+            if ((flags & 0xC0000000) == 0x80000000) { if (out) *out = best; return true; }
+        }
+        if (flags & 0x100) for (const Mesh& mesh : c->meshes) for (const Tri& tri : mesh.tris) {
+            if (tri.v[0]*3+2 >= mesh.verts.size() || tri.v[1]*3+2 >= mesh.verts.size() || tri.v[2]*3+2 >= mesh.verts.size()) continue;
+            if (!sweptVertVTri(a, b, {&tri,mesh.verts.data()}, p, n, t)) continue;
+            record(p, n, t, nullptr);
+            if ((flags & 0xC0000000) == 0x80000000) { if (out) *out = best; return true; }
+        }
+    }
+    if (out) *out = found ? best : LineHit{};
+    return found;
+}
+
 bool Collision::sweptSphereHitsBoxes(const int32_t a[3], const int32_t b[3], int32_t r, int32_t contact[3], int32_t n[3]) {
     // GetSphereIntersectWithStatics, boxes only (flag 0x200): the earliest hit; the normal points from the
     // contact to the sphere centre at that moment.

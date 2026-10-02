@@ -4,8 +4,6 @@
 #include "skidmarks.h"
 #include <glad/gl.h>
 #include <cstring>
-#include <cstdio>
-#include <cstdlib>
 
 static Skidmarks g_skid;
 Skidmarks& TheSkidmarks() { return g_skid; }
@@ -34,7 +32,6 @@ void Skidmarks::addToMark(Mark& m, const int32_t p[3], const int32_t dir[3], int
 }
 
 void Skidmarks::addPoint(uint32_t id, const int32_t p[3], const int32_t dir[3], int hold) {   // cSkidmarkManager::AddSkidPoint
-    if (getenv("CTW_SKIDDBG")) printf("skid %u at %.2f %.2f %.2f\n", id, p[0] / 4096.f, p[1] / 4096.f, p[2] / 4096.f);
     Mark* m = nullptr;
     for (Mark& k : marks_)
         if (k.active && k.id == id) m = &k;

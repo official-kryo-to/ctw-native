@@ -65,10 +65,11 @@ bool TimeCycle::load(const std::vector<uint8_t>& dat) {
 
 void TimeCycle::evaluate() {
     if (!ok_) return;
-    uint32_t hour = time_ >> 12, frac = time_ & 0xFFF;
-    uint32_t next = hour == 23 ? 0 : hour + 1;
+    const uint32_t time = extra_ ? extraTime_ : time_;
+    uint32_t hour = time >> 12, frac = time & 0xFFF;
+    uint32_t next = extra_ ? hour : hour == 23 ? 0 : hour + 1;   // (hour - extra flag) + 1
     for (int t = 0; t < 38; ++t) {
-        int cur = tab_[weather_][t][hour], nxt = tab_[weather_][t][next];
+        int cur = tab_[weather_][t][hour], nxt = tab_[next_][t][next];
         int d = nxt - cur;
         if (angleSlot(t)) {   // x0x100, wrapping at 256 (InitInterpolators)
             int dd = d * 0x100;
@@ -85,6 +86,17 @@ void TimeCycle::evaluate() {
 uint32_t TimeCycle::colour(int i) const {
     auto ch = [&](int k) { return std::min<uint32_t>((uint32_t)(int)v_[i + k] >> 8, 0xFE); };
     return 0xFF000000u | ch(2) << 16 | ch(1) << 8 | ch(0);
+}
+
+uint32_t TimeCycle::colourLightning(int i) const {
+    auto ch = [&](int k) { return std::min<uint32_t>((uint32_t)(int)v_[i + k] >> 8, 0xFE); };
+    uint32_t c[3] = {ch(0), ch(1), ch(2)};
+    if (brightness != 4096)
+        for (uint32_t& v : c) {
+            if (brightness <= 4096) v += (uint32_t)((((uint64_t)((v << 12) ^ 0xFF000)) * (uint32_t)(4096 - brightness)) >> 24);
+            else v -= (uint32_t)(((uint64_t)(v << 12) * (uint32_t)(brightness - 4096)) >> 24);
+        }
+    return 0xFF000000u | c[2] << 16 | c[1] << 8 | c[0];
 }
 
 static int fastsin(int a) { return (int)(sinf((float)a * 9.587378e-05f) * 4096.f); }

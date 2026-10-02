@@ -49,16 +49,19 @@ int main() {
     for (EventInfo& event : fixture.events) { event.mode = 2; event.pan = -1; }
     fixture.gears[1].horn = 9;
     bytes.clear();
-    append(bytes, "CTWSND1", 8);
+    append(bytes, "CTWSND2", 8);
     append(bytes, fixture.events, sizeof fixture.events);
     append(bytes, fixture.gears, sizeof fixture.gears);
     append(bytes, fixture.collisionLow, sizeof fixture.collisionLow);
     append(bytes, fixture.collisionMed, sizeof fixture.collisionMed);
     append(bytes, fixture.collisionHigh, sizeof fixture.collisionHigh);
     append(bytes, fixture.revAfterShift, sizeof fixture.revAfterShift);
+    fixture.propSfx[4] = {17, 91, 0};
+    append(bytes, fixture.propSfx, sizeof fixture.propSfx);
     save(path, bytes);
     SoundTables sound;
-    check(sound.load(path.string()) && sound.gears[1].horn == 9 && !sound.hasPropSfx, "legacy sound fixture decodes without inventing prop samples");
+    check(sound.load(path.string()) && sound.gears[1].horn == 9 && sound.propSfx[4].sample == 17 && sound.propSfx[4].volume == 91,
+          "sound tables decode with the object sample and volume mapping");
     bytes.push_back(0);
     save(path, bytes);
     check(!sound.load(path.string()) && sound.gears[1].horn == 0, "extra sound data rejected and state cleared");
@@ -67,15 +70,13 @@ int main() {
     save(path, bytes);
     check(!sound.load(path.string()), "invalid event mode rejected");
     bytes[8 + 4] = 2;
-    bytes[6] = '2';
-    fixture.propSfx[4] = {17, 91, 0};
-    append(bytes, fixture.propSfx, sizeof fixture.propSfx);
+    bytes[6] = '1';
     save(path, bytes);
-    check(sound.load(path.string()) && sound.hasPropSfx && sound.propSfx[4].sample == 17 && sound.propSfx[4].volume == 91,
-          "version 2 sound fixture retains the object's sample and volume mapping");
+    check(!sound.load(path.string()), "unknown sound table header rejected");
+    bytes[6] = '2';
     bytes.pop_back(); save(path, bytes);
-    check(!sound.load(path.string()) && !sound.hasPropSfx, "truncated prop mapping rejected and state cleared");
-    bytes.push_back(0); bytes[bytes.size() - sizeof fixture.propSfx + 2] = 128; save(path, bytes);
+    check(!sound.load(path.string()) && sound.propSfx[4].sample == 0, "truncated prop mapping rejected and state cleared");
+    bytes.push_back(0); bytes[bytes.size() - sizeof fixture.propSfx + 2] = (char)128; save(path, bytes);
     check(!sound.load(path.string()), "invalid prop volume rejected");
 
     GameplayTables gameFixture;
@@ -137,6 +138,22 @@ int main() {
     bytes[42] = 's'; bytes.pop_back();
     save(path, bytes);
     check(!radio.load(path.string()), "truncated radio mappings rejected");
+
+    bytes.clear();
+    append(bytes, "CTWWTHR1", 8);
+    uint8_t chance[8][8] = {{10, 20, 30, 40}};
+    append(bytes, chance, sizeof chance);
+    const uint32_t thunder[5] = {1, 2, 3, 4, 5};
+    append(bytes, thunder, sizeof thunder);
+    save(path, bytes);
+    WeatherTables weather;
+    check(weather.load(path.string()) && weather.chance[0][3] == 40 && weather.thunder[4] == 5, "weather fixture decodes");
+    bytes[8] = 90;   // 90 + 20 + 30 + 40: more than 100%
+    save(path, bytes);
+    check(!weather.load(path.string()), "weather chances over 100% rejected");
+    bytes[8] = 10; bytes.pop_back();
+    save(path, bytes);
+    check(!weather.load(path.string()), "truncated weather table rejected");
     std::filesystem::remove(path);
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }

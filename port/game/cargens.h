@@ -14,6 +14,7 @@
 #include <set>
 #include <vector>
 #include "world/collision.h"
+#include "random.h"
 
 class Game;
 
@@ -35,5 +36,3 @@ private:
     bool spotTaken(const Game& g, const int32_t p[3]) const;
     int randomVehicle(const Game& g, bool sea);
 };
-
-uint32_t Rand32Critical(uint32_t n);   // the game's critical random numbers: 0..n-1

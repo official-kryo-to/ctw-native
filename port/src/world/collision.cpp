@@ -133,6 +133,24 @@ const Collision::Cell* Collision::cell(int cx, int cy) {
         C.emitters.resize(k);
         memcpy(C.emitters.data(), &sec[8][4], k * 16);
     }
+    // cWorldSector::DataLoaded: u32 node table offset at +0x20, u16 link count +0x24, u16 node count +0x26,
+    // u8 bridge count +0x2A; bridges {u16 node, u16 sector} from +0; u16 links from +0x2C.
+    if (const std::vector<uint8_t>& s = sec[3]; s.size() >= 0x2C) {
+        uint32_t nodeOffset; uint16_t links, nodes;
+        memcpy(&nodeOffset, &s[0x20], 4); memcpy(&links, &s[0x24], 2); memcpy(&nodes, &s[0x26], 2);
+        const unsigned bridges = std::min<unsigned>(s[0x2A], 8);
+        if (0x2C + (size_t)links * 2 <= s.size() && nodeOffset + (size_t)nodes * 10 <= s.size()) {
+            C.pedPaths.links.resize(links);
+            memcpy(C.pedPaths.links.data(), &s[0x2C], (size_t)links * 2);
+            C.pedPaths.nodes.resize(nodes);
+            memcpy(C.pedPaths.nodes.data(), &s[nodeOffset], (size_t)nodes * 10);
+            for (unsigned b = 0; b < bridges; ++b) {
+                uint16_t node, sector;
+                memcpy(&node, &s[b * 4], 2); memcpy(&sector, &s[b * 4 + 2], 2);
+                C.pedPaths.bridges.push_back({node, (uint16_t)(sector & 0x3FFF)});
+            }
+        }
+    }
     if (uint32_t k = count(sec[7]); k && sec[7].size() >= 4 + k * 20) {
         C.carGens.resize(k);
         memcpy(C.carGens.data(), &sec[7][4], k * 20);
@@ -190,6 +208,11 @@ const std::vector<Collision::Prop>* Collision::props(int cx, int cy) {
 const std::vector<Collision::CarGen>* Collision::carGens(int cx, int cy) {
     const Cell* C = cell(cx, cy);
     return C && !C->carGens.empty() ? &C->carGens : nullptr;
+}
+
+const Collision::PedPaths* Collision::pedPaths(int cx, int cy) {
+    const Cell* C = cell(cx, cy);
+    return C && !C->pedPaths.nodes.empty() ? &C->pedPaths : nullptr;
 }
 
 static void cellOf(int32_t x, int32_t y, int* cx, int* cy);

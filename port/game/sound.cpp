@@ -28,11 +28,10 @@ std::string bankFile(int e) {   // eRomBanks -> file naming convention
 static Sound g_sound;
 Sound& TheSound() { return g_sound; }
 
-bool Sound::Bank::load(const std::string& dataDir, const char* name) {
-    GameFs fs;
+bool Sound::Bank::load(GameFs& fs, const char* name) {
     data.clear();
     entries.clear();
-    if (!fs.open(dataDir) || !fs.read((std::string(name) + ".bin").c_str(), data) || data.size() < 4) return false;
+    if (!fs.read(std::string(name) + ".bin", data) || data.size() < 4) return false;
     uint32_t n;
     memcpy(&n, data.data(), 4);
     if (4 + (size_t)n * 12 > data.size()) return false;
@@ -59,10 +58,20 @@ bool Sound::init(const std::string& dataDir) {
     lastWalkFrame_ = -1; firstFoot_ = true;
     ents_.clear();
     car_ = Bank{}; carBankEnum_ = -1; playerUid_ = 0;
+    activeCarBank_ = nullptr; carBanks_.clear();
     res_.data.clear(); res_.entries.clear();
     if (!tables_.load(dataDir + "/sound_tables.bin")) return false;
     if (!Audio_Init()) return false;
-    return res_.load(dataDir, "resbnk");
+    GameFs fs;
+    if (!fs.open(dataDir) || !res_.load(fs, "resbnk")) return false;
+    // Opening GameFs enumerates the data directory. Doing that during entry stalls the simulation.
+    // The engine banks are small; load each referenced file once through this startup handle.
+    for (const GearSound& gear : tables_.gears) {
+        const std::string file = bankFile(gear.bank);
+        if (file.empty() || carBanks_.count(file)) continue;
+        carBanks_[file].load(fs, file.c_str());
+    }
+    return true;
 }
 
 void Sound::stopSlots(Entity& e, bool bankOnly) {
@@ -160,7 +169,7 @@ void Sound::processEntity(Game& g, Entity& e, bool persistent) {   // cAudioMana
         float fpan = pan / 127.f * 2.f - 1.f;
         if (!s.voice) {   // cSoundEvents::StartSoundEvent
             int sfx = s.sfx != -1 ? s.sfx : ei.sfx;
-            const Bank& b = ei.bank == 0 ? res_ : car_;
+            const Bank& b = ei.bank == 0 ? res_ : activeCarBank_ ? *activeCarBank_ : car_;
             const uint8_t* pcm;
             uint32_t len, rate;
             if (!b.sample(sfx, pcm, len, rate)) { s.event = 0x9C; continue; }
@@ -222,12 +231,18 @@ int Sound::explosion(Game& game, const int32_t pos[3]) {
     return voice;
 }
 
+void Sound::playResident(int sample, int volume) {   // cAudioManager::PlaySfx(sample, volume, ...): no position
+    const uint8_t* pcm; uint32_t len, rate;
+    if (!res_.sample(sample, pcm, len, rate)) return;
+    Audio_SfxPlay(pcm, len, (int)rate, std::clamp(volume, 0, 127) / 127.f, 0.f, false);
+}
+
 void Sound::propSmash(const int32_t pos[3], int effect) {
     propSmash(pos, effect, 300);
 }
 
 void Sound::propSmash(const int32_t pos[3], int effect, int radius) {
-    if (!ok() || !tables_.hasPropSfx || effect < 0 || effect >= 57) return;
+    if (!ok() || effect < 0 || effect >= 57) return;
     // Smash uses the kind's smash effect (gGameDir[17] +1), not its hit effect or model id.
     // AddPropCollision passes gPropSfx's resident sample/volume to PlayScriptSfx with squared radius 300.
     for (Entity& e : script_) {
@@ -236,6 +251,22 @@ void Sound::propSmash(const int32_t pos[3], int effect, int radius) {
         const auto& sfx = tables_.propSfx[effect];
         addEvent(e, 0x30, sfx.volume, radius, sfx.sample);
         return;
+    }
+}
+
+// cAudioManager::PlayDeathSound for a ped in view: a scream (event 0x99, volume 127, squared radius 500, resident
+// sample 440 + Rand32NonCritical(10) for men, 430 + ... for women), then the fall (event 0x19, or 0x74 in water,
+// volume 127, squared radius 200, the event's own sample).
+void Sound::pedDeath(const int32_t pos[3], bool male, bool inWater) {
+    if (!ok()) return;
+    const int scream = (male ? 0x1B8 : 0x1AE) + (int)Rand32NonCritical(10);
+    int played = 0;
+    for (Entity& e : script_) {
+        if (e.s[0].event != 0x9C) continue;
+        std::copy(pos, pos + 3, e.pos);
+        if (played == 0) addEvent(e, 0x99, 0x7F, 500, scream);
+        else addEvent(e, inWater ? 0x74 : 0x19, 0x7F, 200, -1);
+        if (++played == 2) return;
     }
 }
 
@@ -273,8 +304,9 @@ void Sound::playerCar(Game& g, Vehicle& v, Entity& e) {   // cSoundEvents::Proce
         for (auto& item : ents_) stopSlots(item.second, true);
         carBankEnum_ = gs.bank;
         std::string file = bankFile(gs.bank);
+        auto bank = carBanks_.find(file);
+        activeCarBank_ = bank == carBanks_.end() ? nullptr : &bank->second;
         car_ = Bank{};
-        if (!file.empty()) car_.load(g.dataDir, file.c_str());
         state_ = 0; revs_ = 0; volA_ = volB_ = 0; gear_ = 0;
     }
     if (!v.engineOn || v.dead()) return;

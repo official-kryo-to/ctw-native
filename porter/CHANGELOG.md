@@ -3,6 +3,15 @@
 What changed in each release of CTW-Native. A release is the Porter exe with the game inside, so every entry
 covers both. The newest is on top; the release workflow publishes the entry of the version it builds.
 
+## 0.2.0
+
+- Streets feel alive: pedestrians walk the sidewalks in their original outfits, dive clear of speeding cars, and traffic stops for them.
+- Smashed bins burst rubbish, and a knocked-over bin spills it as it rolls.
+- The city has sound: street ambience, rain and airport hum, plus the missing smash sounds.
+- The original radio: press Tab in a car for the station carousel, live equaliser, favourites and volume. The game pauses, like the original.
+- Optional on-foot third-person view in the bundled Enhancements mod (V), plus a tidier mod menu (F4) with search and a bigger Cheat Example.
+= PSP lighting in the bundled mod menu
+
 ## 0.1.1
 
 - Include the current game changes: vehicle physics, radio and audio fixes, and updated game tables.

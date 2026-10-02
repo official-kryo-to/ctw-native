@@ -19,8 +19,7 @@
 //   the 8 box corners, the ground plane) with impulses (CalcImpactEnv), and springs (FullSpringCollision:
 //   the corners float 0.3 above the ground). On flat ground with both axles down the car switches to "simple"
 //   physics (no gravity, upright), like the game.
-// Not ported yet: damage, doors, lights, skidmarks, sounds, burnouts, jumps, water, other vehicles/peds as
-// obstacles, bikes/boats/helicopters (cars only).
+// Not ported yet: boat/helicopter/tank controllers, full vehicle-water behavior and pedestrian population.
 #pragma once
 #include <cstdint>
 #include <string>
@@ -69,6 +68,8 @@ public:
     int health() const { return health_; }        // +0x99D: 255 = new; smoke below 190, burning below 31
     bool dead() const { return dead_; }
     void damage(int amount);                      // cVehicle::Damage (collision damage)
+    bool repair();                               // mod API: restore a living vehicle, without resurrecting wrecks
+    void teleport(const int32_t pos[3], int16_t heading); // rebuild the physics transform, upright and stationary
     void processDamage(uint32_t frame);           // the damage part of cVehicle::Process
     bool justDied = false;
     void releaseEffects();
@@ -119,6 +120,7 @@ public:
     // cBike::GetPedRenderPos: where the rider's upper body / legs are drawn (world, Q12)
     void riderRenderPos(int32_t upper[3], int32_t legs[3]) const;
     bool simple() const { return simple_; }
+    bool hasHeadlights() const { return infoFlags8e_ >> 8 & 1; }   // HeadLightsOn: info +0x8E bit 8
 
 private:
     struct Tyre {   // CTyre (+0xA00 front, +0xA58 rear)

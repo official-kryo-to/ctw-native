@@ -3,7 +3,9 @@
 // See LICENSE in the repository root.
 #include "propdynamics.h"
 #include "game.h"
+#include "particles.h"
 #include "sound.h"
+#include "cargens.h"
 #include <algorithm>
 #include <cmath>
 
@@ -16,10 +18,87 @@ void normalise(int32_t p[3]) {
 }
 }
 
+void PropDynamics::smashParticles(Game& g, Loose& l, const int32_t force[3], int effect) {
+    const int32_t at[3] = {l.prop.x,l.prop.y,l.prop.z};
+    const uint32_t ambient = g.world.timeCycle().ok() ? g.world.timeCycle().colour(13) : 0x808080u;
+    const int32_t half[3] = {l.body.hx,l.body.hy,l.body.hz};
+    const int32_t radius = length(half); // cSimpleMover::SetCollisionPrimitiveBox's bound radius
+    auto rgb = [](unsigned r,unsigned g,unsigned b) { return r | (g << 8) | (b << 16); };
+    auto wood = [&](int16_t vx,int16_t vy,int32_t strength,uint32_t a,uint32_t b,bool tint = true) {
+        TheParticles().add<WoodEmitter>(at,vx,vy,strength,a,b,tint,ambient);
+    };
+    // Smash3: rubbish, scaled by the bound radius; effect 35's emitter stays with the bin
+    if (effect == 13 || effect == 37) {
+        TheParticles().add<GarbageEmitter>(at,(int16_t)((radius*0x1EA) >> 12),false);
+        return;
+    }
+    if (effect == 35) {
+        l.garbage = TheParticles().add<GarbageEmitter>(at,(int16_t)((radius*0x332) >> 12),true);
+        return;
+    }
+    // Smash1: these bursts have zero inherited horizontal velocity. Their colours and the
+    // newsstand's second paper burst are separate from the moving furniture branches in Smash4.
+    switch (effect) {
+    case 14: TheParticles().add<PaperEmitter>(at,7,0x1EB,rgb(110,152,195),rgb(190,190,190),true,ambient); return;
+    case 22: TheParticles().add<PaperEmitter>(at,7,0x2E1,rgb(222,222,222),rgb(222,222,222),false,ambient); return;
+    case 46: case 49: wood(0,0,radius,rgb(100,90,75),rgb(100,90,75)); return;
+    case 20: wood(0,0,radius,rgb(240,100,60),rgb(255,255,255)); l.collidable=false; return;
+    case 50: wood(0,0,radius,rgb(80,120,140),rgb(80,120,140)); l.collidable=false; return;
+    case 47: wood(0,0,radius,rgb(130,130,130),rgb(130,130,130)); return;
+    case 42:
+        wood(0,0,radius,rgb(110,90,70),rgb(95,115,90));
+        TheParticles().add<PaperEmitter>(at,4,0x23D,rgb(115,185,240),rgb(220,200,170),false,ambient);
+        return;
+    case 43:
+        wood(0,0,radius,rgb(150,140,110),Rand16NonCritical(2) ? rgb(255,255,255) : rgb(230,35,130)); return;
+    case 45: wood(0,0,radius,rgb(155,60,60),rgb(130,130,130)); return;
+    case 44: wood(0,0,radius,rgb(155,60,60),rgb(85,85,140)); return;
+    case 29: wood(0,0,radius,rgb(138,145,145),rgb(126,104,66)); return;
+    case 48: wood(0,0,radius,rgb(190,75,150),rgb(190,75,150)); return;
+    default: break;
+    }
+    // Smash normalises the incoming force before passing it to Smash4. The original divides
+    // that Q12 vector by fourteen for the emitter's initial horizontal velocity.
+    int32_t direction[3] = {force[0],force[1],force[2]};
+    if ((int64_t)direction[0]*direction[0] + (int64_t)direction[1]*direction[1] +
+        (int64_t)direction[2]*direction[2] >= 0x641) normalise(direction);
+    const int16_t vx = (int16_t)(direction[0]/14), vy = (int16_t)(direction[1]/14);
+    const int32_t large = radius*3/2;
+    if (effect == 10 || effect == 41) {
+        // Smash3's effect 41 emits wood, then falls through to the glass burst shared with effect 10.
+        if (effect == 41) wood(vx,vy,radius/2,rgb(75,155,105),rgb(75,155,105));
+        const int32_t local[3] = {-l.body.hx,0,l.body.hz};
+        int32_t start[3], right[3], point[3];
+        l.body.worldPosition(local,start);
+        const int32_t offset[3] = {l.body.hx*2/7,0,0};
+        l.body.worldPosition(offset,right);
+        for (int i = 0; i < 6; ++i) {
+            for (int k = 0; k < 3; ++k) point[k] = start[k]+i*(right[k]-l.body.pos[k]);
+            TheParticles().add<GlassEmitter>(point);
+        }
+        return;
+    }
+    switch (effect) {
+    case 11: case 12: case 24: case 36:
+        wood(vx,vy,radius,rgb(92,75,45),rgb(92,75,45)); break;
+    case 32: wood(vx,vy,large,rgb(138,145,145),rgb(126,104,66),false); break;
+    case 33: wood(vx,vy,large,rgb(177,34,34),rgb(255,255,255),false); break;
+    case 34: wood(vx,vy,large,rgb(72,118,64),rgb(72,118,64),false); break;
+    case 51: wood(vx,vy,large,rgb(255,255,255),rgb(255,255,255),false); break;
+    case 52: wood(vx,vy,large,rgb(140,140,110),rgb(140,140,110)); break;
+    case 53: wood(vx,vy,large,rgb(35,60,35),rgb(35,60,35)); break;
+    case 54: wood(vx,vy,large,rgb(100,80,55),rgb(100,80,55)); break;
+    case 55: wood(vx,vy,large,rgb(160,150,130),rgb(160,150,130)); break;
+    case 39:
+        wood(vx,vy,radius,Rand16NonCritical(2) ? rgb(77,65,47) : rgb(55,66,32),rgb(204,197,185)); break;
+    default: break;
+    }
+}
+
 PropDynamics::Loose PropDynamics::makeBody(Game& g,int cx,int cy,int index) const {
     Loose l{}; l.cx=cx; l.cy=cy; l.index=index; l.prop=(*g.collision.props(cx,cy))[index];
     PropLibrary::Physics shape{};
-    const auto* kind=g.props.kind(l.prop.kind);
+    const auto* kind=g.props.kindForProp(l.prop.prop);
     if(g.props.physics(l.prop.prop,shape) && kind)
         l.body.init(l.prop,shape,l.prop.prop == 0x30 ? 0 : kind->mass,kind->planar);
     else { l.body.pos[0]=l.prop.x; l.body.pos[1]=l.prop.y; l.body.pos[2]=l.prop.z; }
@@ -27,7 +106,7 @@ PropDynamics::Loose PropDynamics::makeBody(Game& g,int cx,int cy,int index) cons
 }
 
 void PropDynamics::applyForce(Game& g,Loose& l,const int32_t p[3],const int32_t f[3]) {
-    const auto* kind=g.props.kind(l.prop.kind);
+    const auto* kind=g.props.kindForProp(l.prop.prop);
     if(!kind) return;
     const int32_t magnitude=mulq(length(f),0x111);
     const bool uproot=kind->uprootForce >= 0 && magnitude >= (int32_t)std::lround(kind->uprootForce*4096);
@@ -48,17 +127,19 @@ void PropDynamics::applyForce(Game& g,Loose& l,const int32_t p[3],const int32_t 
             int32_t at[3]; l.body.worldCG(at); at[2]+=l.body.hz*2;
             l.body.applyWorldForce(at,sideways);
             const int32_t centre[3]={0,0,l.body.hz*2/5}; l.body.setLocalCG(centre);
+            l.collidable=false; // UpRoot clears entity contacts, retaining world collisions for this effect
         } else l.body.applyWorldForce(p,f);
     }
     if(smash && !l.broken) {
         l.broken=true;
         const int32_t at[3]={l.prop.x,l.prop.y,l.prop.z};
         TheSound().propSmash(at,kind->smashEffect);
+        smashParticles(g,l,f,kind->smashEffect);
         int32_t axis[3]={-f[1],f[0],0}; normalise(axis);
         if(kind->smashEffect == 7) { l.body.rotate(axis,0x16C); l.lampTimer=60; }
         else if(kind->smashEffect == 8) l.body.rotate(axis,0x3C72);
         else if(kind->smashEffect == 15 || kind->smashEffect == 25 || kind->smashEffect == 31) l.body.rotate(axis,0x1555);
-        if(kind->uprootForce == -1.f || !drawnModel(g,l)) l.collidable=false;
+        if(kind->uprootForce < 0 || !drawnModel(g,l)) l.collidable=false;
     }
     if(l.broken || l.uprooted) {
         g.collision.setPropState(l.cx,l.cy,l.index,1);
@@ -165,7 +246,7 @@ void PropDynamics::checkImpacts(Game& g) {
         for(int x=cx-1;x<=cx+1;++x) for(int y=cy-1;y<=cy+1;++y) {
             const auto* list=g.collision.props(x,y); if(!list) continue;
             for(int i=0;i<(int)list->size();++i) {
-                if((*list)[i].state != 0) continue;
+                if((*list)[i].state != 0 || (*list)[i].kind == 1) continue; // garage doors have a separate infinite-mass controller
                 const auto& p=(*list)[i];
                 float radius,height; g.props.footprint(p.prop,radius,height);
                 const double reach=car.boundRadius()+radius*4096+car.speed()/25.0;
@@ -184,6 +265,7 @@ const Model* PropDynamics::drawnModel(Game& g,const Loose& l) {
 }
 
 void PropDynamics::update(Game& g) {
+    for(Loose& l:loose_) { l.body.matrix(l.previous); l.hasPrevious=true; }
     // Resolve each moving pair once, then let flying furniture transfer forces to standing props.
     for(size_t i=0;i<loose_.size();++i)
         for(size_t j=i+1;j<loose_.size();++j) hit(g,loose_[i],loose_[j]);
@@ -194,7 +276,7 @@ void PropDynamics::update(Game& g) {
         for(int x=cx-1;x<=cx+1;++x) for(int y=cy-1;y<=cy+1;++y) {
             const auto* list=g.collision.props(x,y); if(!list) continue;
             for(int j=0;j<(int)list->size();++j) {
-                const auto& p=(*list)[j]; if(p.state) continue;
+                const auto& p=(*list)[j]; if(p.state || p.kind == 1) continue;
                 float radius,height; g.props.footprint(p.prop,radius,height);
                 const auto& body=loose_[i].body;
                 const double reach=body.hx+body.hy+body.hz+radius*4096+body.speed()/25.0;
@@ -212,6 +294,7 @@ void PropDynamics::update(Game& g) {
         const double dx=(double)focus[0]-l.body.pos[0],dy=(double)focus[1]-l.body.pos[1];
         if(dx*dx+dy*dy > 250.0*250*4096*4096) {
             g.collision.setPropState(l.cx,l.cy,l.index,0); g.collision.setPropSolid(l.cx,l.cy,l.index,true);
+            if(l.garbage) l.garbage->release();
             it=loose_.erase(it); continue;
         }
         if(l.lampTimer) {
@@ -228,6 +311,12 @@ void PropDynamics::update(Game& g) {
                 l.lampTimer=0; TheSound().propSmash(l.body.pos,56,900);
             }
             if(!l.lampTimer) l.body.setToPhysics(false);
+        }
+        if(l.garbage) {   // the rubbish follows its bin while it rolls, and ends when it settles
+            const int64_t s2=(int64_t)l.body.vel[0]*l.body.vel[0]+(int64_t)l.body.vel[1]*l.body.vel[1]+
+                             (int64_t)l.body.vel[2]*l.body.vel[2];
+            l.garbage->follow(l.body.pos,s2);
+            if(!l.body.active()) { l.garbage->release(); l.garbage=nullptr; }
         }
         if(l.body.active()) {
             l.body.process(g.collision);
@@ -246,7 +335,24 @@ void PropDynamics::update(Game& g) {
 }
 
 void PropDynamics::render(Game& g) const {
+    const float t=g.renderAlpha;
+    const bool blend=g.interpolate && t < 1.f;
     for(const Loose& l:loose_) if(const Model* model=drawnModel(g,l)) {
-        float M[16]; l.body.matrix(M); PropLibrary::drawModel(*model,M);
+        float M[16]; l.body.matrix(M);
+        if(blend && l.hasPrevious) {   // translation lerped, basis blended and re-orthonormalised (PC presentation)
+            const float* P=l.previous;
+            float f[3],u[3];
+            for(int k=0;k<3;++k) { M[12+k]=P[12+k]+(M[12+k]-P[12+k])*t; f[k]=P[4+k]+(M[4+k]-P[4+k])*t; u[k]=P[8+k]+(M[8+k]-P[8+k])*t; }
+            auto norm=[](float* v) { const float n=std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); if(n>1e-6f) for(int k=0;k<3;++k) v[k]/=n; };
+            norm(f);
+            const float d=f[0]*u[0]+f[1]*u[1]+f[2]*u[2];
+            for(int k=0;k<3;++k) u[k]-=f[k]*d;
+            norm(u);
+            const float sx=std::sqrt(M[0]*M[0]+M[1]*M[1]+M[2]*M[2]),sy=std::sqrt(M[4]*M[4]+M[5]*M[5]+M[6]*M[6]),
+                        sz=std::sqrt(M[8]*M[8]+M[9]*M[9]+M[10]*M[10]);
+            const float r[3]={f[1]*u[2]-f[2]*u[1],f[2]*u[0]-f[0]*u[2],f[0]*u[1]-f[1]*u[0]};
+            for(int k=0;k<3;++k) { M[k]=r[k]*sx; M[4+k]=f[k]*sy; M[8+k]=u[k]*sz; }
+        }
+        PropLibrary::drawModel(*model,M);
     }
 }

@@ -4,6 +4,8 @@
 #define SDL_MAIN_HANDLED
 #include "game.h"
 #include "hud.h"
+#include "plugins.h"
+#include "audio/audio.h"
 #include "os/os.h"
 #include <SDL.h>
 #include <glad/gl.h>
@@ -18,7 +20,8 @@ static void check(bool ok, const char* description) {
 
 struct RadioTestAccess {
     static void run() {
-        Game game;
+        Game& game = TheGame();
+        check(Audio_Init(), "the dummy audio device opens");
         game.cars.resize(1); game.cars[0].uid = 1; game.playerCar = 0;
         Radio& radio = game.radio;
         // Synthetic icons and a one-pixel texture: rendering checks require no game files or font.
@@ -39,53 +42,57 @@ struct RadioTestAccess {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, red);
         radio.textureW_ = radio.textureH_ = 1;
-        radio.key(SDL_SCANCODE_R, game);
+        check(!radio.key(SDL_SCANCODE_R, game) && !radio.appOpen(), "R does not open the radio");
+        check(!radio.key(SDL_SCANCODE_LEFT, game) && !radio.key(SDL_SCANCODE_RIGHT, game) &&
+              !radio.key(SDL_SCANCODE_MINUS, game) && !radio.key(SDL_SCANCODE_LEFTBRACKET, game),
+              "no shortcut tunes outside the Tab app");
 
         auto draw = [&]() {
             // The world is rendered each frame before the overlay.
             glClearColor(1,0,1,1); glClear(GL_COLOR_BUFFER_BIT);
-            Hud_Begin(640,448); radio.render(640,448,game); Hud_End();
-        };
-        auto pixels = [&]() {
-            std::vector<uint8_t> out(640 * 448 * 3);
-            glReadPixels(0,0,640,448,GL_RGB,GL_UNSIGNED_BYTE,out.data());
-            return out;
+            Plugins_BeginFrame(640,448); Hud_Begin(640,448); Plugins_DrawHud(640,448); radio.renderApp(640,448,game); Hud_End();
         };
         glClearColor(1,0,1,1); glClear(GL_COLOR_BUFFER_BIT);
-        draw();
-        auto image = pixels();
-        const size_t margin = (200 * 640 + 10) * 3;
-        check(image[margin] == 255 && image[margin+1] == 0 && image[margin+2] == 255,
-              "compact selector preserves the game view outside its own overlay");
-        for (int frame = 0; frame < 30; ++frame) {
-            if (frame % 4 == 0) radio.key(SDL_SCANCODE_RIGHT, game);
-            radio.update(game); draw();
-        }
-        auto animated = pixels();
-        glClearColor(1,0,1,1); glClear(GL_COLOR_BUFFER_BIT);
-        draw();
-        check(animated == pixels(), "station animation leaves no trails from earlier frames");
-
-        int selected = radio.station();
+        const int tuned = radio.station();
         Host_TestMouse(320,150,0,-1); draw();
-        check(radio.station() == (selected + 1) % 3, "mouse wheel tunes the next station");
-        selected = radio.station();
-        Host_TestMouse(320,150,1,0); draw();
-        check(radio.open() && radio.station() == selected, "clicking station artwork does not pause the radio");
-        Host_TestMouse(10,420,1,0); draw();
-        check(radio.open(), "clicks outside the overlay have no hidden Back action");
-        int volume = radio.volume_;
-        Host_TestMouse(260,300,1,0); draw();
-        check(radio.volume_ == volume, "removed touch buttons cannot change volume");
-        radio.key(SDL_SCANCODE_DOWN,game);
-        check(radio.volume_ == volume - 1, "arrow keys adjust the original volume levels");
-        Host_TestMouse(320,420,1,0); draw();
-        check(radio.open(), "removed Back button does not leave an invisible click target");
-        check(!radio.key(SDL_SCANCODE_A,game) && !radio.key(SDL_SCANCODE_D,game),
-              "radio leaves WASD driving controls available");
-        radio.key(SDL_SCANCODE_ESCAPE,game);
-        check(!radio.open(), "Escape dismisses the compact selector");
+        check(!radio.appOpen() && radio.station() == tuned, "the wheel never tunes: only Tab changes the radio");
+        game.playerCar = -1;
+        Host_TestMouse(320,150,0,-1); draw();
+        check(!radio.appOpen() && radio.station() == tuned, "on foot the wheel does nothing");
+        game.playerCar = 0; radio.stations_[1].available = false; radio.selected_ = 0;
+        game.cars[0].radioStation = 2;
+        game.cars.emplace_back(); game.cars.back().uid = 2; game.cars.back().radioStation = 0;
+        game.playerCar = 1; radio.update(game);
+        check(radio.station() == 0, "each car restores its own station");
+        game.playerCar = 0; radio.update(game);
+        check(radio.station() == 2, "switching back restores the previous car's tuning");
+        const CtwHostApi& api = Plugins_HostApi();
+        check(api.radio_station_count() == 3 && !api.radio_station_available(1) && !api.set_radio_station(1),
+              "radio API exposes station availability");
+        check(api.set_radio_station(0) && api.get_radio_station() == 0 &&
+              api.set_radio_volume(4) && api.get_radio_volume() == 4 && !api.set_radio_volume(11),
+              "radio API tuning and volume are reflected by gameplay");
+        // The radio app: Tab opens it full screen and pauses the game; A / D tune; Tab closes it again.
+        api.set_radio_station(0);
+        check(radio.key(SDL_SCANCODE_TAB, game) && radio.appOpen() && game.uiPaused, "Tab opens the radio app and pauses the game");
+        check(radio.key(SDL_SCANCODE_D, game) && radio.station() == 2, "the app tunes past unavailable stations");
+        check(Audio_SfxPaused(), "changing station keeps the paused game's sounds silent");
+        check(radio.key(SDL_SCANCODE_W, game) && radio.volumeLevel() == 5, "the app raises the volume");
+        check(radio.key(SDL_SCANCODE_F, game), "the paused game takes no other keys while the app is open");
+        radio.renderApp(640, 448, game);
+        check(radio.key(SDL_SCANCODE_TAB, game) && !radio.appOpen() && !game.uiPaused && !Audio_SfxPaused(),
+              "Tab closes the app and resumes the game and its sounds");
+        game.playerCar = -1;
+        check(!radio.key(SDL_SCANCODE_TAB, game) && !radio.appOpen(), "the app needs a car with a radio");
+        game.playerCar = 0;
+        // SDL may report multiple detents in one event, including flipped devices.
+        SDL_Event event{}; event.type = SDL_MOUSEWHEEL; event.wheel.y = 3;
+        event.wheel.direction = SDL_MOUSEWHEEL_FLIPPED;
+        SDL_PushEvent(&event); Host_PumpEvents();
+        int total = 0; while (int notch = Host_PopWheel()) total += notch;
+        check(total == -3, "SDL preserves all wheel detents and flipped direction");
         radio.shutdown();
+        Plugins_Shutdown(); game.cars.clear(); game.playerCar = -1;
     }
 };
 

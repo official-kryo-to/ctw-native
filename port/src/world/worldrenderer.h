@@ -45,6 +45,15 @@ public:
     struct Stats { size_t blocks, draws; int objects; };
     Stats stats() const;
 
+    // PC additions (off by default): soft light on the ground, drawn additively with the light sprite (fx 13).
+    // A glow is centred on pos, spans +-along on the horizontal unit axis ax and +-across perpendicular to it.
+    struct GroundGlow { float pos[3], ax[2], along, across; uint32_t argb; };
+    void drawGlows(const std::vector<GroundGlow>& glows);
+    float lightPools = 0.f;   // 0..2: at night, street lights light the ground under them
+    // The ground under (x, y) below z; false when unknown (lights there get no pool).
+    std::function<bool(float x, float y, float z, float& ground)> groundBelow;
+    bool lightsOn() const;    // cLight::Process: street lights are on (20:00 .. 07:00)
+
 private:
     struct LoadedBlock { int c = 0, r = 0; unsigned vbo = 0; WorldBlockMesh mesh; };
     struct WaterBlock { int16_t uvSize, counter; bool scrolls; int16_t uv[24]; };
@@ -59,6 +68,9 @@ private:
     void loadFxSprites();
     void fxSprite(int sprite, uint32_t argb, const float pos[3], float sx, float sy, const float right[3], const float up[3]);
     void renderLights(const WorldCamera& cam);
+    void renderLightPools(const WorldCamera& cam);
+    std::map<uint64_t, float> poolGround_;   // ground under each light, by position (NAN = unknown)
+    unsigned glowTexture_ = 0;
     void debugPick(int x, int y, int height);
 
     WorldMap map_;

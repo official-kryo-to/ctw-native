@@ -45,7 +45,7 @@ for opt in O1 O2 Os; do
     python3 "$here/parity.py" tables "$so" > "$work/py.txt"
     "$rust" tables "$so" > "$work/rs.txt"
     grep -q ERROR "$work/py.txt" && { echo "fixture $opt did not extract"; fail=1; }
-    for table in population sound render gameplay radio restart; do
+    for table in population sound render gameplay radio restart weather; do
         grep -q "^${table}_tables.bin " "$work/py.txt"
         grep -q "^${table}_tables.bin " "$work/rs.txt"
     done

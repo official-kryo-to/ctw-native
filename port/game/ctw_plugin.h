@@ -16,8 +16,11 @@
 #define CTW_PLUGIN_H
 
 #include <stdint.h>
+#include <stddef.h>
+#include "ctw_types.h"
 
-#define CTW_PLUGIN_API_VERSION 3
+#define CTW_PLUGIN_API_VERSION 5
+#define CTW_HOST_HAS(api, member) ((api) && (api)->size >= offsetof(CtwHostApi, member) + sizeof((api)->member) && (api)->member)
 
 #ifdef _WIN32
 #define CTW_PLUGIN_EXPORT __declspec(dllexport)
@@ -106,6 +109,61 @@ typedef struct CtwHostApi {
     double (*time_seconds)(void);                         /* real time, for smooth movement at any frame rate */
     void (*set_render_distance)(float units);             /* how far the city is loaded around the camera (120+) */
     float (*get_render_distance)(void);
+
+    /* --- version 4: gameplay. Check version, size and get_capabilities. Mutations return
+       1 on success, 0 for invalid data/handles or an unavailable subsystem. Spawn returns 0 on failure.
+       Call on the game thread, in callbacks. Positions must be finite within +/-32768 units,
+       velocity components within +/-512 units/s. State getters require out->size. --- */
+    uint32_t (*get_capabilities)(void);
+    int (*live_vehicle_count)(void);
+    CtwVehicle (*live_vehicle_at)(int index);
+    int (*get_vehicle_state)(CtwVehicle vehicle, CtwVehicleState* out);
+    CtwVehicle (*spawn_vehicle_at)(int model_id, const float xyz[3], float heading, int palette);
+    int (*remove_vehicle)(CtwVehicle vehicle); /* refuses occupied cars and active enter/exit targets */
+    int (*set_vehicle_transform)(CtwVehicle vehicle, const float xyz[3], float heading); /* upright, stops motion */
+    int (*set_vehicle_velocity)(CtwVehicle vehicle, const float xyz[3]); /* detaches traffic's rail controller */
+    int (*set_vehicle_palette)(CtwVehicle vehicle, int palette);
+    int (*set_vehicle_persistent)(CtwVehicle vehicle, int persistent); /* bypass distance cleanup */
+    int (*set_vehicle_engine)(CtwVehicle vehicle, int running);
+    int (*set_vehicle_door)(CtwVehicle vehicle, int seat, int open); /* seats 0..3 */
+    int (*damage_vehicle)(CtwVehicle vehicle, int amount); /* original damage/fire/death behavior */
+    int (*repair_vehicle)(CtwVehicle vehicle); /* living cars only; clears smoke/fire */
+    int (*get_player_state)(CtwPlayerState* out);
+    int (*set_player_heading)(float heading); /* on foot, outside enter/exit animations */
+    int (*set_player_appearance)(int body_set, int palette_upper, int palette_legs);
+    int (*player_enter_vehicle)(CtwVehicle vehicle); /* starts normal animation; within 10 units */
+    int (*player_exit_vehicle)(void); /* starts normal exit/braking; rejects excessive speed */
+    int (*get_ground)(const float xyz[3], CtwGround* out);
+    int (*line_hits_world_boxes)(const float from[3], const float to[3]); /* -1 unavailable/invalid, 0 clear, 1 hit; boxes only */
+    float (*get_traffic_density)(void);
+    int (*set_traffic_density)(float scale); /* 0..4; 0 stops new moving traffic, existing cars continue */
+    int (*radio_station_count)(void); /* includes radio off */
+    const char* (*radio_station_name)(int station);
+    int (*radio_station_available)(int station);
+    int (*get_radio_station)(void);
+    int (*set_radio_station)(int station); /* requires a car with a radio */
+    int (*get_radio_volume)(void); /* 0..10 */
+    int (*set_radio_volume)(int volume);
+    void (*on_game_event)(CtwGameEventCallback fn, void* user); /* queued, delivered on next tick; data valid during callback */
+    void (*consume_mouse_wheel)(void); /* inside on_draw_hud: mark this frame's wheel as used by your UI */
+
+    /* --- version 5: camera control for custom cameras. Check version and size. --- */
+    /* On foot, WASD moves relative to this yaw (degrees, as get_camera) instead of the game camera's. */
+    void (*set_control_yaw)(int enabled, float yaw_deg);
+    void (*set_camera_fov)(float degrees);                /* vertical field of view, 20..120; 0 = the game's own */
+    /* Nearest static world hit (buildings, props' shapes, ground) on the segment. -1 unavailable/invalid, 0 clear,
+       1 hit; *fraction (optional) = 0..1 along the segment. */
+    int (*world_line)(const float from[3], const float to[3], float* fraction);
+    /* Random pedestrians (version 5): read-only for now. */
+    int (*ped_count)(void);
+    int (*get_ped_state)(int index, CtwPedState* out);
+    float (*get_ped_density)(void);
+    int (*set_ped_density)(float scale); /* 0..4; 0 stops new pedestrians, existing ones walk on */
+    /* Called at the start of every rendered frame, before the world is drawn (input for the frame is ready).
+       Place custom cameras here; positions read here are the interpolated ones the frame shows. No HUD drawing. */
+    void (*on_frame_begin)(CtwCallback fn, void* user);
+    /* The look of the picture (see CtwRenderStyle); NULL restores the game's own. 0 if the style is invalid. */
+    int (*set_render_style)(const CtwRenderStyle* style);
 } CtwHostApi;
 
 /* Exported by a plugin DLL. Return 0 from ctw_plugin_init to stay loaded. */

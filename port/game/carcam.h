@@ -9,6 +9,7 @@
 //   - Reversing faster than 8 units/s for a second swings it round to the front (state 1).
 #pragma once
 #include <cstdint>
+#include "cameraobstruction.h"
 
 class Collision;
 class Vehicle;
@@ -22,11 +23,13 @@ public:
     void position(int32_t out[3]) const { out[0] = pos_[0]; out[1] = pos_[1]; out[2] = pos_[2]; }
     uint16_t yaw() const { return yaw_; }
     uint16_t pitch() const { return pitch_; }
-    void inherit(const int32_t pos[3], uint16_t yaw, uint16_t pitch);
+    void inherit(const int32_t pos[3], uint16_t yaw, uint16_t pitch, uint32_t blockedFrames = 0);
+    uint32_t blockedFrames() const { return obstruction_.blockedFrames(); }
 
 private:
     int32_t pos_[3] = {0, 0, 0}, vel_[3] = {0, 0, 0};
     uint16_t pitch_ = 0xD4E4, yaw_ = 0;
     int state_ = 0;              // +0x134
     int8_t reverseFrames_ = 0;   // +0x13E
+    CameraObstruction obstruction_;
 };

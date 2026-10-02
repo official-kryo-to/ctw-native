@@ -30,7 +30,7 @@ bool PropLibrary::load() {
         Def def;
         memcpy(&def.model, &d[o], 2);
         memcpy(&def.broken, &d[o + 2], 2);
-        def.flags = d[o + 6];
+        def.kind = (int8_t)d[o + 6];
         const int n = d[o + 7];
         o += 8;
         for (int k = 0; k < n; ++k) {

@@ -218,6 +218,92 @@ static int lightSize(int base, uint32_t t) {
     return (int16_t)cur;
 }
 
+bool WorldRenderer::lightsOn() const { return lightOn(tc_.time()); }
+
+void WorldRenderer::drawGlows(const std::vector<GroundGlow>& glows) {
+    if (glows.empty()) return;
+    if (!glowTexture_) {   // a soft round falloff, brightest in the middle
+        const int n = 64;
+        std::vector<uint8_t> px(n * n * 4, 255);
+        for (int y = 0; y < n; ++y)
+            for (int x = 0; x < n; ++x) {
+                const float dx = (x + 0.5f) / n * 2.f - 1.f, dy = (y + 0.5f) / n * 2.f - 1.f;
+                const float f = std::max(0.f, 1.f - (dx * dx + dy * dy));
+                px[(y * n + x) * 4 + 3] = (uint8_t)(f * f * 255.f);
+            }
+        glGenTextures(1, &glowTexture_);
+        glBindTexture(GL_TEXTURE_2D, glowTexture_);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, n, n, 0, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    }
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, glowTexture_);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glDepthMask(GL_FALSE);
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_ALPHA_TEST);
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(-2.f, -8.f);
+    glBegin(GL_QUADS);
+    for (const GroundGlow& g : glows) {
+        const float ax[2] = {g.ax[0] * g.along, g.ax[1] * g.along}, ay[2] = {-g.ax[1] * g.across, g.ax[0] * g.across};
+        glColor4ub((GLubyte)(g.argb >> 16), (GLubyte)(g.argb >> 8), (GLubyte)g.argb, (GLubyte)(g.argb >> 24));
+        const float z = g.pos[2];
+        glTexCoord2f(0, 0); glVertex3f(g.pos[0] - ax[0] - ay[0], g.pos[1] - ax[1] - ay[1], z);
+        glTexCoord2f(1, 0); glVertex3f(g.pos[0] + ax[0] - ay[0], g.pos[1] + ax[1] - ay[1], z);
+        glTexCoord2f(1, 1); glVertex3f(g.pos[0] + ax[0] + ay[0], g.pos[1] + ax[1] + ay[1], z);
+        glTexCoord2f(0, 1); glVertex3f(g.pos[0] - ax[0] + ay[0], g.pos[1] - ax[1] + ay[1], z);
+    }
+    glEnd();
+    glDisable(GL_POLYGON_OFFSET_FILL);
+    glDepthMask(GL_TRUE);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_BLEND);
+    glDisable(GL_TEXTURE_2D);
+}
+
+// Pools of light under the street lights (PC addition, lightPools > 0): sized by the height of the light above the
+// ground, faded in and out with the lights themselves.
+void WorldRenderer::renderLightPools(const WorldCamera& cam) {
+    const uint32_t t = tc_.time();
+    if (lightPools <= 0.f || !lightOn(t) || !groundBelow) return;
+    std::vector<GroundGlow> glows;
+    std::vector<const std::vector<WorldLight>*> lists;
+    for (auto& kv : blocks_) lists.push_back(&kv.second->mesh.lights);
+    lists.push_back(&propLights);
+    if (poolGround_.size() > 50000) poolGround_.clear();
+    for (const std::vector<WorldLight>* list : lists)
+        for (const WorldLight& l : *list) {
+            const float p[3] = {l.x / 4096.f, l.y / 4096.f, l.z / 4096.f};
+            const float dx = p[0] - cam.eye[0], dy = p[1] - cam.eye[1];
+            if (dx * dx + dy * dy > 160.f * 160.f) continue;
+            const uint64_t key = (uint64_t)(uint32_t)l.x << 32 | (uint32_t)l.y;
+            auto it = poolGround_.find(key);
+            if (it == poolGround_.end()) {
+                float z;
+                if (!groundBelow(p[0], p[1], p[2] - 0.5f, z) || z >= p[2] - 0.5f) z = NAN;
+                it = poolGround_.emplace(key, z).first;
+            }
+            const float ground = it->second;
+            if (std::isnan(ground)) continue;
+            const float height = p[2] - ground;
+            if (height > 25.f) continue;
+            const float fade = std::clamp(lightSize(l.size, t) / std::max(1.f, 2.f * l.size), 0.f, 1.f);
+            const float r = std::clamp(height * 0.75f + 2.f, 3.f, 10.f);
+            const uint32_t alpha = (uint32_t)std::min(255.f, 72.f * lightPools * fade);
+            if (!alpha) continue;
+            GroundGlow g{{p[0], p[1], ground + 0.06f}, {1.f, 0.f}, r, r, lightColour(l.colour, alpha)};
+            glows.push_back(g);
+        }
+    drawGlows(glows);
+}
+
 void WorldRenderer::renderLights(const WorldCamera& cam) {
     uint32_t t = tc_.time();
     if (!lightOn(t) || fxTexture_ < 0) return;
@@ -288,7 +374,7 @@ void WorldRenderer::render(const WorldCamera& cam, int W, int H) {
     float zero[4] = {0.f, 0.f, 0.f, 1.f};
     if (tc_.ok()) {
         tc_.sunDirection(sun);
-        uint32_t d = tc_.colour(0), am = tc_.colour(13);
+        uint32_t d = tc_.colourLightning(0), am = tc_.colour(13);
         for (int i = 0; i < 3; ++i) {
             dif[i] = (d >> (8 * i) & 0xFF) / 255.f;
             amb[i] = 0.4f * (am >> (8 * i) & 0xFF) / 255.f;
@@ -385,6 +471,7 @@ void WorldRenderer::render(const WorldCamera& cam, int W, int H) {
         glEnable(GL_DEPTH_TEST);
         drawBeforeLights();
     }
+    renderLightPools(cam);
     renderLights(cam);
 
     if (const char* pick = getenv("CTW_PICK")) {

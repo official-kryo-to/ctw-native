@@ -14,7 +14,8 @@ class PropDynamics {
 public:
     void checkImpacts(Game& game);
     void update(Game& game);
-    void render(Game& game) const;
+    void render(Game& game) const;   // between the last two ticks when game.interpolate is on
+    int looseCount() const { return (int)loose_.size(); }   // the debug overlay
 private:
     struct Loose {
         int cx, cy, index;
@@ -22,9 +23,13 @@ private:
         RigidBody body;
         bool broken = false, uprooted = false, collidable = true;
         int lampTimer = 0, sleepCounter = 15;
+        class GarbageEmitter* garbage = nullptr;   // a smashed bin spilling rubbish (effect 35)
+        float previous[16]{};          // the drawn matrix at the start of the tick (render interpolation)
+        bool hasPrevious = false;
     };
     Loose makeBody(Game& game, int cx, int cy, int index) const;
     void applyForce(Game& game, Loose& prop, const int32_t point[3], const int32_t force[3]);
+    void smashParticles(Game& game, Loose& prop, const int32_t force[3], int effect);
     bool hit(Game& game, Vehicle& car, Loose& prop);
     bool hit(Game& game, Loose& a, Loose& b);
     template<class A, class B>

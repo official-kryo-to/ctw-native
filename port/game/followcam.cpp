@@ -22,6 +22,7 @@ void FollowPedCam::reset(const int32_t t[3], int16_t heading) {
     vel_[0] = vel_[1] = vel_[2] = 0;
     pitch_ = 55000;
     pitchVel_ = 0;
+    obstruction_.reset();
 }
 
 // cFollowPedCam::CanSeeTargetFromDefaultPos: the line from 2 units above the target to where the camera would
@@ -31,7 +32,7 @@ bool FollowPedCam::canSeeTarget(Collision* col) const {
     int s = fastsin((int16_t)yaw), c = fastsin((int16_t)yaw + 0x4000), k = std::abs(fastsin(0x16D8));
     int32_t a[3] = {target_[0], target_[1], target_[2] + 0x2000};
     int32_t b[3] = {target_[0] + mulq((int64_t)k * -0x18, s), target_[1] + mulq((int64_t)k * -0x18, c), target_[2] + height + 0x2000};
-    return !col->lineHitsBoxes(a, b, true);
+    return !col->staticLine(a, b, 0x80002200);
 }
 
 // cFollowPedCam::TryToFaceAngle (following the player, not aiming, not in "behind" mode)
@@ -69,7 +70,7 @@ void FollowPedCam::update(const int32_t t[3], int16_t pedHeading, const int32_t 
             double dn = std::sqrt((double)dl), fn = std::sqrt((double)fl);
             if ((d[0] * (double)f[0] + d[1] * (double)f[1]) / (dn * fn) > 0xE66000 / 16777216.0) {
                 int32_t a[3] = {target_[0], target_[1], target_[2] + 0x2000}, b[3] = {target_[0], target_[1], target_[2] + 0x66000};
-                pitchTarget = col->lineHitsBoxes(a, b, false) ? -0x2928 : -0x4000;   // something overhead: stay tilted
+                pitchTarget = col->staticLine(a, b, 0x80000200) ? -0x2928 : -0x4000;   // something overhead: stay tilted
             }
         }
     }
@@ -107,6 +108,8 @@ void FollowPedCam::update(const int32_t t[3], int16_t pedHeading, const int32_t 
         }
     }
     pos_[0] = want[0]; pos_[1] = want[1]; pos_[2] = want[2];
+    obstruction_.recover(t, pos_, col);
+    obstruction_.count(t, pos_, true, col);
 }
 
 void FollowPedCam::position(float out[3]) const {

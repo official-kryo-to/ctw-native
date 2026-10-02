@@ -56,12 +56,11 @@ bool SoundTables::load(const std::string& path) {
     SoundTables next;
     char header[8];
     if (!read(file, header, sizeof header)) return false;
-    next.hasPropSfx = std::memcmp(header, "CTWSND2", 8) == 0;
-    if ((!next.hasPropSfx && std::memcmp(header, "CTWSND1", 8) != 0) || !read(file, next.events, sizeof next.events) ||
+    if (std::memcmp(header, "CTWSND2", 8) != 0 || !read(file, next.events, sizeof next.events) ||
             !read(file, next.gears, sizeof next.gears) || !read(file, next.collisionLow, sizeof next.collisionLow) ||
             !read(file, next.collisionMed, sizeof next.collisionMed) || !read(file, next.collisionHigh, sizeof next.collisionHigh) ||
             !read(file, next.revAfterShift, sizeof next.revAfterShift) ||
-            (next.hasPropSfx && !read(file, next.propSfx, sizeof next.propSfx)) || !end(file)) return false;
+            !read(file, next.propSfx, sizeof next.propSfx) || !end(file)) return false;
     for (const auto& prop : next.propSfx)
         if (prop.volume > 127) return false;
     for (const EventInfo& event : next.events)
@@ -120,6 +119,21 @@ bool RadioTables::load(const std::string& path) {
     }
     if (!end(file)) return false;
     *this = std::move(next);
+    return true;
+}
+
+bool WeatherTables::load(const std::string& path) {
+    auto file = openTable(path);
+    WeatherTables next;
+    if (!magic(file, "CTWWTHR1") || !read(file, next.chance, sizeof next.chance) ||
+        !read(file, next.thunder, sizeof next.thunder) || !end(file)) return false;
+    for (const auto& row : next.chance) {
+        int total = 0;
+        for (uint8_t c : row) total += c;
+        if (total > 100) return false;
+    }
+    for (uint32_t s : next.thunder) if (s > 0xFFFF) return false;
+    *this = next;
     return true;
 }
 

@@ -36,13 +36,15 @@ void FollowCarCam::setBehind(const Vehicle& car) {
     yaw_ = (uint16_t)-atan2q(pos_[0] - car.pos[0], car.pos[1] - pos_[1]);
     state_ = 0;
     reverseFrames_ = 0;
+    obstruction_.reset();
 }
 
-void FollowCarCam::inherit(const int32_t pos[3], uint16_t yaw, uint16_t pitch) {
+void FollowCarCam::inherit(const int32_t pos[3], uint16_t yaw, uint16_t pitch, uint32_t blockedFrames) {
     // cBaseCam::TweenFrom(..., 1, false): retain the outgoing view, not SetCameraBehindTarget.
     for (int i = 0; i < 3; ++i) { pos_[i] = pos[i]; vel_[i] = 0; }
     yaw_ = yaw; pitch_ = pitch;
     state_ = 0; reverseFrames_ = 0;
+    obstruction_.reset(blockedFrames);
 }
 
 void FollowCarCam::update(const Vehicle& car, Collision* col) {
@@ -110,6 +112,8 @@ void FollowCarCam::update(const Vehicle& car, Collision* col) {
     putIntoRange(pitch_, -0x2B1C, -0x2B1C, rate + 0x40);
     int16_t targetYaw = (int16_t)-atan2q(pos_[0] - car.pos[0], car.pos[1] - pos_[1]);
     putIntoRange(yaw_, targetYaw, targetYaw, (int16_t)((uint32_t)(k * 0x6DC) >> 12) + 0x40);
+    // cFollowCarCam2 calls the shared counter but does not invoke HandleStuckCam.
+    obstruction_.count(car.pos, pos_, false, col);
 }
 
 void FollowCarCam::toWorldCamera(WorldCamera& cam) const {

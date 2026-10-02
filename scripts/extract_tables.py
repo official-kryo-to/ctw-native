@@ -205,8 +205,14 @@ class GameBinary:
         return b'CTWRAD2\0' + struct.pack('<II', 11, 33) + self.read(0x484728, 10) + records + self.read(0x480b64, 33 * 40)
 
 
+    def weather(self):
+        # cTimeCycle::msWeatherChanceTable (8 weathers x 8 percentages) and UpdateLightning's five thunder sounds.
+        return b'CTWWTHR1' + self.read(0x48702c, 64) + self.read(0x48706c, 20)
+
+
 def extract_tables(binary):
     game = GameBinary(binary)
     return {'population_tables.bin': game.population(), 'sound_tables.bin': game.sound(),
             'render_tables.bin': game.render(), 'gameplay_tables.bin': game.gameplay(),
-            'radio_tables.bin': game.radio(), 'restart_tables.bin': game.restart()}
+            'radio_tables.bin': game.radio(), 'restart_tables.bin': game.restart(),
+            'weather_tables.bin': game.weather()}

@@ -21,6 +21,7 @@ public:
     void spheres(int32_t out[6][4], int& count) const;
     void bboxVerts(int32_t out[8][3]) const;
     void worldCG(int32_t out[3]) const;
+    void worldPosition(const int32_t local[3], int32_t out[3]) const;
     void velocityAt(const int32_t point[3], int32_t out[3]) const;
     int32_t impactTerm(const int32_t normal[3], const int32_t arm[3]) const;
     int32_t speed() const;

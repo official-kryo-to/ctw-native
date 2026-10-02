@@ -23,10 +23,12 @@ GTA Chinatown Wars PC/
 
 The folder can be moved anywhere. Windows 10 or 11, 64-bit.
 
+See [CONTROLS.md](CONTROLS.md) for the keys.
+
 ## Mods
 
-Press **F4** in the game for the mod menu. Texture mods need no programming; code mods are small C or C++ DLLs.
-See the [modding guide](ctw-modkit/README.md).
+Press **F4** in the game for the mod menu. A mod can contain texture changes, a C or C++ DLL, or both in one folder.
+The bundled **Enhancements** mod adds a third-person camera (**V**, then the mouse) and PSP-style lighting. See the [modding guide](ctw-modkit/README.md).
 
 ## Build from source
 

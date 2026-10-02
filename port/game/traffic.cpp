@@ -56,13 +56,28 @@ bool Traffic::init(const std::string& dataDir) {
         profileFields(tables.profiles[s.profile].data(), zi.fields);
         zi.pedMakeup = s.pedMakeup; zi.vehMakeup = s.vehMakeup;
         zi.pedDensity = std::min(s.pedDensity, 100); zi.carDensity = std::min(s.carDensity, 100);
+        zi.sex = s.sex;
     }
     // popinfo.bin (cPopInfoManager::Init): u32 listTable, u32 pedMakeups, u32 vehicleMakeups, u16 listCount;
     // list = {u32 offset, u8 count, ...} -> count vehicle ids; vehicle makeup (8) = {u32 offset, u16 n, u8 sea, u8 land}
     // -> n x {u16 list, u16 weight}
-    uint32_t off0, off2;
+    uint32_t off0, off1, off2;
     uint16_t cnt;
-    memcpy(&off0, &pi[0], 4); memcpy(&off2, &pi[8], 4); memcpy(&cnt, &pi[12], 2);
+    memcpy(&off0, &pi[0], 4); memcpy(&off1, &pi[4], 4); memcpy(&off2, &pi[8], 4); memcpy(&cnt, &pi[12], 2);
+    // ped makeups (8 bytes each up to the vehicle makeups) = {u32 offset, u16 n} -> n x {u16 pedinfo record, u16 weight}
+    pedMakeups_.clear();
+    for (uint32_t m = off1; m + 8 <= off2 && m + 8 <= pi.size(); m += 8) {
+        uint32_t o;
+        uint16_t n;
+        memcpy(&o, &pi[m], 4); memcpy(&n, &pi[m + 4], 2);
+        std::vector<std::pair<uint16_t, uint16_t>> entries;
+        for (uint16_t j = 0; j < n && o + j * 4 + 4 <= pi.size(); ++j) {
+            uint16_t id, w;
+            memcpy(&id, &pi[o + j * 4], 2); memcpy(&w, &pi[o + j * 4 + 2], 2);
+            entries.push_back({id, w});
+        }
+        pedMakeups_.push_back(entries);
+    }
     for (uint16_t i = 0; i < cnt && off0 + i * 8 + 8 <= pi.size(); ++i) {
         uint32_t o;
         memcpy(&o, &pi[off0 + i * 8], 4);
@@ -92,6 +107,16 @@ const Traffic::ZoneInfo* Traffic::zoneAt(int32_t x, int32_t y, bool night) const
     for (const Zone& z : zones_)
         if (z.x0 < X && X <= z.x1 && z.y0 < Y && Y <= z.y1) return &infos_[night ? 1 : 0][z.info];
     return nullptr;
+}
+
+const Traffic::ZoneInfo& Traffic::zoneOrDefault(int32_t x, int32_t y, bool night) const {
+    static const ZoneInfo def = [] {   // cPopulationZones::mNoZoneDefault
+        ZoneInfo d{};
+        d.fields[1] = 10; d.vehMakeup = 5; d.pedDensity = 25; d.carDensity = 25;
+        return d;
+    }();
+    const ZoneInfo* z = zoneAt(x, y, night);
+    return z ? *z : def;
 }
 
 std::string Traffic::zoneName(int32_t x, int32_t y) const {
@@ -269,9 +294,9 @@ void Traffic::proximity(Game& g) {   // cPhysicalIntegrator::VehicleSimpleProxim
                            (isqrt64((int64_t)vj.hy * vj.hy + (int64_t)vj.hx * vj.hx) + isqrt64((int64_t)vi.hy * vi.hy + (int64_t)vi.hx * vi.hx));
             vi.setLeastCollideDistance(dist, false);
         }
-        // peds on foot (the player) in its path
-        if (g.playerCar < 0 && !g.player.hidden && g.player.pos[2] < 0x5000) {
-            int32_t d[2] = {g.player.pos[0] - vi.pos[0], g.player.pos[1] - vi.pos[1]};
+        // peds on foot (the player and pedestrians) in its path
+        auto pedAhead = [&](const int32_t* pos) {
+            int32_t d[2] = {pos[0] - vi.pos[0], pos[1] - vi.pos[1]};
             if ((int64_t)d[0] * d[0] + (int64_t)d[1] * d[1] < (int64_t)R * R && (int64_t)fi[0] * d[0] + (int64_t)fi[1] * d[1] > 0) {
                 int64_t side = (int64_t)ri[0] * d[0] + (int64_t)ri[1] * d[1];
                 if (std::llabs(side) < (int64_t)(vi.hx + 0x1000) * 0x1000) {
@@ -279,7 +304,9 @@ void Traffic::proximity(Game& g) {   // cPhysicalIntegrator::VehicleSimpleProxim
                     vi.setLeastCollideDistance(dist, false);
                 }
             }
-        }
+        };
+        if (g.playerCar < 0 && !g.player.hidden && g.player.pos[2] < 0x5000) pedAhead(g.player.pos);
+        for (const Pedestrians::Ped& p : g.peds.peds) pedAhead(p.body.pos);
     }
 }
 
@@ -386,15 +413,13 @@ void Traffic::update(Game& g) {
     }
 
     // cPopulationManager::Update (vehicles)
+    firedThisFrame = false;
     int32_t f[3];
     g.focus(f);
     uint32_t t = g.world.timeCycle().time();
     bool night = t - 0x14000u < 0xFFFF3000u;
-    const ZoneInfo* zp = zoneAt(f[0], f[1], night);
-    ZoneInfo def{};
-    def.fields[1] = 10; def.vehMakeup = 5; def.pedDensity = 25; def.carDensity = 25;
-    const ZoneInfo& z = zp ? *zp : def;
-    maxCars = std::min(14, z.carDensity * 100 * 16 / 7500);
+    const ZoneInfo& z = zoneOrDefault(f[0], f[1], night);
+    maxCars = std::min(56, (int)(std::min(14, z.carDensity * 100 * 16 / 7500) * densityScale));
     if (!maxCars || !g.roads.ok()) return;
     const int32_t* vel = g.playerCar >= 0 ? g.cars[g.playerCar].vel : g.player.vel;
     int64_t speed = isqrt64((int64_t)vel[0] * vel[0] + (int64_t)vel[1] * vel[1] + (int64_t)vel[2] * vel[2]);
@@ -402,6 +427,7 @@ void Traffic::update(Game& g) {
     int32_t k = (int32_t)(30 * q / maxCars);
     int period = k <= 0x1000 ? 1 : k <= 0x3000 ? 2 : k <= 0x6000 ? 4 : k <= 0xC000 ? 8 : k <= 0x18000 ? 16 : k <= 0x30000 ? 32 : 64;
     if (g.frame % (uint32_t)period) return;   // cFrameSchedule
+    firedThisFrame = true;
     int total = 0;
     for (int v : z.fields) total += v;
     if (!total) return;

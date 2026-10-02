@@ -38,7 +38,6 @@ struct SoundTables {
     int32_t collisionLow[3]{}, collisionMed[3]{}, collisionHigh[3]{}, revAfterShift[4]{};
     struct PropSfx { uint16_t sample; uint8_t volume, pad; };
     PropSfx propSfx[57]{};
-    bool hasPropSfx = false;   // version 1 setups remain readable; re-port to get object sounds
     bool load(const std::string& path);
 };
 
@@ -59,6 +58,12 @@ struct RadioTables {
     std::vector<Station> stations;
     std::vector<std::string> streams;
     uint8_t volumeSprites[10]{};
+    bool load(const std::string& path);
+};
+
+struct WeatherTables {
+    uint8_t chance[8][8]{};         // cTimeCycle::msWeatherChanceTable: percentages of the next weather
+    uint32_t thunder[5]{};          // UpdateLightning: resident-bank samples
     bool load(const std::string& path);
 };
 

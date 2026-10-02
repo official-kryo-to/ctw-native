@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
-// Particles: a port of cParticleEmitterBase and the emitters the vehicles use.
+// Particles: a port of cParticleEmitterBase and vehicle/street-furniture emitters.
 //
 // An emitter owns up to N particles of 28 bytes (sParticle): i16 position / velocity (fractions of the emitter's range,
 // Q12), u16 angle + i16 spin, RGB555 colour, i16 size + growth, u16 life (-2 a frame), alpha 0..31 (+ step), flags.
@@ -30,8 +30,8 @@ public:
     Emitter(const int32_t pos[3], int count, int32_t range, uint8_t sprite, bool billboard);
     virtual ~Emitter() = default;
     void setPos(const int32_t p[3]);          // cParticleEmitterBase::SetPos
-    void process();                           // Process -> ParticleUpdateLoop(true)
-    void render(const WorldCamera& cam) const;
+    virtual void process(uint32_t hours = 12u << 12); // Process -> ParticleUpdateLoop(true); time is Q12
+    virtual void render(const WorldCamera& cam) const;
     bool finished() const { return dying && !alive_; }
     int32_t pos[3];
     bool dying = false;                       // remove once the last particle is gone (flag 0x20)
@@ -82,6 +82,63 @@ protected:
     void updateParticle(Particle& p) override;
 };
 
+// cParticleEmitterPaper: one burst of horizontal quads, range four, sprite 9 (or untextured).
+// Colours are 0xBBGGRR; ambient is cTimeCycle::Colour(0xD).
+class PaperEmitter : public Emitter {
+public:
+    PaperEmitter(const int32_t pos[3], int count, int16_t size, uint32_t colourA, uint32_t colourB,
+                 bool textured, uint32_t ambient);
+    void process(uint32_t hours = 12u << 12) override;
+protected:
+    void updateParticle(Particle& p) override;
+private:
+    uint16_t colours_[2];
+    int count_;
+    int16_t size_;
+    bool emitted_ = false;
+};
+
+// cParticleEmitterSmashedWood: horizontal quads; count scales with the collision radius, at most 12.
+class WoodEmitter : public Emitter {
+public:
+    WoodEmitter(const int32_t pos[3], int16_t vx, int16_t vy, int32_t strength,
+                uint32_t colourA, uint32_t colourB, bool tint, uint32_t ambient);
+protected:
+    void updateParticle(Particle& p) override;
+private:
+    bool moving_;
+};
+
+// cParticleEmitterGarbage: rubbish from a smashed bin. Unattached (smash effects 13 and 37) it bursts eight pieces;
+// attached to its bin (effect 35) it spills four, then one every other frame while the bin moves faster than
+// 2 units/s. Pieces take one of six colours, darker at night, fall with gravity 0x51 and stop at -3.5 units.
+class GarbageEmitter : public Emitter {
+public:
+    GarbageEmitter(const int32_t pos[3], int16_t size, bool attached);
+    void process(uint32_t hours = 12u << 12) override;
+    void follow(const int32_t pos[3], int64_t speedSquared) { setPos(pos); speed2_ = speedSquared; }
+    void release() { attached_ = false; dying = true; }   // the bin stopped or went away
+protected:
+    void updateParticle(Particle& p) override;
+private:
+    void create(uint32_t hours);   // CreateRandomParticle
+    int16_t size_;
+    bool attached_;
+    uint16_t frames_ = 0;
+    int64_t speed2_ = 0;
+};
+
+// cParticleEmitterSmashedGlass: two horizontal shards on the first Process, coloured by time of day.
+class GlassEmitter : public Emitter {
+public:
+    explicit GlassEmitter(const int32_t pos[3]) : Emitter(pos,2,0x4000,19,false) { dying = true; }
+    void process(uint32_t hours = 12u << 12) override;
+protected:
+    void updateParticle(Particle& p) override;
+private:
+    bool emitted_ = false;
+};
+
 class ExplosionFlash : public Emitter {
 public:
     explicit ExplosionFlash(const int32_t pos[3]);
@@ -103,6 +160,24 @@ protected:
     void updateParticle(Particle& p) override;
 };
 
+// cParticleEmitterRain: the local player's rain (cGeneralParticleController, 63 drops, range 7, attached to the
+// player). AddParticle(n) drops n new streaks 25 units up, within 17 units across, falling 2 units a frame (3 when
+// n >= 5), each turned to face the camera; UpdateParticle wraps them within 3.5 ranges of the emitter and kills
+// them below it. ManagedRender draws each as a 0.08-unit wide, 4-unit long quad of the centre column of effect
+// sprite 20, in the time cycle's ambient colour (Colour(0xD)) at alpha 0x70.
+class RainEmitter : public Emitter {
+public:
+    explicit RainEmitter(const int32_t pos[3]) : Emitter(pos, 63, 0x70000, 20, false) {}
+    void addDrops(unsigned n, uint16_t cameraYaw);   // cParticleEmitterRain::AddParticle(uint)
+    void render(const WorldCamera& cam) const override;
+    uint32_t tint = 0xFF808080u;                     // Colour(0xD), set each frame
+protected:
+    void updateParticle(Particle& p) override;
+private:
+    Particle tmpl_{};
+    bool init_ = false;
+};
+
 class Particles {
 public:
     template <class T, class... A> T* add(A&&... a) {
@@ -110,10 +185,12 @@ public:
         return static_cast<T*>(emitters_.back().get());
     }
     void remove(const Emitter* e);   // (the emitter keeps going until its particles are gone)
-    void update(uint32_t frame);
+    void update(uint32_t frame, uint32_t hours = 12u << 12);
     void render(const WorldCamera& cam) const;
+    int emitterCount() const { return (int)emitters_.size(); }   // the debug overlay
 private:
     std::vector<std::unique_ptr<Emitter>> emitters_;
+    friend struct ParticlesTestAccess;
 };
 
 Particles& TheParticles();
