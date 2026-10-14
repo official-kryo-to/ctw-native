@@ -430,6 +430,16 @@ impl<'a> GameBinary<'a> {
         Ok(out)
     }
 
+    /// cWeaponInfo::msWeaponInfos (28 records of 60 bytes), cWeaponManager::GetDefaultWeaponAmmo's table and
+    /// cBulletTraces::AddTrace's three trace lifetimes.
+    pub fn weapons(&self) -> Result<Vec<u8>, TableError> {
+        let mut out = b"CTWWPN01".to_vec();
+        out.extend(self.read(0x487918, 28 * 60)?);
+        out.extend(self.read(0x487fc2, 28 * 2)?);
+        out.extend(self.read(0x4878ec, 12)?);
+        Ok(out)
+    }
+
     pub fn restart(&self) -> Result<Vec<u8>, TableError> {
         restart_table(self.constant_calls("_ZN11CScriptMain19DefineRestartPointsEv")?)
     }
@@ -473,6 +483,7 @@ pub fn extract_tables(binary: &[u8]) -> Result<Vec<(&'static str, Vec<u8>)>, Tab
         ("radio_tables.bin", game.radio()?),
         ("restart_tables.bin", game.restart()?),
         ("weather_tables.bin", game.weather()?),
+        ("weapon_tables.bin", game.weapons()?),
     ])
 }
 

@@ -32,5 +32,8 @@ void enh_saved_float(const char* key, float* value);
 
 extern const CtwFeature third_person;
 extern const CtwFeature psp_lighting;
+extern const CtwFeature lcs_characters;
+extern const CtwFeature pc_aiming;
+int enh_third_person_active(void);
 
 #endif

@@ -10,6 +10,7 @@
 pub mod apk;
 pub mod elf;
 pub mod export;
+pub mod lcs;
 pub mod manifest;
 pub mod tables;
 
@@ -27,9 +28,18 @@ pub enum Progress {
     /// Reading the lookup tables from the game binary.
     Tables,
     /// Copying the game files out of the APK.
-    Assets { done: usize, total: usize, bytes_done: u64, bytes_total: u64 },
+    Assets {
+        done: usize,
+        total: usize,
+        bytes_done: u64,
+        bytes_total: u64,
+    },
     /// Putting the exe, the icon and the mods in place.
     Installing,
+    ModAssets {
+        done: usize,
+        total: usize,
+    },
 }
 
 #[derive(Debug)]

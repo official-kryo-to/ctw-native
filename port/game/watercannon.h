@@ -11,6 +11,8 @@
 // the cannon's colour mixed 60 % toward the time cycle's ambient colour.
 #pragma once
 #include <cstdint>
+#include "particles.h"
+#include <optional>
 
 struct WorldCamera;
 
@@ -26,6 +28,10 @@ private:
     int32_t pos_[16][3] = {}, vel_[16][3] = {};
     uint8_t age_[16] = {};
     int16_t head_ = 0;
+    std::optional<WaterSplashEmitter> splash_;
+    uint32_t frame_ = 0, audioId_ = 0;
+    mutable uint8_t renderedVertices_ = 0;
+    friend struct WaterTestAccess;
 };
 
 // cFountainStream: a cannon at a fixed spot fed every frame with an upward jet (2.0 units a frame) that wobbles
@@ -39,4 +45,5 @@ private:
     int32_t pos_[3];
     int16_t vel_[3];
     WaterCannon jet_;
+    friend struct WaterTestAccess;
 };

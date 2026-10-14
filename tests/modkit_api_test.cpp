@@ -20,6 +20,9 @@ static std::string modsDir;
 static CtwCallback hudHook, tickHook;
 static CtwKeyCallback keyHook;
 static CtwGameEventCallback eventHook;
+static CtwCharacterCallback characterHook;
+static void* characterUser;
+static CtwCharacterModel released;
 static void *hudUser, *tickUser, *keyUser, *eventUser;
 static float mx, my;
 static int clicked, wheelConsumed;
@@ -48,7 +51,13 @@ int main(int argc, char** argv) {
     const auto enabled = (int (*)())SDL_LoadFunction(probe,"ctw_test_enabled");
     const auto probeMod = (CtwMod* (*)())SDL_LoadFunction(probe,"ctw_test_mod");
     if (!init || !shutdown || !getApi || !events || !toggles || !ticks || !enabled || !probeMod) return 2;
-    CtwHostApi host{}; host.version = 5; host.size = sizeof host;
+    CtwHostApi host{}; host.version = 11; host.size = sizeof host;
+    host.weapon_type_count = [] { return 25; };
+    host.weapon_name = [](int t) -> const char* { return t == 5 ? "Pistol" : nullptr; };
+    host.weapon_givable = [](int t) { return t == 5 ? 1 : 0; };
+    host.give_weapon = [](int t, int ammo) { return t == 5 && ammo == 0 ? 1 : 0; };
+    host.get_player_weapon = [](int* t, int* a, int* c) { if (t) *t = 5; if (a) *a = 30; if (c) *c = 17; return 1; };
+    host.cycle_weapon = [](int d) { return d ? 1 : 0; };
     host.mods_dir = [] { return modsDir.c_str(); }; host.log = [](const char*) {};
     host.override_texture_png = [](int id,const char*) -> int { if (id != 42) return 0; ++textureLoads; return 1; };
     host.restore_texture = [](int id) { if (id == 42) ++textureRestores; };
@@ -78,11 +87,45 @@ int main(int argc, char** argv) {
     host.frame_count = [] { return 1u; }; host.text_input = [] { return ""; };
     host.world_line = [](const float*,const float*,float* f) { if (f) *f = 0.25f; return 1; };
     host.set_render_style = [](const CtwRenderStyle* s) { return s && s->sepia == 0.5f ? 1 : 0; };
-    check(init(&host) == 0, "v4 host loads the mod kit");
+    host.get_camera_shake = [](float* out) { if (out) { out[0]=1; out[1]=2; out[2]=3; } };
+    host.on_character_render = [](CtwCharacterCallback f, void* u) { characterHook=f; characterUser=u; };
+    host.load_character_model = [](const char*, const char*, const char*) -> CtwCharacterModel { return 73; };
+    host.release_character_model = [](CtwCharacterModel model) { released=model; };
+    host.draw_character_model = [](CtwCharacterModel model, const CtwCharacterPose*, float, const char*, float, int) -> int { return model == 73; };
+    host.get_character_bounds = [](CtwCharacterModel model, const char*, float, CtwCharacterBounds* b) -> int {
+        if (model != 73 || !b || b->size < sizeof *b) return 0;
+        b->maximum[2] = 2; b->duration = 1.5f; return 1;
+    };
+    host.draw_character_model_at_time = [](CtwCharacterModel model, const CtwCharacterPose*, float, const char*, float seconds, int loop, int ground) -> int {
+        return model == 73 && seconds == .75f && !loop && ground;
+    };
+    host.draw_character_model_attached = [](CtwCharacterModel model, const CtwCharacterPose*, float, const char*, float phase, int loop, int bone) -> int {
+        return model == 73 && phase == .25f && loop && bone == 1;
+    };
+    check(init(&host) == 0, "v9 host loads the mod kit");
     check(textureLoads == 1, "the same mod folder loads its textures and its DLL");
     const CtwApi* api = getApi();
-    check(api && api->version == 5 && api->size == sizeof(CtwApi), "a mod's DLL receives the complete v5 table");
+    check(api && api->version == 11 && api->size == sizeof(CtwApi), "a mod's DLL receives the complete v11 table");
     if (api) {
+        int t = 0, a = 0, c = 0;
+        check(CTW_MOD_HAS(api, give_weapon) && api->give_weapon(5, 0) && !api->give_weapon(6, 0) &&
+              api->weapon_type_count() == 25 && api->weapon_name(5) && api->weapon_givable(5) &&
+              api->get_player_weapon(&t, &a, &c) && t == 5 && a == 30 && c == 17, "weapon functions forward to the host");
+        check(CTW_MOD_HAS(api, cycle_weapon) && api->cycle_weapon(1) && !api->cycle_weapon(0), "v11 weapon switch forwards");
+    }
+    if (api) {
+        CtwCharacterPose pose{}; pose.size=sizeof pose; pose.id=42;
+        check(api->load_character_model("model", "clips", "textures") == 73 &&
+              api->draw_character_model(73, &pose, 1, "idle", 0, 1), "character model functions forward to host");
+        CtwCharacterBounds bounds{}; bounds.size = sizeof bounds;
+        check(api->get_character_bounds(73, "idle", 0, &bounds) && bounds.maximum[2] == 2 && bounds.duration == 1.5f &&
+              api->draw_character_model_at_time(73, &pose, 1, "fall", .75f, 0, 1),
+              "v8 bounds, elapsed time and fallen-body grounding forward to host");
+        check(api->draw_character_model_attached(73,&pose,1,"rider",.25f,1,1),"v9 native bone attachments forward to host");
+        api->release_character_model(73);
+        check(released == 73 && characterHook && characterHook(&pose, characterUser), "models release and enabled character hook overrides sprites");
+        float shake[3]{}; api->get_camera_shake(shake);
+        check(shake[0] == 1 && shake[1] == 2 && shake[2] == 3, "custom-camera shake forwards through the mod menu");
         check(api->live_vehicle_at(2) == 57 && api->spawn_vehicle_at(5,nullptr,0,0) == 99, "new handles and spawning forward to host");
         CtwVehicleState state{}; state.size = sizeof state;
         check(api->get_vehicle_state(57,&state) && state.health == 123, "state output forwards through mod menu");
@@ -115,13 +158,53 @@ int main(int argc, char** argv) {
     check(textureRestores == 1, "disabling a mixed mod removes its textures as well as stopping its code callbacks");
     eventHook(&e,eventUser); tickHook(tickUser);
     check(events() == 1 && ticks() == 1, "disabled mod receives no gameplay events or ticks");
+    CtwCharacterPose pose{}; pose.size=sizeof pose; pose.id=42;
+    check(characterHook && !characterHook(&pose, characterUser), "disabled mod falls back to original character sprites");
     check(clickText("Disabled"), "the switch now reads Disabled");
     check(toggles() == 2 && enabled() == 1, "reenabling notifies the same loaded mod");
     check(textureLoads == 2, "reenabling the same mixed mod reapplies its textures");
     eventHook(&e,eventUser); check(events() == 2, "reenabling resumes event delivery");
+    check(characterHook && characterHook(&pose, characterUser), "reenabling resumes character rendering");
     shutdown();
     { std::ifstream saved(dir / "Probe/settings.ini"); std::string text((std::istreambuf_iterator<char>(saved)), {});
       check(text.find("speed=2.25") != std::string::npos && text.find("bad") == std::string::npos, "settings are written at shutdown"); }
+    host.version = 10; host.size = offsetof(CtwHostApi,cycle_weapon);
+    check(init(&host) == 0, "truncated v10 host remains supported");
+    api = getApi();
+    check(api && api->version == 10 && CTW_MOD_HAS(api,give_weapon) && !CTW_MOD_HAS(api,cycle_weapon),
+          "v10 host cannot expose the v11 weapon switch");
+    shutdown();
+    host.version = 9; host.size = offsetof(CtwHostApi,weapon_type_count);
+    check(init(&host) == 0, "truncated v9 host remains supported");
+    api = getApi();
+    check(api && api->version == 9 && CTW_MOD_HAS(api,draw_character_model_attached) && !CTW_MOD_HAS(api,give_weapon),
+          "v9 host cannot expose the v10 weapon tail");
+    shutdown();
+    host.version = 8; host.size = offsetof(CtwHostApi,draw_character_model_attached);
+    check(init(&host) == 0, "truncated v8 host remains supported");
+    api = getApi();
+    check(api && api->version == 8 && CTW_MOD_HAS(api,draw_character_model_at_time) &&
+          !CTW_MOD_HAS(api,draw_character_model_attached), "v8 host cannot expose the v9 attachment tail");
+    shutdown();
+    host.version = 7; host.size = offsetof(CtwHostApi,get_character_bounds);
+    check(init(&host) == 0, "truncated v7 host remains supported");
+    api = getApi();
+    check(api && api->version == 7 && CTW_MOD_HAS(api,draw_character_model) &&
+          !CTW_MOD_HAS(api,get_character_bounds) && !CTW_MOD_HAS(api,draw_character_model_at_time),
+          "v7 host keeps phase-based drawing without reading the v8 tail");
+    shutdown();
+    host.version = 6; host.size = offsetof(CtwHostApi,load_character_model); characterHook=nullptr;
+    check(init(&host) == 0, "truncated v6 host remains supported");
+    api = getApi();
+    check(api && api->version == 6 && CTW_MOD_HAS(api,get_camera_shake) && !CTW_MOD_HAS(api,load_character_model) &&
+          !characterHook, "v6 host does not read or advertise the character tail");
+    shutdown();
+    host.version = 5; host.size = offsetof(CtwHostApi,get_camera_shake);
+    check(init(&host) == 0, "truncated v5 host remains supported");
+    api = getApi();
+    check(api && api->version == 5 && CTW_MOD_HAS(api,world_line) && !CTW_MOD_HAS(api,get_camera_shake),
+          "v5 host keeps its camera functions without reading the new shake tail");
+    shutdown();
     // A v4 game: the mod table keeps its menu-side v5 functions but not the game's camera functions.
     host.version = 4; host.size = offsetof(CtwHostApi,set_control_yaw);
     check(init(&host) == 0, "v4 host remains supported");

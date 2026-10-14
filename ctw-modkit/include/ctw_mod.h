@@ -30,7 +30,7 @@
 #include <stddef.h>
 #include "ctw_types.h"
 
-#define CTW_MOD_API_VERSION 5
+#define CTW_MOD_API_VERSION 11
 #define CTW_MOD_HAS(api, member) ((api) && (api)->size >= offsetof(CtwApi, member) + sizeof((api)->member) && (api)->member)
 
 #ifdef _WIN32
@@ -204,6 +204,36 @@ typedef struct CtwApi {
     void (*on_frame_begin)(CtwMod* mod, CtwCallback fn, void* user);
     /* The look of the picture: light pools, colour grade (see CtwRenderStyle). NULL restores the game's own. */
     int (*set_render_style)(const CtwRenderStyle* style);
+    /* Version 6: the game's explosion-shake offset in world units, interpolated for this drawn frame.
+       Read in on_frame_begin; add once to a custom eye after wall/ground checks. Reading does not consume
+       random numbers. Do not add to get_camera's normal game view, which already includes shake. */
+    void (*get_camera_shake)(float out_xyz[3]);
+    /* Version 7: optional skinned character resources. Load/release on the game thread with a GL context.
+       load returns 0 on invalid/missing resources. draw uses normalized phase (0..1), preserves GL state,
+       and returns 0 for an unavailable animation/model. Models are released at plugin shutdown.
+       on_character_render runs at the character's world draw; return 0 to retain the original sprites. */
+    CtwCharacterModel (*load_character_model)(const char* dff, const char* ifp, const char* textures);
+    void (*release_character_model)(CtwCharacterModel model);
+    int (*draw_character_model)(CtwCharacterModel model, const CtwCharacterPose* pose, float scale, const char* animation, float phase, int loop);
+    void (*on_character_render)(CtwMod* mod, CtwCharacterCallback fn, void* user);
+    /* Version 8: donor dimensions and absolute animation time. ground_pose
+       places the lowest skinned vertex on pose.position.z (fallen bodies).
+       Use zero for locomotion, jumping and vehicle attachments. */
+    int (*get_character_bounds)(CtwCharacterModel model, const char* animation, float seconds, CtwCharacterBounds* bounds);
+    int (*draw_character_model_at_time)(CtwCharacterModel model, const CtwCharacterPose* pose, float scale, const char* animation, float seconds, int loop, int ground_pose);
+    /* v9: native frame attachment; same semantics as the host function. */
+    int (*draw_character_model_attached)(CtwCharacterModel model, const CtwCharacterPose* pose, float scale, const char* animation, float phase, int loop, int bone_id);
+    /* Version 10: the player's weapons, by eWeaponType (0 fists .. 24). */
+    int (*weapon_type_count)(void);
+    const char* (*weapon_name)(int type);            /* the game's name, NULL for a bad type */
+    int (*weapon_givable)(int type);                 /* 1 = give_weapon accepts it */
+    int (*give_weapon)(int type, int ammo);          /* to the player; ammo <= 0: the game's default amount; 1 = ok */
+    int (*get_player_weapon)(int* type, int* ammo, int* clip);   /* the held weapon; ammo -1 = infinite; 1 = ok */
+    int (*draw_weapon_icon)(int type, float x, float y, float w, float h);   /* the game's weapon picture; 0 = none */
+    void (*set_aim_override)(int enabled, const float target[3]);   /* PC aiming: fire at this world point */
+    int (*screen_to_world)(float x, float y, float out[3]);        /* the world point under a screen pixel */
+    /* --- version 11 ------------------------------------------------------------------------------------- */
+    int (*cycle_weapon)(int direction);   /* the next (> 0) or previous (< 0) weapon, on foot; 1 = ok */
 } CtwApi;
 
 /*

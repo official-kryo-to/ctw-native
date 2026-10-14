@@ -15,6 +15,7 @@
 #include <vector>
 
 struct WorldCamera;
+class Particles;
 
 struct Particle {   // sParticle
     int16_t p[3], v[3];
@@ -36,15 +37,34 @@ public:
     int32_t pos[3];
     bool dying = false;                       // remove once the last particle is gone (flag 0x20)
 protected:
+    friend class Particles;
+    friend struct ParticlesTestAccess;
     virtual void updateParticle(Particle& p);  // cParticleEmitterBase::UpdateParticle
     void addFromData(const Particle& d);      // AddParticleFromData
     int32_t range_, inv_;                     // +0xD0 = 1 / range
     uint8_t sprite_;
     bool billboard_;
+    bool additive_ = false;                  // cEffectRenderable +0x11: emissive pass before ordinary alpha
     std::vector<Particle> parts_;
     uint8_t next_ = 0;
     int alive_ = 0;
     int32_t moved_[3] = {0, 0, 0};           // +0xC0 / +0xC8
+    uint32_t frame_ = 0;
+    Particles* owner_ = nullptr;
+    int32_t smokeOrigin_[3]{};
+};
+
+// cParticleEmitterWaterSplash, type 1: the horizontal spray at a water stream's source.
+class WaterSplashEmitter : public Emitter {
+public:
+    WaterSplashEmitter(const int32_t pos[3], const int32_t velocity[3], uint16_t colour);
+    void direction(const int32_t velocity[3]);
+    void addParticle() { addFromData(tmpl_); }
+    void tick(uint32_t frame) { frame_=frame; Emitter::process(); }
+protected:
+    void updateParticle(Particle& particle) override;
+private:
+    Particle tmpl_{};
 };
 
 // cParticleEmitterSmoke: range 20, sprite 1, billboard; colours by vehicle damage 0 light .. 3 black
@@ -52,6 +72,8 @@ class SmokeEmitter : public Emitter {
 public:
     SmokeEmitter(const int32_t pos[3], int count) : Emitter(pos, count, 0x14000, 1, true) {}
     void addParticle(const int32_t vel[3], int colour);
+    void addParticleFromData(const Particle& p) { addFromData(p); }
+    bool followPlayer = false; // explosion smoke belongs to the local player's general particle controller
 protected:
     void updateParticle(Particle& p) override;
 private:
@@ -76,7 +98,7 @@ private:
 // cParticleEmitterFire: ten short-lived, shrinking flames, range four, sprite 12.
 class FireEmitter : public Emitter {
 public:
-    explicit FireEmitter(const int32_t pos[3]) : Emitter(pos, 10, 0x4000, 12, true) {}
+    explicit FireEmitter(const int32_t pos[3]) : Emitter(pos, 10, 0x4000, 12, true) { additive_ = true; }
     void addParticle();
 protected:
     void updateParticle(Particle& p) override;
@@ -139,23 +161,41 @@ private:
     bool emitted_ = false;
 };
 
+// cParticleEmitterSmashedSlats: six long strips from the two sides of a broken gate.
+class SlatsEmitter : public Emitter {
+public:
+    SlatsEmitter(const int32_t pos[3], const int32_t velocity[3], const int32_t endA[3], const int32_t endB[3],
+                 uint32_t colourA, uint32_t colourB, bool textured, bool slow, uint32_t ambient);
+    void render(const WorldCamera& cam) const override;
+protected:
+    void updateParticle(Particle& p) override;
+    void vertices(const Particle& p, float out[4][3]) const;
+};
+
 class ExplosionFlash : public Emitter {
 public:
-    explicit ExplosionFlash(const int32_t pos[3]);
+    explicit ExplosionFlash(const int32_t pos[3], int type = 4, int32_t scale = 4096);
 protected:
     void updateParticle(Particle& p) override;
 };
 
 class ExplosionCloud : public Emitter {
 public:
-    explicit ExplosionCloud(const int32_t pos[3]);
+    // cParticleEmitterComplexExplsn for generic/ordinary vehicle blasts (types 0/4).
+    // Phase zero is the main cloud; other phases are random bursts. Big-vehicle circles remain unported.
+    ExplosionCloud(const int32_t pos[3], int type = 4, unsigned phase = 1, int16_t scale = 4096,
+                   int32_t vx = 0, int32_t vy = 0, unsigned count = 8);
+    void process(uint32_t hours = 12u << 12) override;
 protected:
     void updateParticle(Particle& p) override;
+private:
+    int16_t scale_;
+    std::vector<Particle> smoke_;
 };
 
 class ExplosionDebris : public Emitter {
 public:
-    explicit ExplosionDebris(const int32_t pos[3]);
+    explicit ExplosionDebris(const int32_t pos[3], int type = 4);
 protected:
     void updateParticle(Particle& p) override;
 };
@@ -182,10 +222,11 @@ class Particles {
 public:
     template <class T, class... A> T* add(A&&... a) {
         emitters_.push_back(std::make_unique<T>(std::forward<A>(a)...));
+        emitters_.back()->owner_ = this;
         return static_cast<T*>(emitters_.back().get());
     }
     void remove(const Emitter* e);   // (the emitter keeps going until its particles are gone)
-    void update(uint32_t frame, uint32_t hours = 12u << 12);
+    void update(uint32_t frame, uint32_t hours = 12u << 12, const int32_t* playerPos = nullptr);
     void render(const WorldCamera& cam) const;
     int emitterCount() const { return (int)emitters_.size(); }   // the debug overlay
 private:

@@ -25,6 +25,28 @@ the assets and lookup tables from your APK. Changing the game source therefore n
 an existing downloaded Porter keeps the game from its release. Already exported game folders keep their
 own copy too. Use a newer Porter and export to a new folder to get the newer game.
 
+## Optional mods and 3D people
+
+With mods enabled, the Porter shows a premade-mod checklist. Enhancements is selected by default; the cheat
+and appearance examples are optional. Mods can combine code and textures in the same folder.
+
+Enhancements offers an optional extra APK import for third-person 3D people. Choose your own **Liberty City
+Stories for Android 2.4.379** APK; the screen states this version and validates it automatically. You can skip
+and keep the camera/lighting features with CTW sprites. Imported appearances include Toni as the player,
+a cop and twelve civilians; see [character support and limitations](../ctw-modkit/THIRD_PERSON_ASSETS.md).
+
+The importer copies only selected models, required textures and pedestrian/bike animations into
+`mods/Enhancements/lcs/`. It never runs donor code or packages a donor APK/library. Building the Porter excludes
+local imports and user settings. Do not share an exported game folder containing game resources.
+
+The standalone Python exporter supports the same selection:
+
+```text
+python scripts/export_pc.py --apk your-ctw.apk --out your-game --mods Enhancements --lcs-apk your-lcs.apk
+python porter/core/tests/lcs_parity.py              # synthetic importer byte parity
+python porter/core/tests/lcs_parity.py your-lcs.apk # optional private-copy parity check
+```
+
 ## Where things are
 
 | | |

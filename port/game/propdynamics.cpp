@@ -3,6 +3,8 @@
 // See LICENSE in the repository root.
 #include "propdynamics.h"
 #include "game.h"
+#include "explosions.h"
+#include "fixedmath.h"
 #include "particles.h"
 #include "sound.h"
 #include "cargens.h"
@@ -18,7 +20,8 @@ void normalise(int32_t p[3]) {
 }
 }
 
-void PropDynamics::smashParticles(Game& g, Loose& l, const int32_t force[3], int effect) {
+void PropDynamics::smashParticles(Game& g, Loose& l, const int32_t point[3], const int32_t force[3], int effect,
+                                 const int32_t* sourcePos, const int32_t* sourceVelocity, bool vehicleImpact) {
     const int32_t at[3] = {l.prop.x,l.prop.y,l.prop.z};
     const uint32_t ambient = g.world.timeCycle().ok() ? g.world.timeCycle().colour(13) : 0x808080u;
     const int32_t half[3] = {l.body.hx,l.body.hy,l.body.hz};
@@ -27,6 +30,55 @@ void PropDynamics::smashParticles(Game& g, Loose& l, const int32_t force[3], int
     auto wood = [&](int16_t vx,int16_t vy,int32_t strength,uint32_t a,uint32_t b,bool tint = true) {
         TheParticles().add<WoodEmitter>(at,vx,vy,strength,a,b,tint,ambient);
     };
+    if (effect == 9) { // Smash3: anchored hydrant, up to 25 degrees of tilt and an indefinite fountain
+        int32_t direction[3] = {force[0],force[1],force[2]};
+        const int32_t strength = length(direction);
+        if ((int64_t)strength*strength > 0x28000) {
+            normalise(direction);
+            int32_t axis[3] = {direction[1],-direction[0],0};
+            if ((int64_t)axis[0]*axis[0]+(int64_t)axis[1]*axis[1] < 0x28001) {
+                l.broken = false; // a nearly vertical force does not snap the hydrant
+                return;
+            }
+            normalise(axis);
+            l.body.rotate(axis,(int16_t)((int64_t)std::min(strength,50*4096)*0x11C7/(50*4096)));
+            l.collidable = false;
+            l.body.setToPhysics(false);
+        }
+        const int16_t velocity[3] = {(int16_t)(-direction[0]/4),(int16_t)(-direction[1]/4),0x1800};
+        l.fountain.emplace(at,velocity);
+        return;
+    }
+    if (effect == 17) { l.broken = false; return; } // Smash1 clears success; movable does not imply broken
+    if (effect == 28) {
+        int32_t blast[3]; l.body.worldCG(blast);
+        for (int k = 0; k < 3; ++k) blast[k] += (int32_t)Rand32Critical(0x332)-0x199;
+        g.addPropExplosion(blast);
+        l.collidable = false; // Smash's +0x21 branch clears entity contact flags
+        return;
+    }
+    if ((effect == 23 || effect == 30) && vehicleImpact) {
+        // Smash2's hotdog cart struck by a vehicle: a small generic blast, without the gas-jet timer.
+        int32_t blast[3]; l.body.worldCG(blast);
+        g.addPropExplosion(blast,0x8CC);
+        return;
+    }
+    if (effect == 26 || effect == 27) { // Smash2: slats span the prop's transformed right axis
+        int32_t cg[3], right[3], a[3], b[3], launch[3];
+        l.body.worldCG(cg);
+        const int32_t local[3] = {radius,0,0}; l.body.worldPosition(local,right);
+        int64_t speed2 = 0;
+        for (int k=0;k<3;++k) {
+            a[k] = cg[k]-(right[k]-l.body.pos[k]); b[k] = cg[k]+(right[k]-l.body.pos[k]);
+            launch[k] = sourceVelocity ? sourceVelocity[k] : force[k] >> 10;
+            speed2 += (int64_t)launch[k]*launch[k];
+        }
+        if (sourcePos && speed2 < 0x28000) for (int k=0;k<3;++k) launch[k] = cg[k]-sourcePos[k];
+        const uint32_t colour = effect == 26 ? rgb(255,255,255) : rgb(253,116,75);
+        // Cars and dynamic props both belong to the reference's slow-launch ClassId range.
+        TheParticles().add<SlatsEmitter>(point,launch,a,b,colour,colour,effect == 26,true,ambient);
+        return;
+    }
     // Smash3: rubbish, scaled by the bound radius; effect 35's emitter stays with the bin
     if (effect == 13 || effect == 37) {
         TheParticles().add<GarbageEmitter>(at,(int16_t)((radius*0x1EA) >> 12),false);
@@ -105,19 +157,20 @@ PropDynamics::Loose PropDynamics::makeBody(Game& g,int cx,int cy,int index) cons
     return l;
 }
 
-void PropDynamics::applyForce(Game& g,Loose& l,const int32_t p[3],const int32_t f[3]) {
+void PropDynamics::applyForce(Game& g,Loose& l,const int32_t p[3],const int32_t f[3],
+                              const int32_t* sourcePos, const int32_t* sourceVelocity, bool vehicleImpact, int forceType) {
     const auto* kind=g.props.kindForProp(l.prop.prop);
     if(!kind) return;
     const int32_t magnitude=mulq(length(f),0x111);
     const bool uproot=kind->uprootForce >= 0 && magnitude >= (int32_t)std::lround(kind->uprootForce*4096);
     const bool smash=kind->smashForce >= 0 && magnitude >= (int32_t)std::lround(kind->smashForce*4096);
     if(l.uprooted) {
-        l.body.setToPhysics(true); l.body.applyWorldForce(p,f); l.sleepCounter=15;
+        l.body.setToPhysics(true); l.body.applyWorldForce(p,f,forceType); l.sleepCounter=15;
     } else if(uproot && l.body.mass_ > 0) {
         l.uprooted=true; l.body.setToPhysics(true);
         if(kind->smashEffect == 8) {
             int32_t reduced[3]; for(int k=0;k<3;++k) reduced[k]=mulq(f[k],0x4CC);
-            l.body.applyWorldForce(p,reduced);
+            l.body.applyWorldForce(p,reduced,forceType);
             int32_t cg[3]; l.body.worldCG(cg);
             const int32_t up[3]={0,0,0x50000}; l.body.applyWorldForce(cg,up);
             l.collidable=false;
@@ -128,23 +181,59 @@ void PropDynamics::applyForce(Game& g,Loose& l,const int32_t p[3],const int32_t 
             l.body.applyWorldForce(at,sideways);
             const int32_t centre[3]={0,0,l.body.hz*2/5}; l.body.setLocalCG(centre);
             l.collidable=false; // UpRoot clears entity contacts, retaining world collisions for this effect
-        } else l.body.applyWorldForce(p,f);
+        } else l.body.applyWorldForce(p,f,forceType);
     }
-    if(smash && !l.broken) {
-        l.broken=true;
-        const int32_t at[3]={l.prop.x,l.prop.y,l.prop.z};
-        TheSound().propSmash(at,kind->smashEffect);
-        smashParticles(g,l,f,kind->smashEffect);
-        int32_t axis[3]={-f[1],f[0],0}; normalise(axis);
-        if(kind->smashEffect == 7) { l.body.rotate(axis,0x16C); l.lampTimer=60; }
-        else if(kind->smashEffect == 8) l.body.rotate(axis,0x3C72);
-        else if(kind->smashEffect == 15 || kind->smashEffect == 25 || kind->smashEffect == 31) l.body.rotate(axis,0x1555);
-        if(kind->uprootForce < 0 || !drawnModel(g,l)) l.collidable=false;
-    }
+    if(smash) this->smash(g,l,p,f,sourcePos,sourceVelocity,vehicleImpact);
     if(l.broken || l.uprooted) {
         g.collision.setPropState(l.cx,l.cy,l.index,1);
         g.collision.setPropSolid(l.cx,l.cy,l.index,false);
     }
+}
+
+void PropDynamics::smash(Game& g, Loose& l, const int32_t p[3], const int32_t f[3],
+                         const int32_t* sourcePos, const int32_t* sourceVelocity, bool vehicleImpact) {
+    if (l.broken) return;
+    const auto* kind = g.props.kindForProp(l.prop.prop); if (!kind) return;
+    l.broken = true;
+    const int32_t at[3] = {l.prop.x,l.prop.y,l.prop.z};
+    TheSound().propSmash(at,kind->smashEffect);
+    smashParticles(g,l,p,f,kind->smashEffect,sourcePos,sourceVelocity,vehicleImpact);
+    int32_t axis[3] = {-f[1],f[0],0}; normalise(axis);
+    if (kind->smashEffect == 7) { l.body.rotate(axis,0x16C); l.lampTimer=60; }
+    else if (kind->smashEffect == 8) l.body.rotate(axis,0x3C72);
+    else if (kind->smashEffect == 15 || kind->smashEffect == 25 || kind->smashEffect == 31) l.body.rotate(axis,0x1555);
+    if (l.broken && (kind->uprootForce < 0 || !drawnModel(g,l))) l.collidable=false;
+    if (l.broken || l.uprooted) {
+        g.collision.setPropState(l.cx,l.cy,l.index,1);
+        g.collision.setPropSolid(l.cx,l.cy,l.index,false);
+    }
+}
+
+int PropDynamics::health(const Game& g, const Loose& l) const {
+    const auto found = damaged_.find({l.cx*100+l.cy,l.index});
+    if (found != damaged_.end()) return found->second.health;
+    const auto* kind = g.props.kindForProp(l.prop.prop);
+    return kind ? (int8_t)kind->health : 0; // cDynamicProp::Damage reads its health byte as signed
+}
+
+void PropDynamics::damage(Game& g, Loose& l, int amount, int damageKind, const int32_t direction[3]) {
+    const auto* kind = g.props.kindForProp(l.prop.prop);
+    if (!kind || !l.collidable || health(g,l) <= 0) return;
+    const bool bullet = damageKind == 1 || damageKind == 2;
+    const bool melee = damageKind == 0 || damageKind == 11 || damageKind == 12;
+    if ((bullet && !kind->bulletDamage) || (melee && !kind->meleeDamage)) return;
+    // Kind 4 destroys the remaining health outright; other kinds subtract their full damage, including kind 2.
+    if (damageKind != 4 && amount <= 0) return;
+    const int before = health(g,l);
+    const int remaining = damageKind == 4 ? 0 : std::max(0,before-amount);
+    auto& state = damaged_[{l.cx*100+l.cy,l.index}];
+    state.health = (int8_t)remaining; std::copy(l.body.pos,l.body.pos+3,state.pos);
+    if (remaining) return;
+    int32_t force[3] = {direction[0],direction[1],direction[2]}; Normalise3(force);
+    const int strength = damageKind == 4 ? 0 : bullet && damageKind == 2 ? amount/3 : amount;
+    for (int k=0;k<3;++k) force[k] *= strength;
+    const int32_t source[3] = {}; // generic explosions currently have no source-entity ownership
+    smash(g,l,source,force,nullptr,nullptr,false);
 }
 
 template<class A, class B>
@@ -211,7 +300,7 @@ bool PropDynamics::hit(Game& g,Vehicle& car,Loose& l) {
     for(int i=0;i<nc;++i) for(int j=0;j<np && l.collidable;++j) {
         int32_t point[3],fa[3],fb[3];
         if(!contactForces(car,l.body,cars[i],props[j],point,fa,fb)) continue;
-        car.applyWorldForce(point,fa,8); applyForce(g,l,point,fb);
+        car.applyWorldForce(point,fa,8); applyForce(g,l,point,fb,car.pos,car.vel,true);
         car.recalcKinematics(); l.body.recalcKinematics();
         if(!applied) car.onCollision(fa,nullptr);
         applied=true;
@@ -232,7 +321,7 @@ bool PropDynamics::hit(Game& g,Loose& a,Loose& b) {
     for(int i=0;i<na && a.collidable;++i) for(int j=0;j<nb && b.collidable;++j) {
         int32_t point[3],fa[3],fb[3];
         if(!contactForces(a.body,b.body,sa[i],sb[j],point,fa,fb)) continue;
-        applyForce(g,a,point,fa); applyForce(g,b,point,fb);
+        applyForce(g,a,point,fa,b.body.pos,b.body.vel); applyForce(g,b,point,fb,a.body.pos,a.body.vel);
         a.body.recalcKinematics(); b.body.recalcKinematics(); applied=true;
     }
     return applied;
@@ -258,6 +347,44 @@ void PropDynamics::checkImpacts(Game& g) {
             }
         }
     }
+}
+
+void PropDynamics::explosion(Game& g, const ExplosionBlast& blast) {
+    if (!blast.forceRadius) return;
+    auto affect = [&](Loose& l) {
+        if (!l.collidable || !blast.includesCell(l.body.pos)) return;
+        const int64_t squared = ExplosionBlast::distanceSquared(l.body.pos, blast.pos);
+        if (squared > (int64_t)blast.forceRadius * blast.forceRadius) return;
+        int32_t direction[3], point[3], force[3];
+        for (int k = 0; k < 3; ++k) direction[k] = l.body.pos[k] - blast.pos[k];
+        if (!direction[0] && !direction[1] && !direction[2]) {
+            direction[0] = (int32_t)Rand32Critical(10 * 4096) - 5 * 4096;
+            direction[1] = (int32_t)Rand32Critical(10 * 4096) - 5 * 4096;
+        }
+        direction[2] = 4096; Normalise3(direction);
+        for (int k = 0; k < 3; ++k) point[k] = l.body.pos[k] - 3 * direction[k];
+        direction[2] += 2048; Normalise3(direction);
+        const int32_t magnitude = blast.force(squared);
+        for (int k = 0; k < 3; ++k) force[k] = (int32_t)(((int64_t)direction[k] * magnitude) >> 12);
+        applyForce(g, l, point, force, nullptr, nullptr, false, 16);
+        if (squared <= (int64_t)blast.damageRadius * blast.damageRadius) {
+            const int amount = (int)(((int64_t)ExplosionBlast::falloff(squared,blast.damageRadius) * blast.damageQ12) >> 24);
+            damage(g,l,amount,blast.type == 4 ? 6 : 7,force);
+        }
+    };
+    for (Loose& l : loose_) affect(l);
+    for (int x = std::max(0, blast.minCellX); x <= std::min(139, blast.maxCellX); ++x)
+        for (int y = std::max(0, blast.minCellY); y <= std::min(99, blast.maxCellY); ++y) {
+            const auto* list = g.collision.props(x, y); if (!list) continue;
+            for (int i = 0; i < (int)list->size(); ++i) {
+                const auto& prop = (*list)[i];
+                if (prop.state || prop.kind == 1 || !g.props.kindForProp(prop.prop)) continue;
+                const int32_t at[3] = {prop.x, prop.y, prop.z};
+                if (ExplosionBlast::distanceSquared(at, blast.pos) > (int64_t)blast.forceRadius * blast.forceRadius) continue;
+                Loose l = makeBody(g, x, y, i); affect(l);
+                if (l.broken || l.uprooted) loose_.push_back(std::move(l));
+            }
+        }
 }
 
 const Model* PropDynamics::drawnModel(Game& g,const Loose& l) {
@@ -295,8 +422,10 @@ void PropDynamics::update(Game& g) {
         if(dx*dx+dy*dy > 250.0*250*4096*4096) {
             g.collision.setPropState(l.cx,l.cy,l.index,0); g.collision.setPropSolid(l.cx,l.cy,l.index,true);
             if(l.garbage) l.garbage->release();
+            damaged_.erase({l.cx*100+l.cy,l.index});
             it=loose_.erase(it); continue;
         }
+        if(l.fountain) l.fountain->tick(g.frame);
         if(l.lampTimer) {
             float M[16]; l.body.matrix(M);
             if(l.lampTimer >= 53) {
@@ -330,7 +459,14 @@ void PropDynamics::update(Game& g) {
                 l.body.applyWorldForce(cg,gravity,1);
             }
         }
+        const auto damaged = damaged_.find({l.cx*100+l.cy,l.index});
+        if (damaged != damaged_.end()) std::copy(l.body.pos,l.body.pos+3,damaged->second.pos);
         ++it;
+    }
+    for (auto it=damaged_.begin();it!=damaged_.end();) {
+        const int64_t dx=(int64_t)focus[0]-it->second.pos[0], dy=(int64_t)focus[1]-it->second.pos[1];
+        if (dx*dx+dy*dy > (int64_t)(250*4096)*(250*4096)) it=damaged_.erase(it);
+        else ++it;
     }
 }
 
@@ -355,4 +491,7 @@ void PropDynamics::render(Game& g) const {
         }
         PropLibrary::drawModel(*model,M);
     }
+    WorldCamera camera; g.viewCamera(camera);
+    const uint32_t ambient = g.world.timeCycle().ok() ? g.world.timeCycle().colour(13) : 0x808080u;
+    for(const Loose& l:loose_) if(l.fountain) l.fountain->render(camera,ambient);
 }

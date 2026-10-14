@@ -7,6 +7,7 @@
 #include "game.h"
 #include "hud.h"
 #include "gfx/assets.h"
+#include "gfx/character.h"
 #include "os/os.h"
 #include <glad/gl.h>
 #include <map>
@@ -28,6 +29,10 @@ FILE* g_log = nullptr;
 struct Hook { CtwCallback fn; void* user; };
 struct KeyHook { CtwKeyCallback fn; void* user; };
 std::vector<Hook> g_tick, g_hud, g_frame;
+struct CharacterHook { CtwCharacterCallback fn; void* user; };
+std::vector<CharacterHook> g_characters;
+std::map<CtwCharacterModel, std::unique_ptr<CharacterModel>> g_characterModels;
+CtwCharacterModel g_nextCharacter = 1;
 std::vector<KeyHook> g_keys;
 struct EventHook { CtwGameEventCallback fn; void* user; };
 std::vector<EventHook> g_events;
@@ -258,6 +263,52 @@ const CtwHostApi& Plugins_HostApi() {
         GameplayApi_Fill(g_host); g_host.on_game_event = h_on_event;
         g_host.consume_mouse_wheel = [] { g_wheelConsumed = true; };
         g_host.on_frame_begin = [](CtwCallback fn, void* u) { if (fn) g_frame.push_back({fn, u}); };
+        g_host.load_character_model = [](const char* dff, const char* ifp, const char* textures) -> CtwCharacterModel {
+            if (!dff || !ifp || !textures || g_characterModels.size() >= 128 || !g_nextCharacter) return 0;
+            auto model = std::make_unique<CharacterModel>(); std::string error;
+            if (!model->load(dff, ifp, textures, &error)) { Plugins_Log("character: " + error); return 0; }
+            const auto handle = g_nextCharacter++; g_characterModels.emplace(handle, std::move(model)); return handle;
+        };
+        g_host.release_character_model = [](CtwCharacterModel h) {
+            auto i = g_characterModels.find(h); if (i == g_characterModels.end()) return;
+            i->second->release(); g_characterModels.erase(i);
+        };
+        g_host.draw_character_model = [](CtwCharacterModel h, const CtwCharacterPose* p, float scale, const char* animation, float phase, int loop) -> int {
+            auto i = g_characterModels.find(h);
+            if (i == g_characterModels.end() || !p || p->size < offsetof(CtwCharacterPose, one_shot_seconds) || !animation || !std::isfinite(scale) || scale <= 0 || scale > 8 || !std::isfinite(phase)) return 0;
+            for (float v : p->position) if (!std::isfinite(v) || std::abs(v)>32768) return 0;
+            if (!std::isfinite(p->heading)) return 0;
+            float duration=-1; for(const auto& a:i->second->animations) if(a.name==animation){duration=a.duration;break;}
+            return duration>=0 && i->second->draw(p->position,p->heading,scale,animation,std::clamp(phase,0.f,1.f)*duration,loop!=0);
+        };
+        g_host.on_character_render = [](CtwCharacterCallback fn, void* u) { if(fn)g_characters.push_back({fn,u}); };
+        g_host.get_character_bounds = [](CtwCharacterModel h, const char* animation, float seconds, CtwCharacterBounds* out) -> int {
+            const auto i = g_characterModels.find(h);
+            if (i == g_characterModels.end() || !out || out->size < sizeof *out) return 0;
+            CtwCharacterBounds b{}; b.size = sizeof b;
+            if (!i->second->bounds(animation, seconds, b.minimum, b.maximum, &b.duration)) return 0;
+            *out = b; return 1;
+        };
+        g_host.draw_character_model_at_time = [](CtwCharacterModel h, const CtwCharacterPose* p, float scale, const char* animation, float seconds, int loop, int ground) -> int {
+            const auto i = g_characterModels.find(h);
+            if (i == g_characterModels.end() || !p || p->size < offsetof(CtwCharacterPose, one_shot_seconds) ||
+                !animation || !std::isfinite(scale) || scale <= 0 || scale > 8 || !std::isfinite(seconds)) return 0;
+            for (float v : p->position) if (!std::isfinite(v) || std::abs(v)>32768) return 0;
+            if (!std::isfinite(p->heading)) return 0;
+            return i->second->draw(p->position, p->heading, scale, animation, seconds, loop != 0, ground != 0);
+        };
+        g_host.draw_character_model_attached = [](CtwCharacterModel h, const CtwCharacterPose* p, float scale, const char* animation, float phase, int loop, int bone) -> int {
+            const auto i = g_characterModels.find(h);
+            if (i == g_characterModels.end() || !p || p->size < offsetof(CtwCharacterPose, reaction_state) ||
+                !(p->flags & CTW_CHARACTER_ATTACHMENT_FRAME) || !animation || !std::isfinite(phase)) return 0;
+            float duration = -1;
+            for (const auto& clip : i->second->animations) if (clip.name == animation) { duration = clip.duration; break; }
+            if (duration < 0) return 0;
+            const float time = std::clamp(phase,0.f,1.f)*duration;
+            CharacterModel::Matrix transform;
+            if (!i->second->attachmentTransform(animation,time,loop!=0,scale,bone,p->attachment_basis,p->attachment_anchor,transform)) return 0;
+            return i->second->draw(p->position,p->heading,scale,animation,time,loop!=0,false,&transform);
+        };
         return true;
     }();
     (void)filled;
@@ -266,6 +317,11 @@ const CtwHostApi& Plugins_HostApi() {
 
 void Plugins_EmitEvent(uint32_t type, CtwVehicle vehicle, int modelId, int value) {
     if (!g_events.empty()) g_pendingEvents.push_back({sizeof(CtwGameEvent), type, vehicle, modelId, value});
+}
+bool Plugins_RenderCharacter(const CtwCharacterPose& pose) {
+    const auto hooks = g_characters;
+    for (const auto& hook : hooks) if (hook.fn(&pose,hook.user)) return true;
+    return false;
 }
 
 void Plugins_Log(const std::string& line) {
@@ -291,11 +347,12 @@ void Plugins_Init(const std::string& modsDir) {
         pl.shutdown = (CtwPluginShutdownFn)SDL_LoadFunction(pl.lib, "ctw_plugin_shutdown");
         if (!init) { Plugins_Log(pl.name + " is not a plugin (no ctw_plugin_init)"); SDL_UnloadObject(pl.lib); continue; }
         const size_t ticks = g_tick.size(), huds = g_hud.size(), keys = g_keys.size(), events = g_events.size(),
-                     frames = g_frame.size();
+                     frames = g_frame.size(), characters = g_characters.size();
         int r = init(&Plugins_HostApi());
         if (r != 0) {
             // Hooks registered during a failed init must not outlive the unloaded DLL.
             g_tick.resize(ticks); g_hud.resize(huds); g_keys.resize(keys); g_events.resize(events); g_frame.resize(frames);
+            g_characters.resize(characters);
             Plugins_Log(pl.name + " refused to load (" + std::to_string(r) + ")"); SDL_UnloadObject(pl.lib); continue;
         }
         Plugins_Log("loaded plugin " + pl.name);
@@ -311,6 +368,9 @@ void Plugins_Shutdown() {
     g_plugins.clear();
     g_previews.clear();
     g_tick.clear(); g_hud.clear(); g_keys.clear(); g_frame.clear();
+    g_characters.clear();
+    for(auto& item:g_characterModels)item.second->release();
+    g_characterModels.clear();
     g_events.clear(); g_pendingEvents.clear();
     g_gameInput = true; g_captured = false; Host_SetRelativeMouse(false);
     Game& g = TheGame();   // nothing a plugin changed about the camera outlives it

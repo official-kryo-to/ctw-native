@@ -23,7 +23,7 @@ export type ApkSummary = {
   suggestedFolder: string
 }
 
-export type Stage = 'checking' | 'tables' | 'assets' | 'installing'
+export type Stage = 'checking' | 'tables' | 'assets' | 'installing' | 'mod-assets'
 
 export type PortProgress = {
   stage: Stage
@@ -35,7 +35,7 @@ export type PortProgress = {
 
 export type PortResult = { exe: string; folder: string; shortcut: string | null }
 
-export type PortOptions = { apk: string; folder: string; withModkit: boolean; shortcut: boolean }
+export type PortOptions = { apk: string; folder: string; withModkit: boolean; shortcut: boolean; mods: string[]; lcsApk: string | null }
 
 /** 0..1 for the whole run: the copying is nearly all of the time. */
 export function overall(p: PortProgress | null): number {
@@ -49,6 +49,8 @@ export function overall(p: PortProgress | null): number {
       return 0.05 + 0.92 * (p.bytesTotal > 0 ? p.bytesDone / p.bytesTotal : 0)
     case 'installing':
       return 0.98
+    case 'mod-assets':
+      return 0.98 + 0.019 * (p.filesTotal > 0 ? p.filesDone / p.filesTotal : 0)
   }
 }
 
@@ -60,6 +62,14 @@ export async function bundledGame(): Promise<boolean> {
 export async function inspectApk(path: string): Promise<ApkSummary> {
   if (!isTauri()) return mockInspect(path)
   return invoke<ApkSummary>('inspect_apk', { path })
+}
+export async function inspectLcsApk(path: string, version: string): Promise<number> {
+  if (!isTauri()) {
+    await sleep(700)
+    if (version !== '2.4.379' || !path.toLowerCase().endsWith('.apk')) throw new Error('Choose Liberty City Stories for Android 2.4.379.')
+    return 14
+  }
+  return invoke<number>('inspect_lcs_apk', { path, version })
 }
 
 /** A free folder name at `folder` or next to it ("... (2)"). */
@@ -101,11 +111,11 @@ export async function openLink(url: string): Promise<void> {
   return openUrl(url)
 }
 
-export async function pickApk(): Promise<string | null> {
-  if (!isTauri()) return 'C:\\Users\\you\\Downloads\\GTA Chinatown Wars 4.4.243.apk'
+export async function pickApk(lcs = false): Promise<string | null> {
+  if (!isTauri()) return lcs ? 'C:\\Users\\you\\Downloads\\GTA Liberty City Stories 2.4.379.apk' : 'C:\\Users\\you\\Downloads\\GTA Chinatown Wars 4.4.243.apk'
   const { open } = await import('@tauri-apps/plugin-dialog')
   const picked = await open({
-    title: 'Choose your GTA: Chinatown Wars APK',
+    title: lcs ? 'Choose your Liberty City Stories 2.4.379 APK' : 'Choose your GTA: Chinatown Wars APK',
     multiple: false,
     directory: false,
     filters: [{ name: 'Android app', extensions: ['apk'] }],

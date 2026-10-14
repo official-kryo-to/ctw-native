@@ -85,7 +85,8 @@ public:
     // cells and must not be dropped by the original fixed-size candidate buffers. groundSlab adds CCollision::mBox:
     // a 200 x 200 x 1 box whose top is the ground under p (GetGround), used while the ped moves vertically.
     struct Candidates { std::vector<const Box*> boxes; std::vector<const Cyl*> cyls; std::vector<TriRef> tris; Box slab; };
-    void candidates(const int32_t p[3], int32_t radius, bool groundSlab, Candidates& out);
+    // Physical-to-physical callers resolve reactive props separately; peds/cameras still need their shapes.
+    void candidates(const int32_t p[3], int32_t radius, bool groundSlab, Candidates& out, bool physicalProps = true);
 
     // Swept sphere a -> b (radius r) against one shape: t = fraction of the move (0..0x1000) at first contact,
     // hit = the contact point on the shape (CCollision::SweptSphereVBox / VCylinder / VTri).
@@ -130,7 +131,7 @@ private:
         std::vector<CarGen> carGens;
         std::vector<Prop> props;
         struct PropShapes { uint32_t box0 = 0, boxes = 0, cyl0 = 0, cyls = 0, mesh0 = 0, meshes = 0;
-                            std::vector<Box> savedBoxes; std::vector<Cyl> savedCyls; bool solid = true; };
+                            std::vector<Box> savedBoxes; std::vector<Cyl> savedCyls; bool solid = true, physical = false; };
         std::vector<PropShapes> propShapes;   // per prop: its shapes in boxes / cyls
         std::vector<CityEmitter> emitters;
         PedPaths pedPaths;

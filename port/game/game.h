@@ -7,6 +7,7 @@
 #include "carcam.h"
 #include "cargens.h"
 #include "followcam.h"
+#include "localarea.h"
 #include "peds.h"
 #include "player.h"
 #include "radio.h"
@@ -20,6 +21,9 @@
 #include "propdynamics.h"
 #include "watercannon.h"
 #include "weather.h"
+#include "weapons.h"
+#include "projectiles.h"
+#include "targeting.h"
 #include "world/worldrenderer.h"
 #include <cstdint>
 #include <map>
@@ -65,9 +69,30 @@ public:
     Traffic traffic;
     Pedestrians peds;                        // random pedestrians on the pavement network
     Weather weather;                         // weather changes, rain and lightning (weather.cpp)
+    WeaponManager playerWeapons;             // the player's cWeaponManager (weapons.cpp)
+    BulletTraces traces;                     // cBulletTraces
+    PlayerTargeting targeting;               // the player's auto-aim (cPlayerSensorCone, targeting.cpp)
+    Projectiles projectiles;                 // grenades, molotovs, flashbangs, mines and rockets (projectiles.cpp)
+    int weaponCycle = 0;                     // input: -1 previous / +1 next weapon this frame
+    // mods (PC aiming): fire at this world point instead of along the facing; the upper body turns to it
+    struct AimOverride { bool on = false; int32_t target[3] = {0, 0, 0}; } aimOverride;
+    bool screenToWorld(float x, float y, int width, int height, float out[3]) const;   // the drawn camera's ray
+    // The player's view of the world for the game logic (localarea.h): the frame scheduler, the loaded sectors,
+    // the camera frustum and the cLocalAreaKnowledge pavement links.
+    FrameScheduler scheduler;
+    WorldSectors sectors;
+    CameraView view;
+    LocalArea localArea;
+    FrameScheduler::Schedule pedSchedule, carSchedule;   // cPopulationManager +12 (peds) / +14 (vehicles)
+    void updateView();                       // cBaseCam::RecalculateMatrix of the game camera
+    void updateSectors();                    // the held sector and cPlayer::UpdateCriticalArea
+    void updatePopulation();                 // cPopulationManager::Update
+    void collectSectors();                   // cWorld::GarbageCollection: deletes what is in unloaded sectors
+    int pedPopulation() const;               // cPlayer::GetPopulation(network 1)
+    int carPopulation() const;               // cPlayer::GetPopulation(network 0)
     uint16_t cameraYaw() const;
     uint32_t nextUid = 1;
-    bool canSee(const int32_t pos[3], float radius) const;   // cBaseCam::CanBeSeenByAnyPlayer
+    bool canSee(const int32_t pos[3], float radius) const;   // the drawn camera's frustum (rendering only)
     void spawnGenerated(int infoId, const int32_t pos[3], int16_t heading, int palette);   // cCarGenManager -> CreateRandomCar
     void focus(int32_t out[3]) const;           // the player (or his car)
     void viewCamera(WorldCamera& cam) const;    // the active camera
@@ -94,6 +119,13 @@ public:
     float gameSpeed = 1.f;               // mods: simulation speed (the clock follows it)
     float renderDistance = 120.f;        // units of city loaded around the camera (the game: one block ring)
     void setRenderDistance(float units);
+    void shakeNearExplosion(const int32_t pos[3]);
+    void cameraShake(float out[3]) const; // interpolated world-space offset for custom cameras
+    void addPropExplosion(const int32_t pos[3], int16_t scale = 4096); // Smash2's generic type-zero blast
+    // Explosion::AddExplosion for the weapons: 0 grenade, 1 mine, 3 rocket (all cExplosionGeneric),
+    // 2 cExplosionMolotov, 5 cExplosionFlashBang
+    void addWeaponExplosion(const int32_t pos[3], int type, int16_t scale = 4096);
+    void enableExplosionRadiusCheck(bool enable) { explosionRadiusCheck_ = enable; } // native script switch; off at Reset
     struct FreeCamera { bool on = false; WorldCamera cam; } freeCam;   // mods: replaces the game camera
     bool uiPaused = false;               // a full-screen app (the radio) has paused the game
     bool interpolate = true;             // PC: draw between the last two 30 Hz ticks (interpolation.cpp)
@@ -115,6 +147,8 @@ public:
     bool scriptedInput = false;          // testing: use scriptedMove instead of the keyboard
     float scriptedMove[2] = {0, 0};
     int scriptedState = 2;               // Player::MoveState while scripted input moves
+    bool scriptedFire = false;           // testing: hold the fire button
+    bool scriptedThrow = false;          // testing: hold the throw (secondary weapon) button
     std::string dataDir, modsDir;
     bool sprintHeld_ = false;
     int scriptedDrive = 0;               // testing: 1 = hold throttle, -1 = hold brake/reverse
@@ -124,9 +158,13 @@ public:
 private:
     std::map<int, std::unique_ptr<Model>> models_;
     RestartTables restart_;
-    struct Explosion { int32_t pos[3]; int delay; };
+    struct Explosion { int32_t pos[3]; int delay; int type = 4; bool fired = false; int16_t scale = 4096; };
     std::vector<Explosion> explosions_;
+    bool explosionRadiusCheck_ = false;
+    bool queueExplosion(const Explosion& explosion);
     void processVehicleDeaths();
+    void affectExplosion(const Explosion& explosion);
+    unsigned explosionParticleCount(const int32_t pos[3]) const;
     void finishShortFrame();             // the effects, sound and plugin updates of a frame that ends early
     void processTimeCycle();
     void drawDebug(int width, int height);   // F3 (debughud.cpp)
@@ -145,6 +183,9 @@ private:
         bool basis = false;
     };
     struct Interp {
+        int32_t shake[3]{};
+        int shakeCamera = -1;
+        bool shakeValid = false;
         std::map<uint32_t, Pose> cars, peds;
         int32_t player[3]{};
         WorldCamera camera;

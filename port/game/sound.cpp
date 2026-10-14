@@ -53,6 +53,8 @@ bool Sound::Bank::sample(int i, const uint8_t*& pcm, uint32_t& len, uint32_t& ra
 
 bool Sound::init(const std::string& dataDir) {
     for (auto& item : ents_) stopSlots(item.second);
+    for (auto& item : water_) stopSlots(item.second);
+    water_.clear();
     stopSlots(ped_);
     for (Entity& e : script_) stopSlots(e);
     lastWalkFrame_ = -1; firstFoot_ = true;
@@ -241,6 +243,13 @@ void Sound::propSmash(const int32_t pos[3], int effect) {
     propSmash(pos, effect, 300);
 }
 
+void Sound::waterStream(uint32_t id, const int32_t pos[3], int volume) {
+    if(!ok()) return;
+    Entity& e=water_[id];
+    std::copy(pos,pos+3,e.pos); e.seen=true;
+    addEvent(e,0x6C,volume,300,-1);
+}
+
 void Sound::propSmash(const int32_t pos[3], int effect, int radius) {
     if (!ok() || effect < 0 || effect >= 57) return;
     // Smash uses the kind's smash effect (gGameDir[17] +1), not its hit effect or model id.
@@ -412,6 +421,34 @@ void Sound::playerCar(Game& g, Vehicle& v, Entity& e) {   // cSoundEvents::Proce
     }
 }
 
+// projectiles share the water streams' map (entities kept while refreshed), with the top bit set
+void Sound::objectEvent(uint32_t id, const int32_t pos[3], int event, int volume, int radius) {
+    if (!ok()) return;
+    Entity& e = water_[id | 0x80000000u];
+    std::copy(pos, pos + 3, e.pos); e.seen = true;
+    addEvent(e, event, volume, radius, -1);
+}
+
+void Sound::objectTick(uint32_t id, const int32_t pos[3]) {
+    auto it = water_.find(id | 0x80000000u);
+    if (it == water_.end()) return;
+    std::copy(pos, pos + 3, it->second.pos); it->second.seen = true;
+}
+
+void Sound::scriptSfx(const int32_t pos[3], int sample, int volume, int radius) {   // the eight-slot pool
+    if (!ok()) return;
+    for (Entity& e : script_) {
+        if (e.s[0].event != 0x9C) continue;
+        std::copy(pos, pos + 3, e.pos);
+        addEvent(e, 0x30, volume, radius, sample);
+        return;
+    }
+}
+
+void Sound::playerEvent(int event, int volume, int radius) {
+    if (ok()) addEvent(ped_, event, volume, radius, -1);
+}
+
 void Sound::playerPed(Game& g) {
     const Player& player = g.player;
     for (int k = 0; k < 3; ++k) ped_.pos[k] = player.pos[k];
@@ -436,6 +473,11 @@ void Sound::playerPed(Game& g) {
 void Sound::update(Game& g) {
     if (!ok()) return;
     ++ticks_;
+    for(auto it=water_.begin();it!=water_.end();) {
+        if(!it->second.seen) { stopSlots(it->second); it=water_.erase(it); continue; }
+        processEntity(g,it->second,false);
+        it->second.seen=false; ++it;
+    }
     const uint32_t uid = g.playerCar >= 0 && g.playerCar < (int)g.cars.size() ? g.cars[g.playerCar].uid : 0;
     if (playerUid_ && uid != playerUid_) {
         auto it = ents_.find(playerUid_);

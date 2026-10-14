@@ -109,11 +109,32 @@ static void collision() {
     check(!Collision::sweptSphereVBox(a, b, 4096, box, hit, fraction), "clear path beside wall stays clear");
 }
 
+static void replacementAnimationClock() {
+    Player p;
+    p.playOneShot(0x18, 0x19, false);
+    auto pose = p.renderPose(nullptr, 7, 1, CTW_CHARACTER_DEAD);
+    check(pose.one_shot_seconds == 0 && pose.upper_phase == 0, "a new fall starts at time zero");
+    // No sprite frames: the replacement clip must still advance from simulation.
+    for (int i = 0; i < 60; ++i) p.stepOneShot(nullptr);
+    pose = p.renderPose(nullptr, 7, 1, CTW_CHARACTER_DEAD);
+    check(pose.one_shot_seconds == 2 && pose.upper_phase == 0,
+          "single-frame or missing sprites cannot freeze a replacement fall");
+    check(p.renderPose(nullptr, 7, 1, 0).one_shot_seconds == 2,
+          "rendering does not advance animation time");
+    check(std::abs(p.renderPose(nullptr, 7, 1, 0, .5f).one_shot_seconds - (2.f-1.f/60.f)) < 1e-6f,
+          "replacement one-shots interpolate between simulation ticks");
+    p.playOneShot(0xc, 0xd, false);
+    check(p.renderPose(nullptr, 7, 1, 0).one_shot_seconds == 0, "the next one-shot resets its clock");
+    p.update(Player::Input{}, nullptr, nullptr);
+    check(p.renderPose(nullptr, 7, 1, 0).one_shot_seconds == 0, "locomotion clears a stale one-shot clock");
+}
+
 int main() {
     movement();
     camera();
     lighting();
     collision();
+    replacementAnimationClock();
     if (failures) return EXIT_FAILURE;
     std::puts("Movement, camera, daylight and collision checks passed (synthetic inputs, no game assets).");
     return EXIT_SUCCESS;

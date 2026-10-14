@@ -8,10 +8,12 @@ static int events, toggles, ticks, enabled;
 static void event(const CtwGameEvent* e, void* user) { (void)user; if (e->type == CTW_EVENT_VEHICLE_REMOVED) ++events; }
 static void toggle(int on, void* user) { (void)user; ++toggles; enabled = on; }
 static void tick(void* user) { (void)user; ++ticks; }
+static int character(const CtwCharacterPose* pose, void* user) { (void)user; return pose && pose->id == 42; }
 CTW_MOD_EXPORT int ctw_mod_init(CtwMod* mod, const CtwApi* a) {
     api = a; self = mod; events = toggles = ticks = 0; enabled = 1;
     if (CTW_MOD_HAS(a, on_game_event)) a->on_game_event(mod, event, 0);
     if (CTW_MOD_HAS(a, on_enabled_changed)) a->on_enabled_changed(mod, toggle, 0);
+    if (CTW_MOD_HAS(a, on_character_render)) a->on_character_render(mod, character, 0);
     a->on_tick(mod, tick, 0);
     return 0;
 }

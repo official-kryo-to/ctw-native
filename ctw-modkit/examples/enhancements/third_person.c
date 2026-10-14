@@ -30,6 +30,7 @@ static const char* const recenter_names[] = {"Off", "Normal", "Quick"};
 /* state */
 static int available;          /* the game has the camera functions this needs */
 static int active;             /* this feature is showing the view */
+int enh_third_person_active(void) { return active; }
 static float yaw, pitch = DEFAULT_PITCH, zoom = 1.f;
 static float distance;         /* current camera distance after wall checks */
 static float want_distance;    /* on foot or vehicle distance, blended when getting in and out */
@@ -148,6 +149,11 @@ static void place_camera(float dt, const Target* t) {
     ground.size = sizeof ground;
     const float probe[3] = {eye[0], eye[1], at[2]};
     if (api->get_ground(probe, &ground) && eye[2] < ground.height + 0.5f) eye[2] = ground.height + 0.5f;
+    if (CTW_MOD_HAS(api, get_camera_shake)) {
+        float shake[3] = {0.f,0.f,0.f};
+        api->get_camera_shake(shake);
+        for (int i = 0; i < 3; ++i) eye[i] += shake[i];
+    }
     api->set_free_camera(1, eye, view_yaw, pitch);
     api->set_control_yaw(1, yaw);   /* on foot, "forward" is where the camera looks */
     speed_fov += ((t->in_vehicle ? clampf(t->speed * 0.25f, 0.f, 10.f) : 0.f) - speed_fov) * ease(3.f, dt);

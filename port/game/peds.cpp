@@ -3,6 +3,7 @@
 // See LICENSE in the repository root.
 #include "peds.h"
 #include "game.h"
+#include "explosions.h"
 #include "plugins.h"
 #include "random.h"
 #include "sound.h"
@@ -19,7 +20,6 @@ constexpr int64_t kRemoveDist2 = 0x1C39000000LL;     // cPed::ShouldBeDestroyed:
 constexpr int32_t kArrive = 0x800;                   // cWanderPath: cTarget radius 0.5
 constexpr int32_t kFleeArrive = 0x2000;              // cFleeOnFoot: cTarget::SetNode(node, 2.0)
 constexpr int32_t kNearPlayer = 0x19000;             // HandleEvasiveManeuvers: 25 units
-constexpr int32_t kExplosionReach = 0x16000;         // cExplosionBigVehicle::Process -> AffectEntities: 22 units
 constexpr int kSectorColumns = 140;                  // cNodeId / cWorld sector grid
 
 int16_t padAngle(int64_t x, int64_t y) { return (int16_t)(atan2f((float)x, (float)y) * 10430.f); }
@@ -34,6 +34,65 @@ void nodePos(const Collision::PathNode& n, int32_t out[3]) {   // cBaseNode::Pos
 int32_t jitter() {
     const int32_t r = (int32_t)(Rand16Critical(101) << 12) - 0x32000;
     return (int32_t)((int64_t)r * 0xC00 / 204800);
+}
+
+// CCollision::Process2 sphere against the vehicle's oriented local box. Keep
+// the contact normal in world space, including pitch/roll; do not shove feet
+// to the side of an upright XY rectangle.
+bool vehicleContact(Player& body, const Vehicle& car, int32_t normal[3], int32_t& depth) {
+    int32_t local[3]{}, end[3]{}, atVelocity[3];
+    car.velocityAtWorldPos(body.pos, atVelocity);
+    const int16_t* axes[3] = {car.right, car.fwd, car.up};
+    for (int i = 0; i < 3; ++i) {
+        int64_t p = 0, v = 0;
+        for (int k = 0; k < 3; ++k) {
+            p += ((int64_t)body.pos[k] + (k == 2 ? Player::kRadius : 0) - car.pos[k]) * axes[i][k];
+            v += ((int64_t)body.vel[k] - atVelocity[k]) * axes[i][k];
+        }
+        local[i] = (int32_t)(p >> 12);
+        end[i] = local[i] + (int32_t)(((v >> 12) * 17) >> 9);
+    }
+    const Collision::Box box{0, 0, car.hz, car.hx, car.hy, car.hz, 0, 0};
+    int32_t hit[3], n[3], time;
+    depth = 0;
+    if (!Collision::sphereVBox(local, Player::kRadius, box, hit, n, depth)) {
+        if (!Collision::sweptSphereVBox(local, end, Player::kRadius, box, hit, time)) return false;
+        double length2 = 0;
+        for (int i = 0; i < 3; ++i) {
+            n[i] = local[i] + (int32_t)(((int64_t)(end[i]-local[i])*time)>>12) - hit[i];
+            length2 += (double)n[i]*n[i];
+        }
+        if (length2 <= 0) return false;
+        const double factor = 4096 / std::sqrt(length2);
+        for (int32_t& v : n) v = (int32_t)std::lround(v * factor);
+    }
+    for (int k = 0; k < 3; ++k)
+        normal[k] = (int32_t)(((int64_t)n[0]*car.right[k] + (int64_t)n[1]*car.fwd[k] + (int64_t)n[2]*car.up[k]) >> 12);
+    // cPedCollisionData's gentle-contact branch returns without an impulse.
+    if ((int64_t)car.speed() * 2 >= 0x3000) body.dynamicContact(normal, atVelocity, depth);
+    return true;
+}
+
+bool sphereContact(const Player& a, const Player& b, int32_t normal[3]) {
+    // The dynamic sphere is kRadius; only static world sweeps use kSphere.
+    double rel[3], move[3], distance2 = 0, vv = 0, rv = 0;
+    for (int i = 0; i < 3; ++i) {
+        rel[i] = (double)a.pos[i] - b.pos[i];
+        move[i] = (double)(((int64_t)a.vel[i] * 17) >> 9);
+        distance2 += rel[i]*rel[i]; vv += move[i]*move[i]; rv += rel[i]*move[i];
+    }
+    const double radius = 2 * Player::kRadius;
+    if (distance2 >= radius*radius) {
+        const double disc = rv*rv - vv*(distance2-radius*radius);
+        if (vv == 0 || rv >= 0 || disc < 0) return false;
+        const double t = (-rv-std::sqrt(disc))/vv;
+        if (t < 0 || t > 1) return false;
+        distance2 = 0;
+        for (int i = 0; i < 3; ++i) { rel[i] += move[i]*t; distance2 += rel[i]*rel[i]; }
+    }
+    const double scale = distance2 > 0 ? 4096 / std::sqrt(distance2) : 0;
+    for (int i = 0; i < 3; ++i) normal[i] = (int32_t)std::lround(rel[i]*scale);
+    return true;
 }
 }   // namespace
 
@@ -104,68 +163,6 @@ void Pedestrians::dress(Ped& p, int zoneSex) const {
     p.body.bodySet = male ? 1 : 0;   // cPed +0x220 selects the body set (0x113 animations each)
     p.body.palUpper = upper;
     p.body.palLegs = legs;
-}
-
-// cLocalAreaKnowledge::GetCreatePosition for the pavement network: where a link of the loaded pavement nodes crosses
-// the 60-unit circle around the player, out of sight and with nobody close.
-bool Pedestrians::createPos(Game& g, int32_t pos[3], NodeRef& from, NodeRef& to) {
-    int32_t P[3];
-    g.focus(P);
-    int pcx, pcy;
-    Collision::cellOfPos(P[0], P[1], pcx, pcy);
-    struct Candidate { int32_t pos[3]; NodeRef a, b; };
-    std::vector<Candidate> found;
-    for (int dy = -2; dy <= 2; ++dy)
-        for (int dx = -2; dx <= 2; ++dx) {
-            const int cx = pcx + dx, cy = pcy + dy;
-            const Collision::PedPaths* paths = g.collision.pedPaths(cx, cy);
-            if (!paths) continue;
-            for (size_t i = 0; i < paths->nodes.size(); ++i) {
-                const Collision::PathNode& na = paths->nodes[i];
-                for (int k = 0; k < (na.flags >> 2 & 7); ++k) {
-                    const size_t li = (size_t)na.first + k;
-                    if (li >= paths->links.size() || paths->links[li] >= paths->nodes.size()) continue;
-                    const uint16_t j = paths->links[li];
-                    if (j < i) continue;   // each two-way link once
-                    int32_t A[3], B[3];
-                    nodePos(na, A);
-                    nodePos(paths->nodes[j], B);
-                    // maths::GetChordCircle
-                    const double ex = B[0] - A[0], ey = B[1] - A[1], fx = A[0] - P[0], fy = A[1] - P[1];
-                    const double aa = ex * ex + ey * ey;
-                    if (aa < 1.0) continue;
-                    const double bb = 2 * (fx * ex + fy * ey), cc = fx * fx + fy * fy - (double)kSpawnRadius * kSpawnRadius;
-                    const double disc = bb * bb - 4 * aa * cc;
-                    if (disc < 0) continue;
-                    for (double t : {(-bb - std::sqrt(disc)) / (2 * aa), (-bb + std::sqrt(disc)) / (2 * aa)}) {
-                        if (t < 0 || t > 1) continue;
-                        Candidate c;
-                        c.pos[0] = A[0] + (int32_t)(ex * t);
-                        c.pos[1] = A[1] + (int32_t)(ey * t);
-                        c.pos[2] = A[2] + (int32_t)((B[2] - A[2]) * t);
-                        c.a = {(int16_t)cx, (int16_t)cy, (uint16_t)i};
-                        c.b = {(int16_t)cx, (int16_t)cy, j};
-                        found.push_back(c);
-                    }
-                }
-            }
-        }
-    // cPositionConstraints::IsPositionValid / cWorld::IsPositionSafe: off screen, 2 units from peds, 4 from vehicles
-    std::vector<size_t> valid;
-    for (size_t i = 0; i < found.size(); ++i) {
-        const Candidate& c = found[i];
-        if (g.canSee(c.pos, 1.f)) continue;
-        bool clear = true;
-        for (const Ped& p : peds) clear = clear && dist2(p.body.pos, c.pos) >= (int64_t)0x2000 * 0x2000;
-        for (const Vehicle& v : g.cars) clear = clear && dist2(v.pos, c.pos) >= (int64_t)0x4000 * 0x4000;
-        if (clear) valid.push_back(i);
-    }
-    if (valid.empty()) return false;
-    const Candidate& c = found[valid[Rand32Critical((uint32_t)valid.size())]];
-    std::copy(c.pos, c.pos + 3, pos);
-    // which way along the link it walks (GenerateRandomPed faces it from the position along the link)
-    if (Rand16Critical(2)) { from = c.a; to = c.b; } else { from = c.b; to = c.a; }
-    return true;
 }
 
 void Pedestrians::setTarget(Game& g, Ped& p) {   // cWanderPath::SetNext
@@ -302,15 +299,45 @@ bool Pedestrians::advance(Game& g, Ped& p) {
     return true;
 }
 
-void Pedestrians::spawn(Game& g, int type) {   // cPopulationManager::GenerateRandomPed
+void Pedestrians::generate(Game& g, const Traffic::ZoneInfo& z) {
+    if (records_.empty()) return;
+    int total = 0;
+    for (int v : z.fields) total += v;
+    if (!total) return;
+    int r = (int)Rand32Critical((uint32_t)total), type = -1;
+    for (int i = 0; i < 20; ++i) {
+        if (r < z.fields[i]) { type = i; break; }
+        r -= z.fields[i];
+    }
+    if (type >= 0) spawn(g, type, z);
+}
+
+void Pedestrians::collect(Game& g) {
+    peds.erase(std::remove_if(peds.begin(), peds.end(), [&](const Ped& p) {
+        if (p.vehicle) return false; // its vehicle owns the lifetime of an occupant
+        return !g.sectors.loadedAt(p.body.pos[0], p.body.pos[1]);
+    }), peds.end());
+}
+
+// cPopulationManager::GenerateRandomPed: cLocalAreaKnowledge::GetCreatePosition (pavement, 60 units around the
+// player, off screen, in a loaded sector), then cWanderPath from the link's first node to its second. (The original
+// sets the heading from an unwritten stack value; the port faces the first target.)
+void Pedestrians::spawn(Game& g, int type, const Traffic::ZoneInfo& z) {
     int32_t pos[3];
     NodeRef from, to;
-    if (!createPos(g, pos, from, to)) return;
-    int32_t f[3];
-    g.focus(f);
-    const uint32_t t = g.world.timeCycle().time();
-    const Traffic::ZoneInfo& z = g.traffic.zoneOrDefault(f[0], f[1], t - 0x14000u < 0xFFFF3000u);
+    if (!g.localArea.createPosition(g, g.player.pos, kSpawnRadius, pos, from, to)) return;
     Ped p;
+    if (!appearance(g,p,type,z)) return;
+    std::copy(pos, pos + 3, p.body.pos);
+    p.body.placeOnGround(&g.collision);
+    p.prev = from;
+    p.cur = to;
+    setTarget(g, p);
+    p.body.setHeading(padAngle(p.target[0] - pos[0], p.target[1] - pos[1]));
+    peds.push_back(std::move(p));
+}
+
+bool Pedestrians::appearance(Game& g, Ped& p, int type, const Traffic::ZoneInfo& z) {
     p.uid = nextUid_++;
     p.type = type;
     p.subtype = 0;
@@ -331,43 +358,113 @@ void Pedestrians::spawn(Game& g, int type) {   // cPopulationManager::GenerateRa
     }
     if (!record(p.type, p.subtype)) {   // no such ped in pedinfo.bin: use the first of its type
         p.subtype = 0;
-        if (!record(p.type, 0)) return;
+        if (!record(p.type, 0)) return false;
     }
     dress(p, z.sex);
-    std::copy(pos, pos + 3, p.body.pos);
-    p.body.placeOnGround(&g.collision);
-    p.prev = from;
-    p.cur = to;
-    setTarget(g, p);
-    p.body.setHeading(padAngle(p.target[0] - pos[0], p.target[1] - pos[1]));
-    peds.push_back(std::move(p));
+    p.body.playerControlled = false;
+    return true;
 }
 
-// A vehicle over the ped: below cPedCollisionData's gentle-contact speed (speed x 2 < 0x3000) it pushes the ped
-// out of its box; faster, the ped is knocked down (the on-ground death animation also used for the player).
+bool Pedestrians::createDriver(Game& g, Vehicle& car, int type, const Traffic::ZoneInfo& zone) {
+    if (!car.uid || car.dead() || car.seatUser[0] != -1) return false;
+    Ped p;
+    if (!appearance(g,p,type,zone)) return false;
+    p.vehicle=car.uid; p.seat=0;
+    car.seatOffset(0,p.seatPosition);
+    car.localToWorld(p.seatPosition,p.body.pos);
+    p.body.setHeading(car.heading());
+    p.body.hidden=p.body.attached=true;
+    car.seatUser[0]=(int)p.uid;
+    peds.push_back(std::move(p));
+    return true;
+}
+
+bool Pedestrians::exitOccupant(Game& g, Vehicle& car, int seat) {
+    if(seat<0 || seat>=4) return false;
+    if(car.seatUser[seat]==-1) return true;
+    if(car.seatUser[seat]<0) return false;
+    for(Ped& p:peds) if(p.uid==(uint32_t)car.seatUser[seat] && p.vehicle==car.uid) {
+        if(p.exiting) return false;
+        p.exiting=true; p.body.hidden=false;
+        car.seatOffset(seat,p.seatPosition); p.seatPosition[2]-=0x2800;
+        car.doorSpawnPoint(seat,p.exitTarget); p.exitTarget[1]-=0x800;
+        p.body.playOneShot(0xE,0xF,(seat&1)!=0);
+        const int anim=0xE + p.body.bodySet*0x113;
+        const uint32_t rate=(uint32_t)(g.pedSprites.rate(anim)<<4)>>12;
+        const uint32_t frames=rate ? g.pedSprites.numFrames(anim)*30/rate : 0;
+        const int32_t fraction=frames ? 4096/(int32_t)frames : 0;
+        for(int k=0;k<3;++k) p.exitVelocity[k]=(int16_t)(((int64_t)fraction*(p.exitTarget[k]-p.seatPosition[k]))>>12);
+        car.openDoor(seat);
+        g.traffic.forget(car.uid);
+        car.setToPhysics(true);
+        return false;
+    }
+    car.seatUser[seat]=-1; // stale mod-removed pedestrian handle
+    return true;
+}
+
+void Pedestrians::updateOccupant(Game& g, Ped& p) {
+    for(Vehicle& car:g.cars) if(car.uid==p.vehicle) {
+        bool done=false;
+        if(p.exiting) {
+            done=p.body.stepOneShot(&g.pedSprites);
+            for(int k=0;k<3;++k) p.seatPosition[k]=done ? p.exitTarget[k] : p.seatPosition[k]+p.exitVelocity[k];
+        }
+        car.localToWorld(p.seatPosition,p.body.pos);
+        p.body.setHeading(car.heading());
+        std::copy(car.vel,car.vel+3,p.body.vel);
+        if(done) {
+            if(car.seatUser[p.seat]==(int)p.uid) car.seatUser[p.seat]=-1;
+            p.vehicle=0; p.seat=-1; p.exiting=false;
+            p.body.hidden=p.body.attached=false;
+            p.body.placeOnGround(&g.collision);
+            car.engineOn=false;
+            // Until the full carjacking reaction task is ported, a displaced driver exits then flees.
+            p.flee.on=p.flee.straight=true; p.flee.fromCar=car.uid;
+            std::copy(car.pos,car.pos+3,p.flee.from);
+        }
+        return;
+    }
+    p.vehicle=0; p.seat=-1; p.exiting=false;
+    p.body.hidden=p.body.attached=false;
+    p.body.placeOnGround(&g.collision);
+}
+
+void Pedestrians::releaseOccupants(Game& g, Vehicle& car, bool killed) {
+    for(Ped& p:peds) if(p.vehicle==car.uid) {
+        int32_t door[3]; car.doorSpawnPoint(p.seat,door); car.localToWorld(door,p.body.pos);
+        if(car.seatUser[p.seat]==(int)p.uid) car.seatUser[p.seat]=-1;
+        p.vehicle=0; p.seat=-1; p.exiting=false;
+        p.body.hidden=p.body.attached=false;
+        std::fill(p.body.vel,p.body.vel+3,0);
+        p.body.placeOnGround(&g.collision);
+        if(killed && p.body.takeDamage(p.body.health)) {
+            p.deadFrames=0;
+            TheSound().pedDeath(p.body.pos,p.male,false);
+        }
+    }
+}
+
+void Pedestrians::discardOccupants(Vehicle& car) {
+    peds.erase(std::remove_if(peds.begin(),peds.end(),[&](const Ped& p) {
+        if(p.vehicle!=car.uid) return false;
+        if(p.seat>=0 && p.seat<4 && car.seatUser[p.seat]==(int)p.uid) car.seatUser[p.seat]=-1;
+        return true;
+    }),peds.end());
+}
+
 void Pedestrians::runOver(Game& g, Ped& p) {
     for (const Vehicle& v : g.cars) {
-        const int32_t rel[3] = {p.body.pos[0] - v.pos[0], p.body.pos[1] - v.pos[1], p.body.pos[2] - v.pos[2]};
-        if (std::abs(rel[2]) > 0x3000 || std::abs(rel[0]) > 0x10000 || std::abs(rel[1]) > 0x10000) continue;
-        const int32_t across = (int32_t)(((int64_t)rel[0] * v.right[0] + (int64_t)rel[1] * v.right[1]) >> 12);
-        const int32_t along = (int32_t)(((int64_t)rel[0] * v.fwd[0] + (int64_t)rel[1] * v.fwd[1]) >> 12);
-        const int32_t ex = v.hx + Player::kRadius / 2, ey = v.hy + Player::kRadius / 2;
-        if (std::abs(across) >= ex || std::abs(along) >= ey) continue;
-        const int32_t speed = v.speed();
-        if (speed * 2 >= 0x3000 && p.deadFrames < 0) {
+        int32_t normal[3], depth;
+        if (!vehicleContact(p.body, v, normal, depth)) continue;
+        const bool wasDead = p.body.dead;
+        if (p.body.vehicleImpact(v, normal, false)) {
             p.deadFrames = 0;
-            p.body.playOneShot(0x18, 0x19, false);
-            TheSound().collision(v, std::min(127, speed >> 10));
-            TheSound().pedDeath(p.body.pos, p.male, false);
+            p.rollFrames = -1;
+            TheSound().collision(v, std::min(127, v.speed() >> 10));
             Plugins_EmitEvent(CTW_EVENT_PED_KNOCKED_DOWN, v.uid, v.infoId, (int)p.uid);
         }
-        // out of the box along the shallower side
-        const int32_t outX = ex - std::abs(across), outY = ey - std::abs(along);
-        const int32_t push = std::min(outX, outY) + 0x100;
-        const int32_t sx = across < 0 ? -1 : 1, sy = along < 0 ? -1 : 1;
-        for (int i = 0; i < 2; ++i)
-            p.body.pos[i] += outX < outY ? (int32_t)(((int64_t)sx * push * v.right[i]) >> 12)
-                                         : (int32_t)(((int64_t)sy * push * v.fwd[i]) >> 12);
+        if (!wasDead && p.body.dead) TheSound().pedDeath(p.body.pos, p.male, false);
     }
 }
 
@@ -420,12 +517,8 @@ bool Pedestrians::roll(Game& g, Ped& p) {
         const int64_t k = std::clamp((((s + (s << 4)) >> 9) * 40) >> 12, (int64_t)0x28, (int64_t)0xFAE);
         for (int i = 0; i < 2; ++i) p.rollVel[i] = (int32_t)(((int64_t)p.rollVel[i] * (0x1000 - k)) >> 12);
     }
-    if (p.rollVel[0] || p.rollVel[1]) {
-        const int32_t a[3] = {p.body.pos[0], p.body.pos[1], p.body.pos[2] + 0x1000};
-        const int32_t b[3] = {a[0] + p.rollVel[0] / 30, a[1] + p.rollVel[1] / 30, a[2]};
-        if (g.collision.staticLine(a, b, 0x40000000 | 0x400 | 0x200 | 0x100)) p.rollVel[0] = p.rollVel[1] = 0;
-        else { p.body.pos[0] = b[0]; p.body.pos[1] = b[1]; p.body.placeOnGround(&g.collision); }
-    }
+    p.body.vel[0] = p.rollVel[0]; p.body.vel[1] = p.rollVel[1];
+    p.movementPrepared = true;
     if (p.body.stepOneShot(&g.pedSprites)) p.rollFrames = -1;
     return true;
 }
@@ -473,11 +566,52 @@ void Pedestrians::react(Game& g, Ped& p, int action, const int32_t from[3], uint
     }
 }
 
-void Pedestrians::explosion(Game& g, const int32_t pos[3]) {
-    // cBaseExplosion::AffectEntities for type 4: every ped within 22 units gets an sDamageInfo of weapon type 6
-    // (qword_481768[type - 4]), which cSimpleMover::GetAction makes action 3; cPed::ReactToDamage reacts to it
-    for (Ped& p : peds)
-        if (dist2(p.body.pos, pos) <= (int64_t)kExplosionReach * kExplosionReach) react(g, p, 3, pos, 0);
+void Pedestrians::meleeHit(Game& g, Ped& p, int damage, int type, const int32_t from[3]) {
+    if (p.vehicle || p.deadFrames >= 0 || p.body.dead) return;   // CanBeHit: alive, not in a closed vehicle
+    const int d = damage && 100 * damage < 100 ? 1 : 100 * damage / 100;   // FixDamageForArmour (cPed::Reset: 100)
+    const bool killed = p.body.takeDamage(d);
+    if (type == 0) Rand16Critical(2);   // the hit animation (+0xEB: 2 / 16 or 102 / 116; the animation is not ported)
+    if (killed) {
+        p.deadFrames = 0;
+        p.rollFrames = -1;
+        TheSound().pedDeath(p.body.pos, p.male, false);
+        Plugins_EmitEvent(CTW_EVENT_PED_KNOCKED_DOWN, 0, -1, (int)p.uid);
+        return;
+    }
+    react(g, p, 0, from, 0);   // GetAction: types 0 and 12 are action 0
+}
+
+void Pedestrians::bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], int effect, const int32_t from[3]) {
+    (void)dir;
+    (void)effect;   // ApplyDamageResponse for the weapon's effect (+0x30) is not ported yet
+    if (p.vehicle || p.deadFrames >= 0 || p.body.dead) return;   // CanBeHit: alive, not in a closed vehicle
+    const int d = damage && 100 * damage < 100 ? 1 : 100 * damage / 100;   // FixDamageForArmour (cPed::Reset: 100)
+    if (p.body.takeDamage(d)) {
+        p.deadFrames = 0;
+        p.rollFrames = -1;
+        TheSound().pedDeath(p.body.pos, p.male, false);   // cPed::SetDead -> PlayDeathSound
+        Plugins_EmitEvent(CTW_EVENT_PED_KNOCKED_DOWN, 0, -1, (int)p.uid);
+        return;
+    }
+    react(g, p, 0, from, 0);
+}
+
+void Pedestrians::explosion(Game& g, const ExplosionBlast& blast) {
+    (void)g; // source-entity reaction tasks are a separate, still unported path
+    std::vector<uint32_t> knockedDown;
+    for (Ped& p : peds) {
+        int damage;
+        if (p.vehicle || p.body.dead || !blast.pedHit(p.body.pos, false, damage)) continue;
+        int32_t direction[3]; for (int k = 0; k < 3; ++k) direction[k] = p.body.pos[k] - blast.pos[k];
+        const bool response = p.body.explosionHit(damage, direction);
+        if (p.body.dead) TheSound().pedDeath(p.body.pos, p.male, false);
+        if (response || p.body.dead) {
+            p.deadFrames = 0; p.rollFrames = -1;
+            knockedDown.push_back(p.uid);
+        }
+    }
+    // Mod callbacks may remove pedestrians or spawn new ones. Do not dispatch while holding a body reference.
+    for (uint32_t uid : knockedDown) Plugins_EmitEvent(CTW_EVENT_PED_KNOCKED_DOWN, 0, -1, (int)uid);
 }
 
 // cFleeOnFoot::Process: sprint (ConstrainWalkSpeed(3, 3)); at each node GetNextNode takes the link whose direction
@@ -526,10 +660,8 @@ void Pedestrians::fleeStep(Game& g, Ped& p) {
     in.heading = padAngle(p.target[0] - p.body.pos[0], p.target[1] - p.body.pos[1]);
     in.sprint = true;
     in.maxLevel = 3;
-    const int32_t before[2] = {p.body.pos[0], p.body.pos[1]};
-    p.body.update(in, &g.collision, &g.pedSprites);
-    // PC approximation (as in wander): blocked for 1.5 seconds, it switches between the network and straight away
-    p.stuckFrames = dist2(before, p.body.pos) < 0x40 * 0x40 ? p.stuckFrames + 1 : 0;
+    p.body.act(in, &g.pedSprites);
+    p.movementPrepared = true;
     if (p.stuckFrames > 45) {
         p.flee.straight = !p.flee.straight || !p.prev.valid();
         p.flee.to[0] = p.flee.to[1] = 0;
@@ -552,11 +684,10 @@ void Pedestrians::wander(Game& g, Ped& p) {   // cWanderPath::Process (walking p
     in.maxLevel = 1;
     if ((p.type == 1 && p.subtype == 1) || g.world.timeCycle().value(28) >= 2048.f) in.maxLevel = 2;
     if (p.evading) { in.maxLevel = 3; in.sprint = true; }
-    const int32_t before[2] = {p.body.pos[0], p.body.pos[1]};
-    p.body.update(in, &g.collision, &g.pedSprites);
+    p.body.act(in, &g.pedSprites);
+    p.movementPrepared = true;
     // PC approximation: a ped that makes no progress for 1.5 seconds (blocked by something the pavement graph
     // ignores) turns round instead of walking on the spot.
-    p.stuckFrames = dist2(before, p.body.pos) < 0x40 * 0x40 ? p.stuckFrames + 1 : 0;
     if (p.stuckFrames > 45 && p.prev.valid()) {
         std::swap(p.cur, p.prev);
         setTarget(g, p);
@@ -569,58 +700,76 @@ void Pedestrians::update(Game& g) {
     std::vector<Collision::Box> still;
     for (const Vehicle& c : g.cars) {
         if (c.vel[0] || c.vel[1] || c.vel[2] || c.up[2] < 0xFD8) continue;
-        still.push_back({c.pos[0], c.pos[1], c.pos[2], c.hx, c.hy, c.hz, (int16_t)-c.heading(), 0});
+        still.push_back({c.pos[0], c.pos[1], c.pos[2] + c.hz, c.hx, c.hy, c.hz, (int16_t)-c.heading(), 0});
     }
     for (Ped& p : peds) {
-        if (p.deadFrames >= 0) {
-            ++p.deadFrames;
-            p.body.stepOneShot(&g.pedSprites);
-            continue;
-        }
+        p.body.playerControlled = false;
+        p.movementPrepared = false;
+        if(p.vehicle) { updateOccupant(g,p); continue; }
         p.body.obstacles = still;
-        wander(g, p);
+        if (p.body.reacting()) { p.body.actReaction(&g.pedSprites,vehicleAbove(g,p.body)); p.movementPrepared = true; }
+        else if (p.deadFrames >= 0) { p.body.stepOneShot(&g.pedSprites); p.movementPrepared = true; }
+        else wander(g, p);
+        if (!p.body.reacting() && !p.body.dead && p.deadFrames >= 0) p.deadFrames = -1;
+    }
+    contacts(g);
+    for (Ped& p : peds) {
+        if(p.vehicle) continue;
         runOver(g, p);
-        // PC approximation of ped/player contact: walkers step aside instead of walking through the player
-        if (g.playerCar < 0 && !g.player.hidden) {
-            const int64_t d = dist2(p.body.pos, g.player.pos), r = (int64_t)Player::kRadius * 2;
-            if (d < r * r && d > 0) {
-                const double len = std::sqrt((double)d), k = (r - len) / len;
-                p.body.pos[0] += (int32_t)((p.body.pos[0] - g.player.pos[0]) * k);
-                p.body.pos[1] += (int32_t)((p.body.pos[1] - g.player.pos[1]) * k);
-            }
-        }
+        if (p.deadFrames >= 0) ++p.deadFrames;
+        if (!p.movementPrepared && !p.body.reacting()) continue;
+        const int32_t before[2] = {p.body.pos[0], p.body.pos[1]};
+        p.body.advance(&g.collision, p.deadFrames < 0);
+        p.stuckFrames = dist2(before, p.body.pos) < 0x40 * 0x40 ? p.stuckFrames + 1 : 0;
+        if (p.rollFrames >= 0) { p.rollVel[0] = p.body.vel[0]; p.rollVel[1] = p.body.vel[1]; }
+    }
+    if (g.playerCar < 0 && !g.player.hidden && !g.player.attached) for (const Vehicle& car : g.cars) {
+        int32_t normal[3], depth;
+        if (vehicleContact(g.player, car, normal, depth)) g.player.vehicleImpact(car, normal, true);
     }
     // cPed::ShouldBeDestroyed: about 85 units from the player and off screen
     int32_t f[3];
     g.focus(f);
     peds.erase(std::remove_if(peds.begin(), peds.end(), [&](const Ped& p) {
-        return dist2(p.body.pos, f) >= kRemoveDist2 && !g.canSee(p.body.pos, 2.f);
+        return !p.vehicle && dist2(p.body.pos, f) >= kRemoveDist2 && !g.view.canSee(p.body.pos, 0x2000);
     }), peds.end());
-
-    // cPopulationManager::Update (peds): the target count from the zone's ped density, then the spawn schedule
-    const uint32_t t = g.world.timeCycle().time();
-    const Traffic::ZoneInfo& z = g.traffic.zoneOrDefault(f[0], f[1], t - 0x14000u < 0xFFFF3000u);
-    maxPeds = std::min(64, (int)(std::min(16, 20 * z.pedDensity * 100 / 7500) * densityScale));
-    if (!maxPeds || records_.empty() || g.traffic.firedThisFrame) return;
-    const int32_t* vel = g.playerCar >= 0 ? g.cars[g.playerCar].vel : g.player.vel;
-    const int64_t speed = (int64_t)std::sqrt((double)vel[0] * vel[0] + (double)vel[1] * vel[1] + (double)vel[2] * vel[2]);
-    const int64_t q = (int64_t)(0x9100000000000ULL / (uint64_t)(speed + 0x3F48)) >> 20;
-    const int32_t k = (int32_t)(30 * q / maxPeds);
-    const int period = k <= 0x1000 ? 1 : k <= 0x3000 ? 2 : k <= 0x6000 ? 4 : k <= 0xC000 ? 8 : k <= 0x18000 ? 16 : k <= 0x30000 ? 32 : 64;
-    // cFrameSchedule::Fired: ((frame + phase) & (period - 1)) == 0. SetTiming gives each schedule the least loaded of
-    // 64 frame bins; the vehicle schedule holds bin 0, so the ped schedule runs one frame after it.
-    if (((g.frame + 1) & (uint32_t)(period - 1)) || alive() >= maxPeds) return;
-    int total = 0;
-    for (int v : z.fields) total += v;
-    if (!total) return;
-    int r = (int)Rand32Critical((uint32_t)total), type = -1;
-    for (int i = 0; i < 20; ++i) {
-        if (r < z.fields[i]) { type = i; break; }
-        r -= z.fields[i];
-    }
-    if (type >= 0) spawn(g, type);
 }
 
-void Pedestrians::render(const PedSprites* sprites, const PedLight* light) const {
-    for (const Ped& p : peds) p.body.render(sprites, light);
+void Pedestrians::contacts(Game& g) {
+    std::vector<Player*> bodies;
+    if (g.playerCar < 0 && !g.player.hidden && !g.player.attached) bodies.push_back(&g.player);
+    for (Ped& p : peds) if (!p.body.hidden && !p.body.attached) bodies.push_back(&p.body);
+    for (size_t a = 0; a < bodies.size(); ++a) for (size_t b = a + 1; b < bodies.size(); ++b) {
+        int32_t n[3];
+        if (!sphereContact(*bodies[a], *bodies[b], n)) {
+            if (!sphereContact(*bodies[b], *bodies[a], n)) continue;
+            for (int32_t& v : n) v = -v;
+        }
+        bodies[a]->dynamicContact(n, bodies[b]->vel);
+        for (int32_t& v : n) v = -v;
+        bodies[b]->dynamicContact(n, bodies[a]->vel);
+    }
+}
+
+bool Pedestrians::vehicleAbove(const Game& g, const Player& body) {
+    for (const Vehicle& car : g.cars) {
+        const int16_t* axes[3] = {car.right,car.fwd,car.up};
+        int32_t p[3], hit[3], normal[3], depth;
+        for (int i = 0; i < 3; ++i) {
+            int64_t dot = 0;
+            for (int k = 0; k < 3; ++k) dot += ((int64_t)body.pos[k]-car.pos[k])*axes[i][k];
+            p[i] = (int32_t)(dot >> 12);
+        }
+        const Collision::Box box{0,0,car.hz,car.hx,car.hy,car.hz,0,0};
+        if (Collision::sphereVBox(p,0xC00,box,hit,normal,depth)) return true;
+    }
+    return false;
+}
+
+void Pedestrians::render(const PedSprites* sprites, const PedLight* light, float alpha) const {
+    for (const Ped& p : peds) {
+        if (p.body.hidden) continue;
+        auto pose=p.body.renderPose(sprites,p.uid,p.type,p.body.dead ? CTW_CHARACTER_DEAD : 0,alpha);
+        if (!Plugins_RenderCharacter(pose)) p.body.render(sprites, light);
+    }
 }

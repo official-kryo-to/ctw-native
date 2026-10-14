@@ -40,11 +40,11 @@ switch, description and options on the right.
 
 | Example | What it shows |
 | --- | --- |
-| `Enhancements` | PC extras, one feature per source file: a third-person camera (**V**) and PSP-style lighting. Remembers its options. |
-| `CheatExample` | Cheats, a vehicle spawner (F7) and a free camera (F8). |
+| `Enhancements` | PC extras, one feature per source file: a third-person camera (**V**), PSP-style lighting and optional imported LCS 3D people. Remembers its options. |
+| `CheatExample` | Cheats, a spawn menu for vehicles and weapons (F7) and a free camera (F8). |
 | `Trumpify` | Transparent texture layers over the city's adverts. |
 
-The game folder the Porter makes already has `ModMenu.dll` and the example mods. They also come from building
+The Porter lets you choose the premade mods and installs `ModMenu.dll` when mods are enabled. They also come from building
 this kit (see [section 4](#4-adding-code-to-a-mod)).
 
 ## 2. Adding textures to a mod
@@ -173,17 +173,20 @@ colours `0xRRGGBBAA`, screen coordinates pixels from the top left.
 | Events / lifecycle (v4) | `on_game_event`, `on_enabled_changed`, `consume_mouse_wheel`, `get_capabilities` |
 | Pedestrians (v5) | `ped_count`, `get_ped_state` (`CtwPedState`: id, type, position, heading, knocked down, male), `get/set_ped_density`; event `CTW_EVENT_PED_KNOCKED_DOWN` |
 | Custom cameras (v5) | `set_control_yaw` (on-foot movement relative to your camera), `set_camera_fov`, `world_line` (nearest wall/ground hit with its distance) |
+| Character models (v7/v8/v9) | `load_character_model`, `release_character_model`, `draw_character_model`, `on_character_render`: skinned mobile DFF/ANPK/PVR resources and interpolated player/pedestrian poses; v8 adds dimensions, elapsed clips and fallen-body grounding; v9 adds native attachment frames, vehicle identity, continuous reaction/recovery clocks and `draw_character_model_attached` for animated-joint anchors |
+| Camera shake (v6) | `get_camera_shake`: interpolated world-space explosion offset for a custom camera |
 | Look (v5) | `set_render_style` (`CtwRenderStyle`: street light and headlight pools at night, tint, sepia, saturation, contrast, brightness, vignette; `NULL` = the game's own) |
 
 Keys are SDL scancodes (<https://wiki.libsdl.org/SDL2/SDL_Scancode>). Read the mouse and typed text inside
 `on_draw_hud`. `examples/cheat_example` uses most of this: study it next.
 
-**Versions.** `api->version` is 5 for this game. Functions are only ever added at the end of `CtwApi`, so a mod built
+**Versions.** `api->version` is 7 for this game. Functions are only ever added at the end of `CtwApi`, so a mod built
 for an older version keeps working; if your mod needs a newer function, check `api->version` or `api->size` in
 `ctw_mod_init` and return non-zero to refuse loading on an older game.
 
 Use `CTW_MOD_HAS(api, function_name)` to check both table size and a non-null function pointer. The mod menu also
-runs on older games: on a v4 game the v5 game functions are NULL (settings and menu items still work), and on a v3
+runs on older games: on a v6 game the character functions are NULL; on a v5 game `get_camera_shake` is NULL; on a v4 game the v5 game functions are NULL
+(settings and menu items still work), and on a v3
 game it advertises a v3 table. No-op functions
 are not advertised for unported systems. `get_capabilities()` reports which gameplay systems have loaded data.
 
@@ -234,20 +237,28 @@ field of view and mouse capture when your camera stops and in `on_enabled_change
 down the game resets them itself. Hand the view back while the player is dead so the game's death camera runs.
 Two mods driving the free camera at once fight over it: the one later in folder order wins.
 
+For explosion shake, check `CTW_MOD_HAS(api, get_camera_shake)`, read its world-space offset in `on_frame_begin`
+and add it once to the camera eye after wall/ground checks. Reading does not advance simulation or random numbers.
+The game's normal view already includes shake; do not add it to that view again. Enhancements uses this function
+for third person and still runs without shake on older hosts.
+
 **Saved settings.** `get_setting(mod, "key", default)` returns the saved number or the default;
 `set_setting(mod, "key", value)` stores one. The menu writes them to `mods/<YourMod>/settings.ini` about once a
 second, when the menu closes and when the game exits. Keys may contain letters, digits, `_` and `.`.
 
 **Remaining limits.** The SDK exposes the playable prototype, but full original-game modding
-still depends on unfinished ports. Pedestrians, weapons/combat, wanted levels, missions and save/load are not
-implemented. Custom models/animations, object spawning and custom audio also lack public interfaces. These are
+still depends on unfinished ports. Pedestrians have read-only state and density controls; weapons/combat, wanted
+levels, missions and save/load are not implemented. Rigid object spawning, custom audio and general model/material/shader interfaces remain missing.
+The v7/v8/v9 character API supports mobile skinned DFF models, ANPK clips and ETC1 PVR textures; it does not import arbitrary
+FBX/glTF assets. These limits are
 tracked in [STATUS.md](../STATUS.md); access to the source does not make those missing systems complete.
-Rendering hooks (custom lighting or shaders, such as a PSP-style lighting mode) are not in the API yet either.
+See [third-person character support](THIRD_PERSON_ASSETS.md) for the local LCS importer, character API and remaining
+animation/appearance limitations.
 
 ## 6. Windows and menus with ctw_ui.h
 
 `include/ctw_ui.h` is optional, plain C and header-only: windows, buttons, switches, sliders, option pickers,
-tags, scrolling lists, text fields and wrapped text, drawn with the mod API. The mod menu and the Cheat Example's vehicle spawner are built with
+tags, scrolling lists, text fields and wrapped text, drawn with the mod API. The mod menu and the Cheat Example's spawn menu are built with
 it.
 
 Two things keep windows tidy:

@@ -63,6 +63,7 @@ std::string g_modsDir;
 std::vector<std::unique_ptr<CtwMod>> g_mods;
 template <class Fn> struct Hook { CtwMod* mod; Fn fn; void* user; };
 std::vector<Hook<CtwCallback>> g_tickHooks, g_hudHooks, g_frameHooks;
+std::vector<Hook<CtwCharacterCallback>> g_characterHooks;
 std::vector<Hook<CtwKeyCallback>> g_keyHooks;
 std::vector<Hook<CtwGameEventCallback>> g_eventHooks;
 std::vector<Hook<CtwEnabledCallback>> g_enabledHooks;
@@ -188,6 +189,12 @@ void api_set_setting(CtwMod* m, const char* key, float value) {
 void api_on_tick(CtwMod* m, CtwCallback fn, void* user) { if (fn) g_tickHooks.push_back({m, fn, user}); }
 void api_on_hud(CtwMod* m, CtwCallback fn, void* user) { if (fn) g_hudHooks.push_back({m, fn, user}); }
 void api_on_frame(CtwMod* m, CtwCallback fn, void* user) { if (m && fn) g_frameHooks.push_back({m, fn, user}); }
+void api_on_character(CtwMod* m,CtwCharacterCallback fn,void* user) {if(m && fn)g_characterHooks.push_back({m,fn,user});}
+int onCharacter(const CtwCharacterPose* pose,void*) {
+    const auto hooks=g_characterHooks;
+    for(const auto& h:hooks)if(h.mod->enabled && h.mod->codeLoaded && h.fn(pose,h.user))return 1;
+    return 0;
+}
 void onFrame(void*) {
     const auto hooks = g_frameHooks;
     for (const auto& h : hooks) if (h.mod->enabled && h.mod->codeLoaded) h.fn(h.user);
@@ -591,6 +598,23 @@ extern "C" CTW_PLUGIN_EXPORT int ctw_plugin_init(const CtwHostApi* host) {
 #define FORWARD_V5(name) g_api.name = gameplay && CTW_HOST_HAS(H, name) ? H->name : nullptr;
     CTW_FORWARDED_V4(FORWARD_V4)
     CTW_FORWARDED_V5(FORWARD_V5)
+    g_api.get_camera_shake = gameplay && CTW_HOST_HAS(H,get_camera_shake) ? H->get_camera_shake : nullptr;
+    g_api.load_character_model = gameplay && CTW_HOST_HAS(H,load_character_model) ? H->load_character_model : nullptr;
+    g_api.release_character_model = gameplay && CTW_HOST_HAS(H,release_character_model) ? H->release_character_model : nullptr;
+    g_api.draw_character_model = gameplay && CTW_HOST_HAS(H,draw_character_model) ? H->draw_character_model : nullptr;
+    g_api.get_character_bounds = gameplay && CTW_HOST_HAS(H,get_character_bounds) ? H->get_character_bounds : nullptr;
+    g_api.draw_character_model_at_time = gameplay && CTW_HOST_HAS(H,draw_character_model_at_time) ? H->draw_character_model_at_time : nullptr;
+    g_api.draw_character_model_attached = gameplay && CTW_HOST_HAS(H,draw_character_model_attached) ? H->draw_character_model_attached : nullptr;
+    g_api.on_character_render = gameplay && CTW_HOST_HAS(H,on_character_render) ? api_on_character : nullptr;
+    g_api.weapon_type_count = gameplay && CTW_HOST_HAS(H,weapon_type_count) ? H->weapon_type_count : nullptr;
+    g_api.weapon_name = gameplay && CTW_HOST_HAS(H,weapon_name) ? H->weapon_name : nullptr;
+    g_api.weapon_givable = gameplay && CTW_HOST_HAS(H,weapon_givable) ? H->weapon_givable : nullptr;
+    g_api.give_weapon = gameplay && CTW_HOST_HAS(H,give_weapon) ? H->give_weapon : nullptr;
+    g_api.get_player_weapon = gameplay && CTW_HOST_HAS(H,get_player_weapon) ? H->get_player_weapon : nullptr;
+    g_api.draw_weapon_icon = gameplay && CTW_HOST_HAS(H,draw_weapon_icon) ? H->draw_weapon_icon : nullptr;
+    g_api.set_aim_override = gameplay && CTW_HOST_HAS(H,set_aim_override) ? H->set_aim_override : nullptr;
+    g_api.screen_to_world = gameplay && CTW_HOST_HAS(H,screen_to_world) ? H->screen_to_world : nullptr;
+    g_api.cycle_weapon = gameplay && CTW_HOST_HAS(H,cycle_weapon) ? H->cycle_weapon : nullptr;
 #undef FORWARD_V4
 #undef FORWARD_V5
     g_api.on_game_event = gameplay && H->on_game_event ? api_on_event : nullptr;
@@ -610,6 +634,7 @@ extern "C" CTW_PLUGIN_EXPORT int ctw_plugin_init(const CtwHostApi* host) {
     H->on_draw_hud(onHud, nullptr);
     if (gameplay && H->on_game_event) H->on_game_event(onGameEvent, nullptr);
     if (g_api.on_frame_begin) H->on_frame_begin(onFrame, nullptr);
+    if (g_api.on_character_render) H->on_character_render(onCharacter,nullptr);
     return 0;
 }
 
@@ -623,6 +648,7 @@ extern "C" CTW_PLUGIN_EXPORT void ctw_plugin_shutdown(void) {
     g_tickHooks.clear();
     g_hudHooks.clear();
     g_frameHooks.clear();
+    g_characterHooks.clear();
     g_keyHooks.clear();
     g_eventHooks.clear();
     g_enabledHooks.clear();

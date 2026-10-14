@@ -10,6 +10,7 @@
 #pragma once
 #include <cstdint>
 #include "cameraobstruction.h"
+#include "camerashake.h"
 
 class Collision;
 class Vehicle;
@@ -20,6 +21,8 @@ public:
     void setBehind(const Vehicle& car);   // cFollowCarCam2::SetCameraBehindTarget
     void update(const Vehicle& car, Collision* col);
     void toWorldCamera(WorldCamera& out) const;
+    void shake(int32_t amplitude, int32_t decay) { shake_.start(amplitude,decay); }
+    void shakeOffset(int32_t out[3]) const { shake_.offset(out); }
     void position(int32_t out[3]) const { out[0] = pos_[0]; out[1] = pos_[1]; out[2] = pos_[2]; }
     uint16_t yaw() const { return yaw_; }
     uint16_t pitch() const { return pitch_; }
@@ -32,4 +35,5 @@ private:
     int state_ = 0;              // +0x134
     int8_t reverseFrames_ = 0;   // +0x13E
     CameraObstruction obstruction_;
+    CameraShake shake_;
 };

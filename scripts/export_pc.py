@@ -73,7 +73,12 @@ def set_exe_icon(exe, ico):
         raise OSError('could not write the icon resources')
 
 
-def export(apk, out, build_dir, rebuild, with_modkit):
+def export(apk, out, build_dir, rebuild, with_modkit, mods=None, lcs_apk=None):
+    allowed = {'Enhancements', 'CheatExample', 'Trumpify'}
+    if mods is not None and not set(mods) <= allowed:
+        raise ValueError('Unknown premade mod selection')
+    if lcs_apk and (not with_modkit or (mods is not None and 'Enhancements' not in mods)):
+        raise ValueError('Select Enhancements to import LCS characters')
     if out.exists():
         raise ValueError(f'{out} already exists. Choose another --out or remove it first.')
     if rebuild or not (build_dir / 'GTACTW.exe').is_file() or (with_modkit and not (build_dir / 'mods' / 'ModMenu.dll').is_file()):
@@ -92,9 +97,17 @@ def export(apk, out, build_dir, rebuild, with_modkit):
                     set_exe_icon(exe, extra.read_bytes())
                 extra.unlink()
         if with_modkit:
-            shutil.copytree(build_dir / 'mods', package / 'mods', ignore=lambda folder, names: [n for n in names if n in NOT_MODS])
+            def ignored(folder, names):
+                return [n for n in names if n in NOT_MODS or n == 'lcs' or n == 'settings.ini' or
+                        (Path(folder) == build_dir / 'mods' and n != 'ModMenu.dll' and mods is not None and n not in mods)]
+            shutil.copytree(build_dir / 'mods', package / 'mods', ignore=ignored)
         else:
             (package / 'mods').mkdir()
+        if lcs_apk:
+            if not (package / 'mods/Enhancements/mod.ini').is_file():
+                raise ValueError('This build has no Enhancements mod')
+            from lcs_assets import extract
+            extract(lcs_apk, package / 'mods/Enhancements/lcs')
         out.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(package), str(out))
     print(f'Exported the game to {out}')
@@ -107,6 +120,8 @@ def main():
     parser.add_argument('--build-dir', type=Path, default=RELEASE_BUILD, help='CMake release build folder')
     parser.add_argument('--rebuild', action='store_true', help='Build the game again before exporting')
     parser.add_argument('--with-modkit', action='store_true', help='Also put the mod menu and the example mods into mods/')
+    parser.add_argument('--mods', nargs='*', choices=['Enhancements', 'CheatExample', 'Trumpify'], help='Install only these premade mods; implies --with-modkit')
+    parser.add_argument('--lcs-apk', type=Path, help='Own Liberty City Stories Android 2.4.379 APK for Enhancements 3D characters')
     args = parser.parse_args()
     apk = args.apk
     if apk is None:
@@ -115,7 +130,8 @@ def main():
             parser.error('Place exactly one APK in input/ or supply --apk PATH.')
         apk = candidates[0]
     try:
-        export(apk.resolve(), args.out.resolve(), args.build_dir.resolve(), args.rebuild, args.with_modkit)
+        export(apk.resolve(), args.out.resolve(), args.build_dir.resolve(), args.rebuild, args.with_modkit or args.mods is not None,
+               args.mods, args.lcs_apk)
     except (OSError, ValueError, KeyError, zipfile.BadZipFile, subprocess.CalledProcessError) as exc:
         parser.exit(1, f'Export failed: {exc}\n')
 

@@ -20,11 +20,14 @@
 //                  (1.5 units), and is pushed out of overlaps; then GetGround decides on-ground / gravity
 //                  (-0x1ED0 per frame).
 //   AnimateWalkRunCycle - the sprite pair for the level, stepped by CurrentSpeed x 0x88 >> 16.
-// Not ported: swimming (the player won't step into water), jumping/diving, weapons and other peds.
+//   AnimateWalkRunCycleWeapons - the held weapon replaces the upper-body animation while it fires or reloads
+//                  (and for some weapons always); weapons.cpp fills in weaponType / weaponState / weaponFlags.
+// Not ported: swimming (the player won't step into water), jumping/diving, melee and the fight idle.
 #pragma once
 #include <cstdint>
 #include <vector>
 #include "world/collision.h"
+#include "ctw_types.h"
 
 class PedSprites;
 struct PedLight;
@@ -50,9 +53,29 @@ public:
 
     void placeOnGround(Collision* col);
     void update(const Input& in, Collision* col, const PedSprites* sprites);
+    // Act, dynamic contacts, then Integrate: contacts must not be overwritten by walking velocity.
+    void act(const Input& in, const PedSprites* sprites);
+    void advance(Collision* col, bool avoidWater = true);
+    void dynamicContact(const int32_t normal[3], const int32_t otherVelocity[3], int32_t depth = 0);
+    bool vehicleImpact(const class Vehicle& vehicle, const int32_t normal[3], bool isPlayer);
+    // cPed::Damage's health part (after FixDamageForArmour) and SetHealth: at 0, SetDead's effect-4 fall. True if
+    // it killed.
+    bool takeDamage(int damage);
+    bool explosionHit(int damage, const int32_t direction[3]); // effect 2: health first, then a high knockdown
+    bool reacting() const { return reaction_ >= 0; }
+    void actReaction(const PedSprites* sprites, bool vehicleAbove = false);
+    void resetReaction();
+    int health = 127; // cPed::Reset; armour/combat damage are separate, still unported paths
+    // the current weapon as cPed::AnimateWalkRunCycleWeapons sees it (cWeapon Type / +0xC state / +0x10 flags)
+    int weaponType = 0, weaponState = 0;
+    uint32_t weaponFlags = 0;
+    int16_t fireDir[3] = {0, 0x1000, 0};   // cPed +0x32A (FireDirection)
+    bool upperAim = false;                 // cPed::Render draws the upper body along fireDir (+0x338 bit 30)
+    uint8_t punch = 0;
+    int throwPower = 0;                    // cPed +0x1E0: the thrown weapon's power, 0..128 (StandardConvertFromPower)                     // cPlayer +0x118D: which hand punches next (GetMeleeAnim)
+    bool playerControlled = true; // cPlayer's extra static slide/grace behavior
     // cPed::ConstrainByCollision (player): still, upright vehicles nearby act as extra boxes (set by the game)
     std::vector<Collision::Box> obstacles;
-    void collideMovingCar(const int32_t previous[3], const Collision::Box& before, const Collision::Box& after);
     void render(const PedSprites* sprites, const PedLight* light) const;
 
     // Attached to a vehicle (cAttachedManager, while getting in or out): the game places the ped every frame and
@@ -75,6 +98,7 @@ public:
     int walkFrame() const { return frameUpper_ >> 8; }   // cSoundEvents reads the unarmed upper-body cycle
     void posf(float out[3]) const { for (int i = 0; i < 3; ++i) out[i] = pos[i] / 4096.f; }
     int32_t currentSpeed() const;     // cPed::CurrentSpeed, units per second (20.12)
+    CtwCharacterPose renderPose(const PedSprites* sprites, uint32_t id, int type, uint32_t flags, float alpha = 1.f) const;
 
     static constexpr int32_t kRadius = 0x1400;                          // cPed::Reset
     static constexpr int32_t kSphere = (int32_t)((0x1400LL * 0xB33) >> 12);   // GetStaticCollsiionRadius
@@ -85,6 +109,7 @@ private:
     void integrate(Collision* col);
     void constrainByCollision(Collision* col, int32_t moveLen, bool& walkable, bool& hit);
     void animate(const PedSprites* sprites);
+    void reactionPose(int state);
 
     uint8_t level_ = 0, counter_ = 0, exhaustion_ = 0;   // cPed +0x357, +0x35A, +0x365
     bool slowing_ = false;                                // +0x338 bit 25
@@ -93,5 +118,10 @@ private:
     int32_t clearance_ = 0, lastPos_[3] = {0, 0, 0};     // +0x320, +0x2F8
     int animUpper_ = -1, animLegs_ = -1, frameUpper_ = 0, frameLegs_ = 0;
     bool flip_ = false, doneUpper_ = false, doneLegs_ = false;
+    uint32_t oneShotTicks_ = 0;
+    int reaction_ = -1, reactionTicks_ = 0;
+    uint32_t reactionAge_ = 0;
+    uint32_t recoveryAge_ = 0;
+    bool reactionForward_ = false;
     friend struct PlayerTestAccess;
 };

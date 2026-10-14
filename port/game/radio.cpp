@@ -84,7 +84,34 @@ bool Radio::init(const std::string& dir) {
 }
 
 void Radio::remember() {
+    countListening();
     if (playing_ >= 0 && playing_ < (int)stations_.size()) stations_[playing_].position = Audio_MusicPosition();
+}
+
+void Radio::countListening() {
+    const double now = OS_TimeAccurate();
+    if (listenClock_ > 0 && now >= listenClock_ && playing_ >= 0 && playing_ < stationCount() && Audio_MusicPlaying())
+        stations_[playing_].listened += now - listenClock_;
+    listenClock_ = now;
+}
+
+int Radio::favoriteStars(int station) const {
+    if (station < 0 || station >= stationCount() || stations_[station].stream < 0 ||
+        stations_[station].listened <= 0 || std::find(appOrder_.begin(),appOrder_.end(),station) == appOrder_.end()) return 0;
+    // CalcStationOrder sorts ascending, removes zero-time stations, then ProcessStars caps the rank at five.
+    int rank = 1;
+    for (int other : appOrder_) {
+        if (stations_[other].stream < 0 || stations_[other].listened <= 0) continue;
+        if (stations_[other].listened < stations_[station].listened ||
+            (stations_[other].listened == stations_[station].listened && other < station)) ++rank;
+    }
+    return std::min(5,rank);
+}
+
+float Radio::volumeAlpha(double now) const {
+    const double frames = std::floor(std::max(0.0,now-volumeShownAt_) * 30.0);
+    if (frames < 100) return std::min(1.f,0.4f + (float)frames * 0.1f);
+    return std::max(0.4f,1.f - (float)(frames-100) * 0.1f);
 }
 
 void Radio::shutdown() {
@@ -94,11 +121,13 @@ void Radio::shutdown() {
     Audio_SetSfxPaused(false);
     if (texture_) glDeleteTextures(1, &texture_);
     texture_ = 0; stations_.clear(); playing_ = -1;
+    app_ = appTuning_ = false; pointerDown_ = pointerSwiped_ = false; listenClock_ = 0;
     ambience_ = -1; ambienceLevel_ = 0;
 }
 
 void Radio::sync(Game& game) {
     bool enabled = inCar(game);
+    if (enabled && app_ && appTuning_) return;
     if (!enabled || stations_.empty() || !stations_[selected_].available || stations_[selected_].stream < 0) {
         if (playing_ >= 0) { remember(); Audio_StopMusic(); playing_ = -1; }
         ambience(game);
@@ -110,6 +139,7 @@ void Radio::sync(Game& game) {
         Audio_SetMusicVolume(volume_ / 10.f);
         const Station& s = stations_[selected_];
         if (Audio_PlayMusic(s.path, true, s.position)) playing_ = selected_;
+        listenClock_ = OS_TimeAccurate();
     }
 }
 
@@ -120,7 +150,8 @@ void Radio::sync(Game& game) {
 void Radio::ambience(Game& game) {
     if (dir_.empty() || tables_.streams.size() <= 24) return;
     const bool wet = game.world.timeCycle().value(28) >= 2048.f;
-    const int32_t x = game.playerCar >= 0 ? game.cars[game.playerCar].pos[0] : game.player.pos[0];
+    const int32_t x = game.playerCar >= 0 && game.playerCar < (int)game.cars.size()
+                        ? game.cars[game.playerCar].pos[0] : game.player.pos[0];
     const int want = x > 0x604000 ? (wet ? 24 : 23) : (wet ? 3 : 1);
     static const int level[33] = {0, 50, 0, 25, 25, 127, 0, 127, 0, 127, 127, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 127, 127, 75, 40};
     if (want != ambience_) {   // fade the old loop out, then start the new one
@@ -148,6 +179,7 @@ bool Radio::stationAvailable(int index) const {
 bool Radio::tune(int index, Game& game) {
     if (!stationAvailable(index) || !inCar(game)) return false;
     adoptCar(game);
+    appTuning_ = false;   // explicit host API tuning is not a carousel gesture
     select(index, game);
     return true;
 }
@@ -174,9 +206,9 @@ void Radio::adoptCar(Game& game) {
 
 void Radio::update(Game& game) {
     if (stations_.empty()) return;
+    countListening();
     adoptCar(game);
     sync(game);
-    if (playing_ >= 0 && Audio_MusicPlaying()) stations_[playing_].listened += 1.0 / 30;
 }
 
 void Radio::select(int index, Game& game) {
@@ -230,8 +262,8 @@ void Radio::sprite(int id, float x, float y, float scale, float alpha) const {
 // segments every 16 pixels up from y 220 in gTopCols, and a perspective floor reflection below in gRefCols; the level
 // is min(9, sqrt(band energy x 64) x 9) (GetOutput) from the music's band filters (Audio_MusicBands). ProcessStars:
 // the dotted outline (sprite 17) at (181, 246), scale 2.35, and up to five stars (sprite 7, scale 2) at y 250,
-// x 273 down to 169, for the five most listened stations. ProcessVolumeIcon: the meter (sprite 20 and the level
-// sprite) at (208, 270), fading out after a change. The PDA frame, touch buttons and the station heading are drawn
+// x 273 down to 169, by ascending nonzero listening-time rank, capped at five. ProcessVolumeIcon: the meter (sprite 20 and the level
+// sprite) at (208, 270), fading back to 40 percent after a change. The PDA frame and station heading are drawn
 // in a PC style; the station name position is a PC choice.
 namespace {
 constexpr float kAppW = 480.f, kAppH = 340.f;
@@ -249,6 +281,8 @@ void Radio::openApp(bool open, Game& game) {
     open = open && inCar(game) && !stations_.empty();
     if (open == app_) return;
     app_ = open;
+    appTuning_ = false;
+    pointerDown_ = pointerSwiped_ = false;
     game.uiPaused = open;            // cRadioApp::Init: cGame::Pause
     Audio_SetSfxPaused(open);
     if (open) {
@@ -268,14 +302,69 @@ void Radio::openApp(bool open, Game& game) {
         appScroll_ = at == appOrder_.end() ? 0.f : appOffset_[at - appOrder_.begin()];
         appLast_ = OS_TimeAccurate();
     } else {
+        sync(game);
         remember();
         save();
     }
 }
 
 void Radio::appStation(int step, Game& game) {   // DoStationUp / DoStationDown
+    const int previous = selected_;
+    const bool pending = appTuning_;
+    appTuning_ = true;
     cycle(step, game);
+    if (selected_ == previous) appTuning_ = pending;
     volumeShownAt_ = -10.0;
+}
+
+void Radio::advanceCarousel(float frames, Game& game) {
+    auto at = std::find(appOrder_.begin(), appOrder_.end(), selected_);
+    if (at == appOrder_.end() || appWidth_ <= 0.f) return;
+    float diff = appOffset_[at - appOrder_.begin()] - appScroll_;
+    if (diff > appWidth_ * 0.5f) diff -= appWidth_;
+    if (diff < -appWidth_ * 0.5f) diff += appWidth_;
+    const float k = 1.f - std::pow(0.75f, std::max(0.f,frames));
+    appScroll_ = std::fmod(appScroll_ + diff * k + appWidth_, appWidth_);
+    if (std::fabs(diff) < 0.5f) appScroll_ = appOffset_[at - appOrder_.begin()];
+    // ProcessStationIcons changes the stream when the integer quarter-step reaches zero (within three pixels).
+    if (appTuning_ && std::fabs(diff) < 4.f) {
+        appTuning_ = false;
+        sync(game);
+    }
+}
+
+void Radio::appClick(float x, float y, Game& game) {
+    if (x < 0 || x > kAppW || y < -46 || y > kAppH) return;
+    if (y >= 312 && x <= 90) { openApp(false, game); return; }
+    if (y >= 270 && y <= 321) {
+        if (x >= 160 && x <= 207) volume(-1);
+        else if (x >= 272 && x <= 319) volume(1);
+        else return;
+        volumeShownAt_ = OS_TimeAccurate();
+    } else if (y >= 55 && y <= 233) {
+        if (x < 177) appStation(-1, game);
+        else if (x > 304) appStation(1, game);
+    }
+}
+
+void Radio::appPointer(float x, float y, bool down, bool pressed, Game& game) {
+    if (pressed && !down) {   // a complete click between display frames
+        pointerDown_ = pointerSwiped_ = false;
+        appClick(x, y, game);
+        return;
+    }
+    if (down && !pointerDown_) {
+        pointerX_ = x; pointerY_ = y; pointerSwiped_ = false;
+    } else if (down && !pointerSwiped_ && pointerX_ >= 0 && pointerX_ <= kAppW &&
+               pointerY_ >= 55 && pointerY_ <= 233 && std::fabs(x - pointerX_) >= 5) {
+        // cRadioApp::OnDrag: one station per gesture, after five logical pixels.
+        appStation(x > pointerX_ ? -1 : 1, game);
+        pointerSwiped_ = true;
+    } else if (!down && pointerDown_ && !pointerSwiped_ && pointerX_ >= 0 && pointerX_ <= kAppW &&
+               std::fabs(x - pointerX_) < 5 && std::fabs(y - pointerY_) < 5) {
+        appClick(x, y, game);
+    }
+    pointerDown_ = down;
 }
 
 bool Radio::appKey(int k, Game& game) {
@@ -299,13 +388,18 @@ bool Radio::appKey(int k, Game& game) {
 void Radio::renderApp(int W, int H, Game& game) {
     if (!app_) return;
     if (!inCar(game)) { openApp(false, game); return; }
+    countListening();   // the broadcast keeps playing while the simulation is paused
     const double now = OS_TimeAccurate();
     const float frames = (float)std::min(4.0, (now - appLast_) * 30.0);   // the app runs per 30 Hz frame
     appLast_ = now;
-    // the screen: the world dimmed (the original stops drawing it), the app scaled to fit and centred
-    Hud_Rect(0, 0, (float)W, (float)H, 0x000000E6u);
     const float scale = std::min(W / kAppW, H / (kAppH + 60.f));
     const float ox = (W - kAppW * scale) * 0.5f, oy = (H - kAppH * scale) * 0.5f + 10.f * scale;
+    int mouseX, mouseY; Host_GetMouse(&mouseX, &mouseY);
+    appPointer((mouseX - ox) / scale, (mouseY - oy) / scale, Host_MouseDown(0),
+               Plugins_HostApi().mouse_clicked(0) != 0, game);
+    if (!app_) return;
+    // cRadioApp disables world rendering; no city image shows through its screen.
+    Hud_Rect(0, 0, (float)W, (float)H, 0x000000FFu);
     glPushMatrix();
     glTranslatef(ox, oy, 0);
     glScalef(scale, scale, 1);
@@ -338,15 +432,7 @@ void Radio::renderApp(int W, int H, Game& game) {
     }
 
     // ProcessStationIcons: ease the carousel towards the station, then draw it
-    auto at = std::find(appOrder_.begin(), appOrder_.end(), selected_);
-    if (at != appOrder_.end() && appWidth_ > 0.f) {
-        float diff = appOffset_[at - appOrder_.begin()] - appScroll_;
-        if (diff > appWidth_ * 0.5f) diff -= appWidth_;
-        if (diff < -appWidth_ * 0.5f) diff += appWidth_;
-        const float k = 1.f - std::pow(0.75f, frames);   // a quarter of the way each frame
-        appScroll_ = std::fmod(appScroll_ + diff * k + appWidth_, appWidth_);
-        if (std::fabs(diff) < 0.5f) appScroll_ = appOffset_[at - appOrder_.begin()];
-    }
+    advanceCarousel(frames,game);
     for (size_t i = 0; i < appOrder_.size(); ++i) {
         const Station& st = stations_[appOrder_[i]];
         auto def = std::find_if(sprites_.sprites().begin(), sprites_.sprites().end(), [&](const SpriteDef& d) { return d.id == st.icon; });
@@ -358,25 +444,20 @@ void Radio::renderApp(int W, int H, Game& game) {
         if (alpha > 0.f && x > -def->w && x < kAppW) sprite(st.icon, x, 85.f - def->h * 0.5f + 40.f, 1.f, alpha);
     }
 
-    // ProcessStars: the five most listened stations get one to five stars
-    std::vector<int> byTime = appOrder_;
-    std::stable_sort(byTime.begin(), byTime.end(), [&](int a, int b) { return stations_[a].listened < stations_[b].listened; });
-    const auto rankAt = std::find(byTime.begin(), byTime.end(), selected_);
-    const int rank = rankAt == byTime.end() ? -1 : (int)(rankAt - byTime.begin()) - std::max(0, (int)byTime.size() - 5);
-    if (stations_[selected_].listened > 0 && rank >= 0) {
+    // ProcessStars hides the outline only for the off station.
+    if (stations_[selected_].stream >= 0) {
         sprite(17, 181, 246, 9626 / 4096.f);   // SetSpriteScale is 20.12 fixed point
         static const float starX[5] = {273, 247, 221, 195, 169};
-        for (int i = 0; i < 5; ++i) if (rank >= i) sprite(7, starX[i], 250, 2.f);
+        const int stars = favoriteStars(selected_);
+        for (int i = 0; i < stars; ++i) sprite(7, starX[i], 250, 2.f);
     }
 
-    // ProcessVolumeIcon: shown after a change, fading out
-    const float shown = (float)(now - volumeShownAt_);
-    const float volAlpha = shown < 2.f ? 1.f : std::max(0.f, 1.f - (shown - 2.f) * 1.5f);
-    if (volAlpha > 0.f) {
-        sprite(20, 208, 270, 1.f, volAlpha);
-        if (volume_ > 0) sprite(tables_.volumeSprites[volume_ - 1], 208, 270, 1.f, volAlpha);
-    }
-    Hud_Text(16, kAppH - 18, 0.8f, 0x9A9DAAFFu, "A / D: station    W / S: volume    Tab: back to the game");
+    // ProcessVolumeIcon: brighten by 0.1/frame, hold for the 100-frame timer, then return to 0.4.
+    const float volAlpha = volumeAlpha(now);
+    sprite(20, 208, 270, 1.f, volAlpha);
+    if (volume_ > 0) sprite(tables_.volumeSprites[volume_ - 1], 208, 270, 1.f, volAlpha);
+    sprite(13, 176, 288); sprite(15, 272, 288);
+    Hud_Text(16, kAppH - 18, 0.8f, 0xF4F5F8FFu, "Back");
     glPopMatrix();
 }
 

@@ -191,7 +191,7 @@ bool Traffic::createPos(Game& g, int network, int& a, int& b, int32_t pos[3], in
             if (t1 != 0) { t = t1; if (t2 != 0x1000) t = Rand32Critical(2) ? t2 : t1; }
             int32_t c[3] = {A[0] + (int32_t)(dx * t / 4096), A[1] + (int32_t)(dy * t / 4096), A[2] + mulq(B[2] - A[2], t)};
             // cPositionConstraints::IsPositionValid: not on screen (radius VEHICLE_AVERAGE_LENGTH), 69 out
-            if (g.canSee(c, 5.f)) { rejSeen++; continue; }
+            if (g.view.canSee(c, 0x5000)) { rejSeen++; continue; }
             // cWorld::IsPositionSafe: nothing within 5 units
             bool clear = true;
             for (const Vehicle& v : g.cars) {
@@ -247,6 +247,7 @@ void Traffic::generate(Game& g, int pedType, const ZoneInfo& z) {   // cPopulati
     int32_t p[2], dir[2];
     d.spline.getPosAndDir(g.roads, p, dir);
     v.placeOnRail(p[0], p[1], g.roads.node(a).z < -4 ? -0x7800 : 0, dir, d.speed);
+    if (!g.peds.createDriver(g,v,pedType,z)) { g.removeCar(idx); return; }
     drivers_[v.uid] = d;
 }
 
@@ -403,7 +404,8 @@ void Traffic::update(Game& g) {
     for (auto it = drivers_.begin(); it != drivers_.end();) {
         bool keep = false;
         for (int i = 0; i < (int)g.cars.size(); ++i)
-            if (g.cars[i].uid == it->first) keep = !g.cars[i].physicsActive() && i != g.playerCar && i != g.task.car;
+            if (g.cars[i].uid == it->first) keep = !g.cars[i].dead() && g.cars[i].seatUser[0] > 0 &&
+                !g.cars[i].physicsActive() && i != g.playerCar && i != g.task.car;
         it = keep ? std::next(it) : drivers_.erase(it);
     }
     proximity(g);
@@ -411,23 +413,12 @@ void Traffic::update(Game& g) {
         auto it = drivers_.find(v.uid);
         if (it != drivers_.end()) wander(g, v, it->second);
     }
+}
 
-    // cPopulationManager::Update (vehicles)
-    firedThisFrame = false;
-    int32_t f[3];
-    g.focus(f);
-    uint32_t t = g.world.timeCycle().time();
-    bool night = t - 0x14000u < 0xFFFF3000u;
-    const ZoneInfo& z = zoneOrDefault(f[0], f[1], night);
-    maxCars = std::min(56, (int)(std::min(14, z.carDensity * 100 * 16 / 7500) * densityScale));
-    if (!maxCars || !g.roads.ok()) return;
-    const int32_t* vel = g.playerCar >= 0 ? g.cars[g.playerCar].vel : g.player.vel;
-    int64_t speed = isqrt64((int64_t)vel[0] * vel[0] + (int64_t)vel[1] * vel[1] + (int64_t)vel[2] * vel[2]);
-    int64_t q = (int64_t)(0x7200000000000ULL / (uint64_t)(speed + 0x5FFA)) >> 20;
-    int32_t k = (int32_t)(30 * q / maxCars);
-    int period = k <= 0x1000 ? 1 : k <= 0x3000 ? 2 : k <= 0x6000 ? 4 : k <= 0xC000 ? 8 : k <= 0x18000 ? 16 : k <= 0x30000 ? 32 : 64;
-    if (g.frame % (uint32_t)period) return;   // cFrameSchedule
-    firedThisFrame = true;
+// cPopulationManager::Update when the vehicle schedule fired: roll a ped type from the zone's profile, then
+// generate a vehicle for it if there is room (GenerateRandomVehicle)
+void Traffic::generateRandom(Game& g, const ZoneInfo& z, bool room) {
+    if (!g.roads.ok()) return;
     int total = 0;
     for (int v : z.fields) total += v;
     if (!total) return;
@@ -436,7 +427,7 @@ void Traffic::update(Game& g) {
         if (r < z.fields[i]) { type = i; break; }
         r -= z.fields[i];
     }
-    if (tdbg()) printf("traffic: roll type %d (count %d max %d period %d)\n", type, count(), maxCars, period);
-    if (type < 0 || count() >= maxCars) return;
+    if (tdbg()) printf("traffic: roll type %d (count %d max %d room %d)\n", type, count(), maxCars, room);
+    if (type < 0 || !room) return;
     generate(g, type, z);
 }

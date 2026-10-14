@@ -15,16 +15,20 @@ use crate::{PortError, Progress};
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use zip::ZipArchive;
 
 pub const GAME_EXE: &str = "GTACTW.exe";
 /// Goes into the exe instead of the data folder.
 const ICON: &str = "gtactw.ico";
 
+#[derive(Default)]
 pub struct ExportOptions {
     /// Put the mod menu and the example mods into mods/.
     pub with_modkit: bool,
+    /// None retains the historical all-premade-mods selection; Some([]) installs only the menu.
+    pub mods: Option<Vec<String>>,
+    pub lcs_apk: Option<PathBuf>,
 }
 
 /// Whether a payload (a zip with `GTACTW.exe` and `mods/`) carries the game.
@@ -59,6 +63,16 @@ pub(crate) fn export_with(
     if !payload_has_game(payload) {
         return Err(PortError::NoGame);
     }
+    if let Some(mods) = &options.mods {
+        if mods.iter().any(|m| !["Enhancements", "CheatExample", "Trumpify"].contains(&m.as_str())) {
+            return Err(PortError::Unsafe("Unknown premade mod selection.".into()));
+        }
+    }
+    if options.lcs_apk.is_some()
+        && (!options.with_modkit || options.mods.as_ref().is_some_and(|mods| !mods.iter().any(|m| m == "Enhancements")))
+    {
+        return Err(PortError::WrongGame("Select Enhancements to import LCS characters.".into()));
+    }
     let parent = out.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
     fs::create_dir_all(&parent)?;
     // Staged next to the result, so publishing it is a rename on the same drive.
@@ -78,7 +92,22 @@ pub(crate) fn export_with(
     }
     fs::create_dir(package.join("mods"))?;
     if options.with_modkit {
-        unpack(&mut archive, &package, |name| name.starts_with("mods/"))?;
+        unpack(&mut archive, &package, |name| {
+            name.starts_with("mods/")
+                && (name == "mods/ModMenu.dll"
+                    || options.mods.as_ref().is_none_or(|mods| {
+                        name.split('/').nth(1).is_some_and(|folder| mods.iter().any(|m| m == folder))
+                    }))
+        })?;
+    }
+    if let Some(lcs) = &options.lcs_apk {
+        if !package.join("mods/Enhancements/mod.ini").is_file() {
+            return Err(PortError::WrongGame("This Porter has no bundled Enhancements mod.".into()));
+        }
+        crate::lcs::extract(lcs, &package.join("mods/Enhancements/lcs"), progress, cancel)?;
+    }
+    if cancel.load(Ordering::SeqCst) {
+        return Err(PortError::Cancelled);
     }
     fs::rename(&package, out)?;
     Ok(out.join(GAME_EXE))

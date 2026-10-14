@@ -53,6 +53,8 @@ int main(int argc, char** argv) {
     std::vector<XC> extraCars;
     float hour = -1;
     int forceWeather = -1;
+    const char* giveWeapons = nullptr;
+    int fireFrom = -1, throwFrom = -1, throwTo = -1;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--collision")) { TheGame().showDebug = true; continue; }
         if (!strcmp(argv[i], "--trace")) { trace = true; continue; }
@@ -64,7 +66,7 @@ int main(int argc, char** argv) {
         else if (strcmp(option, "--data") && strcmp(option, "--mods") && strcmp(option, "--shot") &&
                  strcmp(option, "--frames") && strcmp(option, "--keys") && strcmp(option, "--export-textures") && strcmp(option, "--ui") && strcmp(option, "--state") &&
                  strcmp(option, "--enter") && strcmp(option, "--handbrake") && strcmp(option, "--hour") &&
-                 strcmp(option, "--weather")) {
+                 strcmp(option, "--weather") && strcmp(option, "--weapon") && strcmp(option, "--fire") && strcmp(option, "--throw")) {
             fprintf(stderr, "Unknown option: %s\n", option);
             return 4;
         }
@@ -103,6 +105,15 @@ int main(int argc, char** argv) {
             extraCars.push_back({(float)atof(argv[i + 2]), (float)atof(argv[i + 3]), (float)atof(argv[i + 4]), atoi(argv[i + 1])});
         if (!strcmp(argv[i], "--hour")) hour = (float)atof(argv[i + 1]);   // testing: start at this time of day
         if (!strcmp(argv[i], "--weather")) forceWeather = atoi(argv[i + 1]);   // testing: ForceWeather(0..7)
+        if (!strcmp(argv[i], "--weapon")) giveWeapons = argv[i + 1];   // testing: give these weapon types (comma-separated)
+        if (!strcmp(argv[i], "--throw")) {   // testing: hold the throw button over frames A:B
+            if (sscanf(argv[i + 1], "%d:%d", &throwFrom, &throwTo) != 2) throwTo = throwFrom + 1;
+            TheGame().scriptedInput = true;
+        }
+        if (!strcmp(argv[i], "--fire")) {   // testing: hold the fire button from this frame on
+            fireFrom = atoi(argv[i + 1]);
+            TheGame().scriptedInput = true;
+        }
         if (!strcmp(argv[i], "--pos") && i + 2 < argc) {        // start position (testing)
             TheGame().player.pos[0] = (int32_t)(atof(argv[i + 1]) * 4096.0);
             TheGame().player.pos[1] = (int32_t)(atof(argv[i + 2]) * 4096.0);
@@ -143,13 +154,32 @@ int main(int argc, char** argv) {
         game.world.timeCycle().evaluate();
     }
     if (forceWeather >= 0) game.weather.force(game, forceWeather & 7);
+    for (const char* p = giveWeapons; p && *p;) {
+        const int type = atoi(p);
+        game.playerWeapons.give(type, Weapons_DefaultAmmo(type), true);
+        game.playerWeapons.setUse(type, false);   // testing: hold it (GiveWeapon does not select every weapon)
+        while (*p && *p != ',') ++p;
+        if (*p) ++p;
+    }
     for (const XC& c : extraCars) {
         int32_t at[3] = {(int32_t)(c.x * 4096), (int32_t)(c.y * 4096), 0};
         game.spawnCar(c.id, at, (int16_t)(c.h * 65536 / 360));
     }
     if (shot) {   // automated test: run N game frames, optionally press keys, save a screenshot
         for (int f = 0; f < frames; ++f) {
+            if (fireFrom >= 0) game.scriptedFire = f >= fireFrom;
+            if (throwFrom >= 0) game.scriptedThrow = f >= throwFrom && f < throwTo;
             game.tick();
+            if (trace)
+                for (const Projectiles::Projectile& p : game.projectiles.list())
+                    printf("f%3d projectile %d at %.2f %.2f %.2f life %d%c", f, p.kind, p.pos[0] / 4096.0,
+                           p.pos[1] / 4096.0, p.pos[2] / 4096.0, p.lifetime, 10);
+            if (trace && game.playerWeapons.current()) {
+                const Weapon& w = *game.playerWeapons.current();
+                printf("f%3d weapon %d state %d timer %d ammo %d clip %d target %d:%u%s fire %d,%d%c", f, w.type, w.state, w.timer, w.ammo, w.clip,
+                       game.targeting.target.kind, game.targeting.target.uid, game.targeting.locked ? " locked" : "",
+                       game.player.fireDir[0], game.player.fireDir[1], 10);
+            }
             if (ui) {   // UI tests: this frame's scripted input, then a rendered frame for the immediate-mode UI
                 for (const char* p = ui; *p;) {
                     int at = -1, x = 0, y = 0, n = 0;

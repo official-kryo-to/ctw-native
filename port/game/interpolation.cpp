@@ -41,6 +41,10 @@ void blendBasis(const float f0[3], const float u0[3], const float f1[3], const f
 
 void Game::snapshotPoses() {
     Interp& s = interp_;
+    s.shakeCamera = playerCar;
+    s.shakeValid = !player.dead;
+    if (playerCar >= 0) carCam.shakeOffset(s.shake);
+    else camera.shakeOffset(s.shake);
     s.cars.clear();
     for (const Vehicle& c : cars) {
         Pose& p = s.cars[c.uid];
@@ -55,6 +59,19 @@ void Game::snapshotPoses() {
     s.cameraValid = !freeCam.on;
     if (s.cameraValid) viewCamera(s.camera);
     s.valid = true;
+}
+
+void Game::cameraShake(float out[3]) const {
+    if (!out) return;
+    int32_t offset[3]{};
+    if (!player.dead) {
+        if (playerCar >= 0) carCam.shakeOffset(offset);
+        else camera.shakeOffset(offset);
+    }
+    const bool blend = !player.dead && interpolate && interp_.valid && interp_.shakeValid &&
+                       interp_.shakeCamera == playerCar && renderAlpha < 1.f;
+    for (int k = 0; k < 3; ++k)
+        out[k] = (blend ? lerp(interp_.shake[k],offset[k],renderAlpha) : offset[k])/4096.f;
 }
 
 // The entity an interpolated pose belongs to, found again by id: callbacks during rendering may add or remove

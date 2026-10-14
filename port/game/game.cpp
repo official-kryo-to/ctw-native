@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 #include "game.h"
+#include "weaponhud.h"
 #include "hud.h"
 #include "particles.h"
 #include "sound.h"
@@ -22,6 +23,7 @@ Game& TheGame() { return g_game; }
 
 bool Game::init(const std::string& data, const std::string& mods) {
     RandInit(0); // Android cGame::Init seeds all four gameplay random streams with zero.
+    explosionRadiusCheck_ = false; // Explosion::Reset clears the script-controlled duplicate check.
     dataDir = data;
     modsDir = mods;
     if (!LoadGameplayTables(dataDir)) {
@@ -52,12 +54,23 @@ bool Game::init(const std::string& data, const std::string& mods) {
     if (!radio.init(dataDir)) fprintf(stderr, "radio_tables.bin / SS_Radio missing or invalid: run scripts/setup_game.py\n");
     if (!traffic.init(dataDir)) fprintf(stderr, "population_tables.bin / infozones.bin / popinfo.bin invalid: no traffic (run scripts/setup_game.py)\n");
     if (!peds.init(dataDir)) fprintf(stderr, "pedinfo.bin missing or invalid: no pedestrians\n");
+    if (!Weapons_Init(dataDir))
+        fprintf(stderr, "weapon_tables.bin missing or invalid: no weapons or blast health damage (run scripts/setup_game.py)\n");
+    else if (!WeaponHud_Init(dataDir)) fprintf(stderr, "SS_Weapons / SS_Hud / SS_AlwaysLoaded missing: no weapon HUD\n");
     if (!weather.init(dataDir))
         fprintf(stderr, "weather_tables.bin missing or invalid: the weather does not change (run scripts/setup_game.py)\n");
     weather.reset(*this, 0);
     weather.rain = TheParticles().add<RainEmitter>(player.pos);
     LoadVehicleInfos(vehicleInfos);   // parked cars come from the map's car generators (cargens.cpp)
     carGens.reset();
+    // cPlayer::cPlayer: cPopulationManager's schedules (peds 64, vehicles 32), then cLocalAreaKnowledge's (16)
+    scheduler.reset();
+    scheduler.create(pedSchedule, 64);
+    scheduler.create(carSchedule, 32);
+    localArea.reset(scheduler);
+    sectors.reset();
+    updateView();
+    updateSectors();
     Plugins_Init(modsDir);
     return true;
 }
@@ -184,6 +197,7 @@ void Game::updateCityEmitters() {   // cWorldSector::DataLoaded -> cCityEmitters
 }
 
 void Game::updateWorldObjects() {   // once per game frame, after the vehicles moved
+    traces.update();
     updateCityEmitters();
     for (auto& kv : fountains)
         for (auto& f : kv.second) f->tick(frame);
@@ -223,6 +237,126 @@ bool Game::canSee(const int32_t p[3], float r) const {   // the active camera's 
     return true;
 }
 
+bool Game::screenToWorld(float x, float y, int W, int H, float out[3]) const {
+    if (W <= 0 || H <= 0) return false;
+    WorldCamera cam;
+    viewCamera(cam);
+    const float ty = tanf(cam.fovY * 3.14159265f / 360.f), tx = ty * W / (float)H;
+    const float nx = (2.f * x / W - 1.f) * tx, ny = (1.f - 2.f * y / H) * ty;
+    float d[3];
+    for (int k = 0; k < 3; ++k) d[k] = cam.fwd[k] + cam.right[k] * nx + cam.up[k] * ny;
+    const int32_t a[3] = {(int32_t)(cam.eye[0] * 4096), (int32_t)(cam.eye[1] * 4096), (int32_t)(cam.eye[2] * 4096)};
+    const int32_t b[3] = {(int32_t)((cam.eye[0] + d[0] * 400.f) * 4096), (int32_t)((cam.eye[1] + d[1] * 400.f) * 4096),
+                          (int32_t)((cam.eye[2] + d[2] * 400.f) * 4096)};
+    Collision::LineHit hit;
+    if (const_cast<Collision&>(collision).staticLine(a, b, 0x40001F00, &hit)) {
+        for (int k = 0; k < 3; ++k) out[k] = hit.point[k] / 4096.f;
+        return true;
+    }
+    if (std::fabs(d[2]) < 1e-4f) return false;   // else where it meets the player's height
+    const float t = (player.pos[2] / 4096.f - cam.eye[2]) / d[2];
+    if (t <= 0) return false;
+    for (int k = 0; k < 3; ++k) out[k] = cam.eye[k] + d[k] * t;
+    return true;
+}
+
+void Game::updateView() {   // the game camera (not a mod's free camera), as cBaseCam::RecalculateMatrix sets it up
+    int32_t eye[3];
+    uint16_t yaw, pitch;
+    if (player.dead) {
+        std::copy(deathEye_, deathEye_ + 3, eye);
+        yaw = deathYaw_;
+        pitch = deathPitch_;
+    } else if (playerCar >= 0) {
+        carCam.position(eye);
+        yaw = carCam.yaw();
+        pitch = carCam.pitch();
+    } else {
+        camera.position(eye);
+        yaw = camera.yaw;
+        pitch = camera.pitch();
+    }
+    view.set(eye, yaw, pitch, (int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());
+}
+
+void Game::updateSectors() {
+    int32_t f[3];
+    focus(f);
+    sectors.hold(f[0], f[1]);                     // the player (and the car he drives) hold their sector
+    sectors.updateCriticalArea(player.pos, view);  // cPlayer::UpdateCriticalArea (after cCamera::Update)
+}
+
+int Game::pedPopulation() const {   // cWorldSector::GetPopulation(1): every ped in the sectors, the player included
+    int n = WorldSectors::inBox(player.pos, 327680, player.pos[0], player.pos[1]) ? 1 : 0;
+    for (const Pedestrians::Ped& p : peds.peds)
+        n += sectors.loadedAt(p.body.pos[0], p.body.pos[1]) &&
+             WorldSectors::inBox(player.pos, 327680, p.body.pos[0], p.body.pos[1]);
+    return n;
+}
+
+int Game::carPopulation() const {   // cWorldSector::GetPopulation(0): every vehicle in the sectors
+    int n = 0;
+    for (const Vehicle& c : cars)
+        n += sectors.loadedAt(c.pos[0], c.pos[1]) && WorldSectors::inBox(player.pos, 327680, c.pos[0], c.pos[1]);
+    return n;
+}
+
+// cPopulationManager::Update(false, false) from cPlayer::Process. The ped cap is 20 (the wanted multiplier below
+// three stars) x the zone's ped density x 100 / 7500, at most 16; the vehicle cap 16 x car density x 100 / 7500
+// (as 1145325 / 2^33), at most 14. The counts are everything in the loaded sectors of the 80-unit box around the
+// player (cPlayer::GetPopulation). Each schedule's period follows the player's speed and its cap; a frame where the
+// vehicle schedule fires may generate a vehicle, otherwise one where the ped schedule fires a ped.
+// Not ported: the pool limits (word_105E8C8 / word_105E8E8: the free ped and vehicle slots also cap the counts),
+// the wanted level (WantedModifier; when full, a cop roll frees a vehicle: cGlobalPopulationManager::ForceFreeVehicle)
+// and the minimal-AI caps (4 and 4).
+void Game::updatePopulation() {
+    const uint32_t t = world.timeCycle().time();
+    const Traffic::ZoneInfo& z = traffic.zoneOrDefault(player.pos[0], player.pos[1], t - 0x14000u < 0xFFFF3000u);
+    const int pedCount = pedPopulation();
+    int pedCap = std::min(16, (int)(20u * (uint32_t)z.pedDensity * 100u / 7500u));
+    pedCap = std::min(64, (int)(pedCap * peds.densityScale));   // PC mod API (1 = the original)
+    int carCap = std::min(14, (int)((uint32_t)((1145325ULL * (16u * (uint32_t)z.carDensity * 100u)) >> 32) >> 1));
+    carCap = std::min(56, (int)(carCap * traffic.densityScale));
+    peds.maxPeds = pedCap;
+    traffic.maxCars = carCap;
+    const int carCount = carPopulation();
+    // the player ped's speed (driving: his car's)
+    const int32_t* vel = playerCar >= 0 ? cars[playerCar].vel : player.vel;
+    const uint32_t speed = (uint32_t)std::sqrt((double)(uint64_t)((int64_t)vel[0] * vel[0] + (int64_t)vel[1] * vel[1] +
+                                                                  (int64_t)vel[2] * vel[2]));
+    auto periodFor = [](int32_t k) {
+        return k <= 4096 ? 1 : k <= 12288 ? 2 : k <= 24576 ? 4 : k <= 49152 ? 8 : k <= 98304 ? 16 : k <= 196608 ? 32 : 64;
+    };
+    if (pedCap) {
+        const int32_t k = (int32_t)(30u * ((uint64_t)(0x9100000000000LL / (int)(speed + 16200)) >> 20)) / pedCap;
+        const int period = periodFor(k);
+        if (period != pedSchedule.period) scheduler.setTiming(pedSchedule, period);
+    }
+    if (carCap) {
+        const int32_t k = (int32_t)(30u * ((uint64_t)(0x7200000000000LL / (int)(speed + 24570)) >> 20)) / carCap;
+        const int period = periodFor(k);
+        if (period != carSchedule.period) scheduler.setTiming(carSchedule, period);
+    }
+    if (!FrameScheduler::fired(carSchedule, frame)) {
+        if (FrameScheduler::fired(pedSchedule, frame) && pedCount < pedCap) peds.generate(*this, z);
+        return;
+    }
+    traffic.generateRandom(*this, z, carCount < carCap);
+}
+
+void Game::collectSectors() {   // cWorld::GarbageCollection (cGame::Render): cWorldSector::Reset deletes the entities
+    sectors.collect();
+    peds.collect(*this);
+    for (int i = (int)cars.size() - 1; i >= 0; --i) {
+        // entities that hold their sector (cEntity +0x38): the player's car, one being entered, mods' and missions'
+        if (i == playerCar || i == task.car || cars[i].keep) continue;
+        if (!sectors.loadedAt(cars[i].pos[0], cars[i].pos[1])) {
+            peds.discardOccupants(cars[i]);
+            removeCar(i);
+        }
+    }
+}
+
 void Game::removeFarCars() {   // cVehicle::ShouldBeDestroyed: more than ~74 units from the player (and off screen)
     int32_t f[3];
     focus(f);
@@ -231,14 +365,15 @@ void Game::removeFarCars() {   // cVehicle::ShouldBeDestroyed: more than ~74 uni
         if (i == playerCar || i == task.car || c.keep) continue;
         int64_t dx = f[0] - c.pos[0], dy = f[1] - c.pos[1];
         if (dx * dx + dy * dy <= 0x1563FFFFFFLL) continue;
-        if (canSee(c.pos, 5.f)) continue;   // (only when off screen)
+        if (view.canSee(c.pos, 0x5000)) continue;   // (only when off screen)
+        peds.discardOccupants(cars[i]);
         removeCar(i);
     }
 }
 
 // cPlayerOnFoot::HandlePlayerEnterExitVehicle / cPlayerInVehicle: the enter/exit button starts the get-in or get-out task
 void Game::enterOrExit() {
-    if (player.dead) return;
+    if (player.dead || player.reacting()) return;
     if (task.op != CarTask::None) return;
     if (playerCar >= 0) startExit();
     else startEnter();
@@ -340,6 +475,7 @@ bool Game::tickTask(bool stickHeld, int16_t stickHeading) {
     case CarTask::OpenDoor: {
         place();
         if (!player.stepOneShot(&pedSprites)) return true;
+        if (!peds.exitOccupant(*this,c,task.seat)) return true;
         // op 8: AddSlideIntoSeatAnim - facing forward, slide from the door to the seat while sinking 0.8
         task.heading = 0;
         int32_t seat[3];
@@ -431,6 +567,7 @@ void Game::killInVehicle(Vehicle& car) {
     for (int& occupant : car.seatUser) if (occupant == -2) occupant = -1;
     player.hidden = player.attached = false;
     player.dead = true;
+    player.health = 0;
     player.vel[0] = player.vel[1] = player.vel[2] = 0;
     player.placeOnGround(&collision);
     player.playOneShot(0x18, 0x19, false);   // cAnimation: the on-ground death response
@@ -444,20 +581,75 @@ void Game::processVehicleDeaths() {
     for (Vehicle& car : cars) {
         if (!car.justDied) continue;
         car.justDied = false;
+        car.explosionDebris(carModel(car.infoId));
+        peds.releaseOccupants(*this,car,true);
         Plugins_EmitEvent(CTW_EVENT_VEHICLE_DESTROYED, car.uid, car.infoId);
-        TheParticles().add<ExplosionFlash>(car.pos);
-        Explosion explosion{{car.pos[0],car.pos[1],car.pos[2]}, 5 + (int)Rand32Critical(10) / 2};
-        explosions_.push_back(explosion);
+        Explosion explosion{{car.pos[0],car.pos[1],car.pos[2]},3}; // ordinary type-4 generic explosion
+        if (queueExplosion(explosion)) shakeNearExplosion(car.pos);
         if (playerCar >= 0 && &car == &cars[playerCar]) killInVehicle(car);
     }
-    for (auto it = explosions_.begin(); it != explosions_.end();) {
-        if (--it->delay > 0) { ++it; continue; }
-        TheSound().explosion(*this, it->pos);
-        peds.explosion(*this, it->pos);
-        TheParticles().add<ExplosionCloud>(it->pos);
-        TheParticles().add<ExplosionDebris>(it->pos);
-        it = explosions_.erase(it);
+    // Blast callbacks can smash explosive props and append to this queue. Copy the firing entry and defer
+    // newborn explosions until the next tick; never retain a vector reference across a callback.
+    const size_t count = explosions_.size();
+    for (size_t i = 0; i < count; ++i) {
+        if (explosions_[i].fired) { // generic explosion remains in its final state for eleven Process calls
+            ++explosions_[i].delay;
+            if (explosions_[i].type == 2 && explosions_[i].delay == 1) {   // cExplosionMolotov state 2: the blast
+                const Explosion explosion = explosions_[i];
+                affectExplosion(explosion);
+                TheParticles().add<ExplosionCloud>(explosion.pos,2,2,explosion.scale,0,0,5u);
+            }
+            continue;
+        }
+        if (--explosions_[i].delay > 0) continue;
+        const Explosion explosion = explosions_[i];
+        explosions_[i].fired = true; explosions_[i].delay = 0;
+        if (explosion.type == 2) TheSound().scriptSfx(explosion.pos, 611, 127, 400);   // cExplosionMolotov
+        else TheSound().explosion(*this, explosion.pos);
+        TheParticles().add<ExplosionFlash>(explosion.pos,explosion.type,explosion.scale);
+        // cExplosionMolotov's blast is the next Process (above); its fires (cFire) and the flash bang's
+        // DazeEntities are not ported
+        if (explosion.type == 2 || explosion.type == 5) continue;
+        affectExplosion(explosion);
+        if (explosion.type == 4) {
+            TheParticles().add<ExplosionDebris>(explosion.pos);
+        }
+        TheParticles().add<ExplosionCloud>(explosion.pos,explosion.type,1,explosion.scale,0,0,explosionParticleCount(explosion.pos));
     }
+    explosions_.erase(std::remove_if(explosions_.begin(), explosions_.end(),
+        [](const Explosion& e) { return e.fired && e.delay >= 11; }), explosions_.end());
+}
+
+void Game::addWeaponExplosion(const int32_t at[3], int type, int16_t scale) {
+    // Explosion::AddExplosion: types 0, 1, 3 and 4 are cExplosionGeneric (types 1, 3 and 4 shake the cameras),
+    // 2 cExplosionMolotov, 5 cExplosionFlashBang (shakes). The generic and molotov blasts act on their third
+    // Process, the flash bang on its first.
+    const int delay = type == 5 ? 1 : 3;
+    if (!queueExplosion({{at[0],at[1],at[2]},delay,type,false,scale})) return;
+    if (type == 1 || type == 3 || type == 5 || (type == 0 && scale >= 0xCCD)) shakeNearExplosion(at);
+}
+
+void Game::addPropExplosion(const int32_t at[3], int16_t scale) {
+    // cExplosionGeneric: two ticks in state zero, then the blast on the third Process.
+    if (queueExplosion({{at[0],at[1],at[2]},3,0,false,scale}) && scale >= 0xCCD) shakeNearExplosion(at);
+}
+
+unsigned Game::explosionParticleCount(const int32_t at[3]) const {
+    int32_t eye[3];
+    if (player.dead) std::copy(deathEye_,deathEye_+3,eye);
+    else if (playerCar >= 0) carCam.position(eye);
+    else camera.position(eye);
+    int64_t d2 = 0;
+    for (int k = 0; k < 3; ++k) { const int64_t d = (int64_t)eye[k]-at[k]; d2 += d*d; }
+    const int32_t distance = (int32_t)std::sqrt((double)d2);
+    return (unsigned)std::clamp(((distance-10*4096)/5) >> 12,1,8);
+}
+
+void Game::shakeNearExplosion(const int32_t at[3]) {
+    int32_t playerPos[3]; focus(playerPos);
+    if (!CameraShake::nearExplosion(playerPos,at)) return;
+    if (playerCar >= 0) carCam.shake(0x2000,0xB33);
+    else camera.shake(0x2000,0xB33);
 }
 
 void Game::processTimeCycle() {   // cTimeCycle::Process: the clock, the weather each hour, rain and lightning
@@ -476,8 +668,12 @@ uint16_t Game::cameraYaw() const {   // the active camera's yaw (cBaseCam +0xE8)
 }
 
 void Game::finishShortFrame() {
+    updateView();
+    updateSectors();
+    updatePopulation();
     updateWorldObjects();
-    TheParticles().update(frame, world.timeCycle().time());
+    TheParticles().update(frame, world.timeCycle().time(),playerCar >= 0 ? cars[playerCar].pos : player.pos);
+    collectSectors();
     TheSound().update(*this);
     Plugins_Tick();
 }
@@ -508,6 +704,8 @@ void Game::updateDeath() {
         if (closest) player.setHeading((int16_t)(closest->heading * 65536 / 360));
         player.placeOnGround(&collision);
         player.dead = false;
+        player.health = 127;
+        player.resetReaction();
         camera.reset(player.pos, player.heading());
         world.loadAllNow(player.pos[0] / 4096.f, player.pos[1] / 4096.f);
         world.timeCycle().advanceFrames(6 * 60 * 30);
@@ -519,6 +717,7 @@ void Game::tick() {
     radio.update(*this);
     ++frame;
     if (!player.dead && deathFrames_ >= 72 && deathFrames_ < 84) ++deathFrames_;
+    localArea.update(*this);   // cPlayer::Think
     player.speedScale = speedScale;
     Plugins_BeginFrameInput();
     // input -> the player's yoke (cPlayerOnFoot::HandleStrafe: wanted heading = camera yaw + stick angle)
@@ -569,17 +768,20 @@ void Game::tick() {
             dc.handbrake = !back;
         } else if (task.op == CarTask::ClimbOut) dc = Vehicle::Controls{};
         tickTask(false, 0);
+        Weapons_PlayerFrame(*this, false, 0);   // the weapon timers keep running in a vehicle
+        weaponCycle = 0;
         if (playerCar < 0) { // camera updates once after the exit task, as cPlayer::UpdateCamera does
             camera.update(player.pos, player.heading(), player.vel, &collision);
             finishShortFrame();
             return;
         }
         traffic.update(*this);
-        peds.update(*this);
         for (int i = 0; i < (int)cars.size(); ++i) cars[i].act(i == playerCar ? dc : Vehicle::Controls{}, i == playerCar, &collision);
+        peds.update(*this);
         Vehicle::collideCars(cars, playerCar, frame);
         propDynamics.checkImpacts(*this);
-        for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); c.processDamage(frame); }
+        for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); c.processDebris(carModel(c.infoId)); c.processDamage(frame); }
+        projectiles.process(*this);
         processVehicleDeaths();
         if (playerCar < 0) {
             finishShortFrame();
@@ -593,7 +795,7 @@ void Game::tick() {
             }
         }
         updateWorldObjects();
-        TheParticles().update(frame,world.timeCycle().time());
+        TheParticles().update(frame,world.timeCycle().time(),playerCar >= 0 ? cars[playerCar].pos : player.pos);
         TheSkidmarks().process();
         if (cars[playerCar].isBike() && player.hidden) {   // cPed::AnimatePedInVehicle on a bike
             const Vehicle& c = cars[playerCar];
@@ -605,17 +807,21 @@ void Game::tick() {
         Vehicle& me = cars[playerCar];
         if (player.hidden) { player.pos[0] = me.pos[0]; player.pos[1] = me.pos[1]; player.pos[2] = me.pos[2]; }
         carCam.update(me, &collision);
+        updateView();
+        updateSectors();
+        updatePopulation();
         sprintHeld_ = false;
         world.tick();
         processTimeCycle();
         if (!freeCam.on) world.stream(me.pos[0] / 4096.f, me.pos[1] / 4096.f, 2);
         carGens.update(*this);
         removeFarCars();
+        collectSectors();
         TheSound().update(*this);
         Plugins_Tick();
         return;
     }
-    bool busy = player.dead || tickTask(stickHeld, stickHeading);   // attached to a car (opening the door / getting in)
+    bool busy = player.dead || player.reacting() || tickTask(stickHeld, stickHeading);   // attached to a car / impact response
     Player::Input in;
     in.moving = stickHeld;
     in.heading = stickHeading;
@@ -634,36 +840,49 @@ void Game::tick() {
     if (task.op == CarTask::GotoDoor) in.maxLevel = 2;   // sVirtYoke::ConstrainWalkSpeed
     sprintHeld_ = sprint;
     player.obstacles.clear();
-    const int32_t previousPed[3] = {player.pos[0], player.pos[1], player.pos[2]};
-    std::map<uint32_t, Collision::Box> previousCars;
-    for (const Vehicle& c : cars)
-        previousCars[c.uid] = {c.pos[0], c.pos[1], c.pos[2] + c.hz, c.hx, c.hy, c.hz, (int16_t)-c.heading(), 0};
     for (const Vehicle& c : cars) {   // cPed::ConstrainByCollision: still, upright cars are boxes for the player
         if (c.vel[0] || c.vel[1] || c.vel[2] || c.up[2] < 0xFD8) continue;
         Collision::Box b{};
         int32_t cz = c.pos[2] + c.hz;   // GetWorldCollisionPos: the box centre
-        b.cx = c.pos[0]; b.cy = c.pos[1]; b.cz = cz - c.hz;
+        b.cx = c.pos[0]; b.cy = c.pos[1]; b.cz = cz;
         b.hx = c.hx; b.hy = c.hy; b.hz = c.hz;
         b.angle = (int16_t)-c.heading();
         player.obstacles.push_back(b);
     }
+    {   // fire: Space or the left mouse button (the phone game's fire button, sVirtYoke +0x61);
+        // throw: G or the right mouse button (the secondary weapon button: hold for more power)
+        bool fire = false, throwing = false;
+        if (Plugins_GameInput()) {
+            const Uint8* ks = SDL_GetKeyboardState(nullptr);
+            const Uint32 mouse = SDL_GetMouseState(nullptr, nullptr);
+            fire = ks[SDL_SCANCODE_SPACE] || (mouse & SDL_BUTTON(SDL_BUTTON_LEFT));
+            throwing = ks[SDL_SCANCODE_G] || (mouse & SDL_BUTTON(SDL_BUTTON_RIGHT));
+        }
+        if (scriptedInput) { fire = scriptedFire; throwing = scriptedThrow; }
+        Weapons_PlayerFrame(*this, fire && !busy, weaponCycle, throwing && !busy);
+        weaponCycle = 0;
+    }
     if (!busy) player.update(in, &collision, &pedSprites);
     else if (player.dead) player.stepOneShot(&pedSprites);
+    else if (player.reacting()) player.actReaction(&pedSprites,Pedestrians::vehicleAbove(*this,player));
+    else if (player.dead) player.stepOneShot(&pedSprites);
     traffic.update(*this);
-    peds.update(*this);
     for (Vehicle& c : cars) c.act(Vehicle::Controls{}, false, &collision);
+    const bool wasDead = player.dead;
+    peds.update(*this);
+    if (!wasDead && player.dead) {
+        camera.position(deathEye_);
+        deathYaw_ = (uint16_t)camera.yaw; deathPitch_ = camera.pitch();
+        deathFrames_ = 0; deathCameraSettled_ = false;
+    }
+    if (!player.hidden && !player.attached && (!busy || player.reacting())) player.advance(&collision);
     Vehicle::collideCars(cars, -1, frame);
     propDynamics.checkImpacts(*this);
-    for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); c.processDamage(frame); }
+    for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); c.processDebris(carModel(c.infoId)); c.processDamage(frame); }
+    projectiles.process(*this);
     processVehicleDeaths();
-    if (!busy) for (const Vehicle& c : cars) {
-        auto old = previousCars.find(c.uid);
-        if (old == previousCars.end()) continue;
-        Collision::Box now{c.pos[0], c.pos[1], c.pos[2] + c.hz, c.hx, c.hy, c.hz, (int16_t)-c.heading(), 0};
-        player.collideMovingCar(previousPed, old->second, now);
-    }
     updateWorldObjects();
-    TheParticles().update(frame,world.timeCycle().time());
+    TheParticles().update(frame,world.timeCycle().time(),playerCar >= 0 ? cars[playerCar].pos : player.pos);
     TheSkidmarks().process();
     if (player.dead) updateDeath();
     else if (playerCar >= 0) {
@@ -671,6 +890,9 @@ void Game::tick() {
         std::copy(c.pos, c.pos + 3, player.pos);
         carCam.update(c, &collision); // entry switched the active camera during tickTask
     } else camera.update(player.pos, player.heading(), player.vel, &collision);
+    updateView();
+    updateSectors();
+    updatePopulation();
     world.tick();
     processTimeCycle();
     float p[3];
@@ -678,6 +900,7 @@ void Game::tick() {
     if (!freeCam.on) world.stream(p[0], p[1], 2);   // (the free camera streams around itself in render)
     carGens.update(*this);
     removeFarCars();
+    collectSectors();
     TheSound().horn = false;
     TheSound().update(*this);
     Plugins_Tick();
@@ -707,6 +930,7 @@ void Game::render(int W, int H) {
     PedLight light = PedLight::fromTimeCycle(tc);
     TheSkidmarks().render();
     for (const Vehicle& c : cars) c.render(carModel(c.infoId));   // (lit by the world renderer's lights)
+    projectiles.render(*this);
     {   // cCar::UpdateHeadLights: headlights on outside 07:00 .. 20:00
         bool night = t - 0x7000u >= 0xD000u;
         for (const Vehicle& c : cars) c.renderLights(cam, frame, night, &collision);
@@ -732,13 +956,40 @@ void Game::render(int W, int H) {
             for (auto& f : kv.second) f->render(cam, ambient);
     }
     TheParticles().render(cam);
+    traces.render();
+    Weapons_RenderThrowArc(*this);
+    targeting.render(*this);
     glEnable(GL_DEPTH_TEST);
-    peds.render(&pedSprites, &light);
-    player.render(&pedSprites, &light);   // (hidden while sitting in a car)
+    const float characterAlpha = interpolate && interp_.valid ? renderAlpha : 1.f;
+    peds.render(&pedSprites, &light, characterAlpha);
+    if (!player.hidden) {
+        auto pose=player.renderPose(&pedSprites,0,13,CTW_CHARACTER_PLAYER,characterAlpha);
+        if (player.attached && task.car >= 0 && task.car < (int)cars.size()) {
+            const Vehicle& car = cars[task.car];
+            const float angle = task.heading * 3.14159265f / 32768.f;
+            const float s = std::sin(angle), c = std::cos(angle);
+            for (int i=0;i<3;++i) {
+                pose.attachment_basis[i]=(car.right[i]*c-car.fwd[i]*s)/4096.f;
+                pose.attachment_basis[3+i]=(car.right[i]*s+car.fwd[i]*c)/4096.f;
+                pose.attachment_basis[6+i]=car.up[i]/4096.f;
+                pose.attachment_anchor[i]=pose.position[i];
+            }
+            pose.flags |= CTW_CHARACTER_ATTACHMENT_FRAME;
+            pose.attachment_vehicle = car.uid;
+        }
+        if (!Plugins_RenderCharacter(pose)) player.render(&pedSprites, &light);
+    }
     if (playerCar >= 0 && cars[playerCar].isBike() && player.hidden) {   // riding: drawn where the bike says
         int32_t up[3], legs[3];
         cars[playerCar].riderRenderPos(up, legs);
-        player.renderRiding(&pedSprites, &light, up, legs, cars[playerCar].heading());
+        auto pose=player.renderPose(&pedSprites,0,13,CTW_CHARACTER_PLAYER|CTW_CHARACTER_RIDING,characterAlpha);
+        for(int i=0;i<3;++i)pose.position[i]=legs[i]/4096.f;
+        pose.heading=-cars[playerCar].heading()*360.f/65536.f;
+        cars[playerCar].riderRenderBasis(pose.attachment_basis);
+        for (int i=0;i<3;++i) pose.attachment_anchor[i]=up[i]/4096.f;
+        pose.flags |= CTW_CHARACTER_ATTACHMENT_FRAME;
+        pose.attachment_vehicle = cars[playerCar].uid;
+        if (!Plugins_RenderCharacter(pose)) player.renderRiding(&pedSprites, &light, up, legs, cars[playerCar].heading());
     }
     float p[3];
     player.posf(p);
@@ -748,6 +999,7 @@ void Game::render(int W, int H) {
 
     Hud_Begin(W, H);
     if (showDebug) drawDebug(W, H);
+    WeaponHud_Render(*this, W, H);   // the game's HUD, under the mods' windows
     Plugins_DrawHud(W, H);
     if (deathFrames_ >= 60 && deathFrames_ < 84) {
         int alpha = deathFrames_ < 72 ? (deathFrames_ - 60) * 255 / 12 : (84 - deathFrames_) * 255 / 12;
@@ -783,7 +1035,12 @@ void Game::run() {
 bool Game::key(int k) {
     if (k == SDL_SCANCODE_F3) { showDebug = !showDebug; return true; }
     if (Plugins_Key(k)) return true;
-    return Plugins_GameInput() && radio.key(k, *this);
+    if (!Plugins_GameInput()) return false;
+    if (radio.key(k, *this)) return true;
+    if (WeaponHud_Key(*this, k)) return true;
+    // PC: the phone game cycles weapons by tapping the HUD weapon icon (sVirtYoke +0x67 / +0x68)
+    if (playerCar < 0 && (k == SDL_SCANCODE_Q || k == SDL_SCANCODE_E)) { weaponCycle = k == SDL_SCANCODE_E ? 1 : -1; return true; }
+    return false;
 }
 
 void Game::shutdown() { radio.shutdown(); Plugins_Shutdown(); }

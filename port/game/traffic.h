@@ -36,11 +36,12 @@ public:
     struct ZoneInfo { int fields[20]; int pedMakeup, vehMakeup, pedDensity, carDensity, sex = 0; };   // sex: 1 male, 2 female
     const ZoneInfo* zoneAt(int32_t x, int32_t y, bool night) const;
     std::string zoneName(int32_t x, int32_t y) const;
-    int maxCars = 0;          // for the HUD / tests
+    int maxCars = 0;          // the cap of the last population update (HUD / tests)
     int count() const { return (int)drivers_.size(); }
     float densityScale = 1.f; // PC mod API: scales the target moving-car population; original default is 1
     void forget(uint32_t uid) { drivers_.erase(uid); }
-    bool firedThisFrame = false;   // the vehicle schedule fired: cPopulationManager::Update skips peds this frame
+    // the vehicle part of cPopulationManager::Update (Game::updatePopulation): room = below the cap
+    void generateRandom(Game& g, const ZoneInfo& z, bool room);
     const ZoneInfo& zoneOrDefault(int32_t x, int32_t y, bool night) const;   // cPopulationZones::Info
     // popinfo.bin ped makeups: weighted pedinfo.bin record indices (cPopInfoManager::GetSubType)
     const std::vector<std::pair<uint16_t, uint16_t>>* pedMakeup(int makeup) const {

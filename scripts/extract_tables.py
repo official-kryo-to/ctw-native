@@ -209,10 +209,15 @@ class GameBinary:
         # cTimeCycle::msWeatherChanceTable (8 weathers x 8 percentages) and UpdateLightning's five thunder sounds.
         return b'CTWWTHR1' + self.read(0x48702c, 64) + self.read(0x48706c, 20)
 
+    def weapons(self):
+        # cWeaponInfo::msWeaponInfos (28 records of 60 bytes), cWeaponManager::GetDefaultWeaponAmmo's table and
+        # cBulletTraces::AddTrace's three trace lifetimes.
+        return b'CTWWPN01' + self.read(0x487918, 28 * 60) + self.read(0x487fc2, 28 * 2) + self.read(0x4878ec, 12)
+
 
 def extract_tables(binary):
     game = GameBinary(binary)
     return {'population_tables.bin': game.population(), 'sound_tables.bin': game.sound(),
             'render_tables.bin': game.render(), 'gameplay_tables.bin': game.gameplay(),
             'radio_tables.bin': game.radio(), 'restart_tables.bin': game.restart(),
-            'weather_tables.bin': game.weather()}
+            'weather_tables.bin': game.weather(), 'weapon_tables.bin': game.weapons()}

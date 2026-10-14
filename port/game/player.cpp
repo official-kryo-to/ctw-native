@@ -4,6 +4,7 @@
 #include "player.h"
 #include "gfx/pedsprites.h"
 #include "world/collision.h"
+#include "vehicle.h"
 #include <glad/gl.h>
 #include <algorithm>
 #include <cmath>
@@ -12,29 +13,6 @@
 
 static int fastsin(int a) { return (int)(sinf((float)a * 9.587378e-05f) * 4096.f); }
 static inline int32_t mulq(int64_t a, int64_t b) { return (int32_t)((a * b) >> 12); }
-
-void Player::collideMovingCar(const int32_t previous[3], const Collision::Box& before, const Collision::Box& after) {
-    if (attached || hidden) return;
-    int32_t delta[3] = {after.cx - before.cx, after.cy - before.cy, after.cz - before.cz};
-    int32_t a[3] = {previous[0], previous[1], previous[2] + kSphere};
-    int32_t b[3] = {pos[0] - delta[0], pos[1] - delta[1], pos[2] + kSphere - delta[2]};
-    int32_t hit[3], t = 0;
-    if (Collision::sweptSphereVBox(a, b, kSphere, before, hit, t)) {
-        int32_t center[3], n[3];
-        for (int k = 0; k < 3; ++k) { center[k] = a[k] + mulq(b[k] - a[k], t); n[k] = center[k] - hit[k]; }
-        double len = std::hypot((double)n[0], (double)n[1]);
-        if (len > 0 && std::abs(n[2]) < kSphere / 2) {
-            for (int k = 0; k < 2; ++k) {
-                pos[k] = center[k] + delta[k] + (int32_t)std::lround(n[k] * 64.0 / len);
-                vel[k] = delta[k] * 30;
-            }
-        }
-    }
-    int32_t center[3] = {pos[0], pos[1], pos[2] + kSphere}, n[3], depth;
-    if (Collision::sphereVBox(center, kSphere, after, hit, n, depth) && depth > 0 && std::abs(n[2]) < 2048) {
-        for (int k = 0; k < 2; ++k) pos[k] += mulq(n[k], depth + 64);
-    }
-}
 
 // ATan2(cFixed, cFixed): atan2f * 10430, clamped to a short
 static int16_t atan2q(int32_t y, int32_t x) {
@@ -132,6 +110,12 @@ void Player::turnTo(int16_t target, int16_t maxStep) {
 }
 
 void Player::update(const Input& in, Collision* col, const PedSprites* sprites) {
+    act(in, sprites);
+    advance(col);
+}
+
+void Player::act(const Input& in, const PedSprites* sprites) {
+    if (reacting()) { actReaction(sprites); return; }
     // cPed::Act
     updateSpeed(in);
     animate(sprites);
@@ -151,11 +135,14 @@ void Player::update(const Input& in, Collision* col, const PedSprites* sprites) 
     }
     if (in.moving) turnTo(in.heading, 4000);   // cSimpleMover::UpdateForSimpleMovement
 
-    // cPed::Integrate (swimming is not ported: don't let the player walk into water)
+}
+
+void Player::advance(Collision* col, bool avoidWater) {
+    // cPed::Integrate (swimming is not ported: don't let walkers walk into water)
     int32_t before[3] = {pos[0], pos[1], pos[2]};
     integrate(col);
     blockedByWater = false;
-    if (col && col->ok()) {
+    if (avoidWater && !reacting() && col && col->ok()) {
         Collision::Ground g = col->ground(pos[0] / 4096.f, pos[1] / 4096.f, pos[2] / 4096.f + 0.01f);
         if (g.surface == 2 && pos[2] - (int32_t)lroundf(g.z * 4096.f) < 0x999) {
             pos[0] = before[0]; pos[1] = before[1]; pos[2] = before[2];
@@ -166,12 +153,148 @@ void Player::update(const Input& in, Collision* col, const PedSprites* sprites) 
     }
 }
 
+void Player::dynamicContact(const int32_t normal[3], const int32_t otherVelocity[3], int32_t depth) {
+    // cPedCollisionData::OnDynamicCollision: an impulse in relative velocity,
+    // not a positional teleport. Separating contacts do not add energy.
+    int64_t dot = 0;
+    for (int i = 0; i < 3; ++i) dot += (int64_t)normal[i] * (vel[i] - otherVelocity[i]);
+    const int32_t closing = (int32_t)(dot >> 12);
+    if (closing >= 0) return;
+    const int32_t impulse = (int32_t)(((int64_t)closing * 0x102800000LL) >> 32);
+    for (int i = 0; i < 3; ++i) vel[i] += mulq(normal[i], depth) - mulq(normal[i], impulse);
+    clearance_ = 0;
+}
+
+bool Player::vehicleImpact(const Vehicle& car, const int32_t normal[3], bool isPlayer) {
+    if (dead || attached || hidden) return false;
+    // cPed::ApplyCollisionEffect: only the vehicle's central width/front can
+    // apply damage; the surrounding dynamic sphere is just contact.
+    int32_t rel[3]; int64_t across = 0, along = 0, forwardVelocity = 0;
+    for (int i = 0; i < 3; ++i) {
+        rel[i] = pos[i] - car.pos[i];
+        across += (int64_t)rel[i] * car.right[i];
+        along += (int64_t)rel[i] * car.fwd[i];
+        forwardVelocity += (int64_t)car.vel[i] * car.fwd[i];
+    }
+    across >>= 12; along >>= 12;
+    if (std::abs(across) > car.hx ||
+        (forwardVelocity < 0 ? -along : along) * 4096 < 0x4CC000LL - (int64_t)car.hy * 2048 ||
+        (std::abs(along) < car.hy - 0x333 && std::abs(across) > (int64_t)car.hx * 3 / 4)) return false;
+    int32_t velocity[3]; car.velocityAtWorldPos(pos, velocity);
+    int64_t v2 = 0;
+    for (int32_t v : velocity) v2 += (int64_t)v * v;
+    const int64_t squared = v2 >> 12;
+    if (squared <= 0x51000) return false; // 9 units/s, not gentle contact's 1.5 units/s
+    const bool high = squared > 0x271000; // 25 units/s
+    const int damage = high ? (isPlayer ? 15 : 255)
+                            : std::clamp((int)std::sqrt((double)(v2 & ~0xFFFLL)) / 4030, 10, 50) / 2;
+    health = std::max(0, health - damage);
+    dead = health == 0;
+    if (reacting()) return false; // ApplyDamageResponse does not replace an existing cAnimation task
+    reactionAge_ = 0;
+    if (dead) {
+        // SetHealth(0) calls SetDead first. Its pending effect-4 animation is
+        // visible to FindTask, so Damage cannot add a second impact task.
+        // The default death direction is opposite the current facing.
+        reactionForward_ = false;
+        reactionPose(2);
+        return true;
+    }
+    int32_t direction[3] = {normal[0], normal[1], 0}; normalise(direction);
+    reactionForward_ = (int64_t)direction[0] * fwd[0] + (int64_t)direction[1] * fwd[1] > 0;
+    // Damage's animation strength is 20, independently of the damage amount.
+    // Physical effect 3 applies a 40-unit/s outward and 20-unit/s upward
+    // impulse. In this Android build effect 2 computes a proposed impulse,
+    // but returns after SetPos without SetVelocity: preserve contact velocity.
+    if (high) {
+        for (int i = 0; i < 2; ++i) vel[i] = direction[i] * 40;
+        vel[2] = 20 * 4096;
+    } else pos[2] += 2 * 4096;
+    onGround_ = false; airFrames_ = 1;
+    reactionPose(high ? 7 : 14);
+    return true;
+}
+
+bool Player::takeDamage(int damage) {
+    if (dead || attached || hidden) return false;
+    health = std::max(0, health - damage);
+    dead = health == 0;
+    if (!dead || reacting()) return dead;
+    reactionAge_ = 0;
+    reactionForward_ = false;   // SetDead: ApplyDamageResponse(4) against the facing
+    reactionPose(2);
+    return true;
+}
+
+bool Player::explosionHit(int damage, const int32_t direction[3]) {
+    if (dead || attached || hidden) return false;
+    const bool hadReaction = reacting();
+    takeDamage(damage);
+    if (hadReaction) return false;
+    if (dead) return true; // SetDead's effect-4 task takes priority over the blast response
+    reactionAge_ = 0;
+    reactionForward_ = (int64_t)direction[0]*fwd[0] + (int64_t)direction[1]*fwd[1] + (int64_t)direction[2]*fwd[2] > 0;
+    // ApplyPhysicalEffect(3) uses the animation's heading, not the length or height of the damage vector.
+    const int16_t angle = atan2q(direction[0], direction[1]);
+    vel[0] = fastsin(angle) * 40;
+    vel[1] = fastsin(angle + 0x4000) * 40;
+    vel[2] = 20 * 4096;
+    onGround_ = false; airFrames_ = 1;
+    reactionPose(7);
+    return true;
+}
+
+void Player::reactionPose(int state) {
+    reaction_ = state; reactionTicks_ = 0;
+    if (state == 5) recoveryAge_ = 0;
+    // cAnimation::SetupForState: direction relative to the existing facing
+    // selects front/back variants; the ped does not snap to face the car.
+    int upper = 0x18;
+    switch (state) {
+    case 7: upper = reactionForward_ ? 0x2C : 0x2E; break;
+    case 14: upper = reactionForward_ ? 0x32 : 0x30; break;
+    case 2: upper = reactionForward_ ? 0x1A : 0x18; break;
+    case 5: upper = reactionForward_ ? 0x1E : 0x1C; break;
+    case 1: upper = 0x12; break;
+    }
+    playOneShot(upper, upper + 1, false);
+}
+
+void Player::actReaction(const PedSprites* sprites, bool vehicleAbove) {
+    if (!reacting()) return;
+    ++reactionTicks_;
+    if (reactionAge_ < UINT32_MAX) ++reactionAge_;
+    if ((reaction_ == 5 || reaction_ == 1) && recoveryAge_ < UINT32_MAX) ++recoveryAge_;
+    const bool done = stepOneShot(sprites);
+    if ((reaction_ == 7 || reaction_ == 14) && done) reactionPose(2);
+    else if (reaction_ == 2 && reactionTicks_ >= 30 && !dead && onGround_ && vel[2] <= 0 && !vehicleAbove) reactionPose(5);
+    else if (reaction_ == 5 && done) reactionPose(dead ? 2 : 1);
+    else if (reaction_ == 1 && done) { if (dead) reactionPose(2); else { resetReaction(); return; } }
+    // cAnimation::ApplyPhysics: low fallen sprites use flat drag. Airborne
+    // impacts use quadratic drag (4 in the air, 40 on the ground).
+    const int64_t v2 = (int64_t)vel[0]*vel[0] + (int64_t)vel[1]*vel[1];
+    if (v2 < 0x400000) vel[0] = vel[1] = 0;
+    else if (reaction_ == 2 || reaction_ == 5 || reaction_ == 1) {
+        const int32_t speed = (int32_t)std::sqrt((double)v2), drag = std::min(speed, 0xAA0);
+        for (int i = 0; i < 2; ++i) vel[i] -= mulq((int32_t)((int64_t)vel[i] * 4096 / speed), drag);
+    } else {
+        const int64_t s = v2 >> 12;
+        const int64_t k = std::clamp((((s * 17) >> 9) * (onGround_ ? 40 : 4)) >> 12, (int64_t)0x28, (int64_t)0xFAE);
+        for (int i = 0; i < 2; ++i) vel[i] = mulq(vel[i], 4096 - k);
+    }
+}
+
+void Player::resetReaction() {
+    reaction_ = -1; reactionTicks_ = 0; reactionAge_ = recoveryAge_ = 0; oneShotTicks_ = 0;
+    animUpper_ = animLegs_ = -1; level_ = counter_ = 0;
+}
+
 void Player::integrate(Collision* col) {
     int32_t speed = (int32_t)std::sqrt((double)vel[0] * vel[0] + (double)vel[1] * vel[1] + (double)vel[2] * vel[2]);
     int32_t moveLen = (int32_t)(((int64_t)speed * 0x11) >> 9);
     int32_t vz0 = vel[2], z0 = pos[2];
     auto freeMove = [&] { for (int i = 0; i < 3; ++i) pos[i] += (int32_t)(((int64_t)vel[i] * 0x11) >> 9); };
-    if (!col || !col->ok()) { freeMove(); return; }
+    if (!col || !col->ok()) { freeMove(); if (vz0 != 0 || !onGround_) vel[2] -= kGravity; return; }
 
     bool full = vz0 != 0;
     if (!full) {   // still clear of everything seen last time: move without testing
@@ -184,25 +307,30 @@ void Player::integrate(Collision* col) {
     } else {
         bool walkable = false, hit = false;
         constrainByCollision(col, moveLen, walkable, hit);
+        // cPed::Integrate's vertical/full path applies gravity after the
+        // constrained move. Being within 0.6 units of ground does not cancel
+        // it: that distance marks standing, it is not a vertical impulse.
+        const bool appliedGravity = vz0 != 0;
+        if (appliedGravity) vel[2] -= kGravity;
         if (vz0 < 0 && hit && std::abs(z0 - pos[2]) < 0x28) walkable = true;
         Collision::Ground g = col->ground(pos[0] / 4096.f, pos[1] / 4096.f, (pos[2] + 0x28) / 4096.f);
         int32_t gz = (int32_t)lroundf(g.z * 4096.f);
         for (int i = 0; i < 3; ++i) groundNormal[i] = (int16_t)lroundf(g.normal[i] * 4096.f);
         if (!walkable || g.surface == 2) {
             if (pos[2] - gz < 0x999) onGround_ = true;
-            else { vel[2] -= kGravity; onGround_ = false; }
+            else { if (!appliedGravity) vel[2] -= kGravity; onGround_ = false; }
         } else onGround_ = true;
     }
     // cPed::Integrate, player part: one frame of grace when leaving the ground, and a ped hanging still in the
     // air for 10 frames counts as standing
-    if (!onGround_) {
+    if (playerControlled && !reacting() && !onGround_) {
         if (airFrames_++ == 0) {
             int32_t v = vel[2] + kGravity;
             vel[2] = v != 0 ? v : vel[2] + 0x1EA8;
             onGround_ = true;
         }
     } else airFrames_ = 0;
-    if (!onGround_ && std::abs(vel[2]) < 0x1000) {
+    if (playerControlled && !reacting() && !onGround_ && std::abs(vel[2]) < 0x1000) {
         if (stuckFrames_ == 10) onGround_ = true;
         else ++stuckFrames_;
         return;
@@ -221,7 +349,7 @@ void Player::constrainByCollision(Collision* col, int32_t moveLen, bool& walkabl
     col->candidates(C, Rq, vz0 != 0, cand);
     for (const Collision::Box& b : obstacles) {   // (the world entity iterator: at most 32, within reach)
         if (cand.boxes.size() >= 0x40) break;
-        int64_t dx = b.cx - C[0], dy = b.cy - C[1], dz = (b.cz + b.hz) - C[2];
+        int64_t dx = b.cx - C[0], dy = b.cy - C[1], dz = b.cz - C[2];
         int64_t rr = (int64_t)Rq + (int32_t)std::sqrt((double)b.hx * b.hx + (double)b.hy * b.hy + (double)b.hz * b.hz);
         if (dx * dx + dy * dy + dz * dz <= rr * rr) cand.boxes.insert(cand.boxes.begin(), &b);
     }
@@ -264,7 +392,7 @@ void Player::constrainByCollision(Collision* col, int32_t moveLen, bool& walkabl
         return best;
     };
 
-    const int iterations = 3;   // cPlayer (2 for other peds)
+    const int iterations = playerControlled ? 3 : 2;   // cPlayer (2 for other peds)
     int32_t frac = 0x1000;
     for (int it = 0; it < iterations; ++it) {
         int32_t E[3];
@@ -292,7 +420,7 @@ void Player::constrainByCollision(Collision* col, int32_t moveLen, bool& walkabl
     }
 
     // cPlayer: follow the ground down (sweep 1.5 units down; if everything hit is walkable, go there next frame)
-    if (vz0 != 0) {
+    if (playerControlled && vz0 != 0) {
         int32_t D[3] = {C[0], C[1], C[2] - 0x1800};
         int32_t best = sweep(C, D, 1);
         if (!contacts.empty()) {
@@ -311,14 +439,14 @@ void Player::constrainByCollision(Collision* col, int32_t moveLen, bool& walkabl
         }
     }
     // cPlayer: push out of anything still overlapping (a fifth of the depth per frame)
-    for (const Collision::Box* b : cand.boxes) {
+    if (playerControlled) for (const Collision::Box* b : cand.boxes) {
         int32_t c[3], n[3], d;
         if (Collision::sphereVBox(C, rS, *b, c, n, d)) {
             int32_t k = (int32_t)(((int64_t)d * 0x33300000LL) >> 32);
             for (int i = 0; i < 3; ++i) v[i] += mulq(k, n[i]);
         }
     }
-    for (const Collision::TriRef& tr : cand.tris) {
+    if (playerControlled) for (const Collision::TriRef& tr : cand.tris) {
         int32_t c[3], n[3], d;
         if (Collision::sphereVTri(C, rS, tr, c, n, d)) {
             int32_t k = (int32_t)(((int64_t)d * 0x33300000LL) >> 32);
@@ -330,7 +458,85 @@ void Player::constrainByCollision(Collision* col, int32_t moveLen, bool& walkabl
 }
 
 // cPed::AnimateWalkRunCycle (unarmed, no reactions)
+// cPed::AnimateWalkRunCycleWeapons (the player never has +0x210 set: his fire chance is 100): the upper-body
+// animation for the held weapon. hold: show its first frame (it was fired this frame); sync: it steps with the
+// walk speed like the legs instead of at the fixed rate.
+static int weaponUpper(int base, int up, int type, int state, uint32_t flags, bool& hold, bool& sync, uint8_t& punch) {
+    hold = sync = false;
+    if (type == 0) {   // fists: a punch while the swing runs (cPlayer::GetMeleeAnim; the combo is not ported)
+        bool swing = false, fresh = false;
+        if (state) {
+            const bool later = !(flags & 2) && state != 1;
+            if (!(flags & 1)) { swing = true; fresh = !later; }
+            else if (!later) { swing = true; fresh = true; }
+        } else if (flags & 2) { swing = true; fresh = true; }
+        if (!swing) return up;
+        if (fresh) punch = ((punch + 1) & 0xFE) ? 0 : punch + 1;
+        hold = fresh;
+        return base + (punch == 1 ? 243 : 233);
+    }
+    const bool firing = state == 1 || state == 2 || (flags & 6);
+    const bool reloading = state == 4 || (flags & 0x10);
+    const bool fireHold = state == 1 || ((flags >> 1) & 1);
+    switch (type) {
+        case 1: case 2:   // nightstick, baseball bat
+            if ((state && (state == 1 || !(flags & 1))) || (flags & 2)) { hold = fireHold; return base + 256; }
+            sync = true;
+            return base + 257;
+        case 3:   // sword
+            if ((state && (state == 1 || !(flags & 1))) || (flags & 2)) { hold = fireHold; return base + 232; }
+            return base + 214;
+        case 4:   // chainsaw
+            if (!state || (flags & 1)) { sync = true; return base + 229; }
+            return base + 230;
+        case 5: case 7: case 19:   // pistol, revolver, taser
+            if (reloading) up = base + 220;
+            if (!firing) { hold = (flags >> 1) & 1; return up; }
+            hold = fireHold;
+            return base + 234;
+        case 6:   // twin pistols
+            if (firing) return base + 231;
+            if (reloading) return base + 221;
+            return up;
+        case 8: case 9:   // micro SMG, SMG
+            if (firing) return base + 239;
+            if (reloading) return base + 222;
+            sync = true;
+            return up;
+        case 10: case 11: case 12: {   // shotguns
+            int a = base + 238;
+            if (!firing) {
+                a = base + 223;
+                if (!reloading) { sync = true; a = base + 236; }
+            }
+            hold = fireHold;
+            return a;
+        }
+        case 13: case 14:   // assault rifle, carbine rifle
+            if (firing) return base + 237;
+            if (!reloading) { sync = true; return base + 236; }
+            return base + 222;
+        case 15:   // minigun
+            if (firing) return base + 242;
+            if (!reloading) { sync = true; return base + 241; }
+            return base + 223;
+        case 16:   // flame thrower
+            if (!reloading) { sync = true; return base + 228; }
+            return base + 223;
+        case 17:   // RPG
+            if (!reloading) { sync = true; return base + 227; }
+            return base + 224;
+        case 18:   // sniper rifle
+            if (reloading) return base + 235;
+            sync = true;
+            return base + 236;
+        default:   // the thrown weapons
+            return up;
+    }
+}
+
 void Player::animate(const PedSprites* sprites) {
+    oneShotTicks_ = 0;
     if (!sprites || !sprites->ok()) return;
     int base = bodySet * 0x113, up, legs;
     flip_ = false;
@@ -340,10 +546,26 @@ void Player::animate(const PedSprites* sprites) {
         case 3: up = base + 0xA0; legs = base + 0xA1; break;   // the player's sprint (class 0x36)
         default: up = base; legs = base + 1; break;
     }
+    bool hold = false, sync = false;
+    uint8_t punchNext = punch;
+    const int weaponUp = playerControlled ? weaponUpper(base, up, weaponType, weaponState, weaponFlags, hold, sync, punchNext) : up;
+    punch = punchNext;
+    if (weaponUp != up) {   // AnimateWalkRunCycle with a weapon pose: it restarts when it changes and steps at the
+        // fixed rate (0x88 >> 4) unless synced with the legs; the legs keep their own cycle
+        if (weaponUp != animUpper_) { animUpper_ = weaponUp; frameUpper_ = 0; }
+        if (legs != animLegs_) { animLegs_ = legs; frameLegs_ = 0; }
+        const int step = (int)(((int64_t)currentSpeed() * 0x88) >> 16);
+        if (level_) frameLegs_ = sprites->advance(animLegs_, frameLegs_, step);
+        else frameLegs_ = 0;
+        if (!(sync && !level_)) frameUpper_ = sprites->advance(animUpper_, frameUpper_, sync ? step : 0x88 >> 4);
+        if (hold) frameUpper_ = 0;
+        return;
+    }
     if (level_ == 0) {   // standing: both sprites hold their first frame
         if (up != animUpper_) { animUpper_ = up; frameUpper_ = 0; }
         if (legs != animLegs_) { animLegs_ = legs; frameLegs_ = 0; }
         frameLegs_ = 0;
+        if (hold) frameUpper_ = 0;
         return;
     }
     if (up != animUpper_ || legs != animLegs_) {   // switching gait keeps the step phase
@@ -365,6 +587,7 @@ void Player::animate(const PedSprites* sprites) {
 }
 
 void Player::ride(int upper, int legs, const PedSprites* sprites) {
+    oneShotTicks_ = 0;
     upper += bodySet * 0x113;
     legs += bodySet * 0x113;
     flip_ = false;
@@ -415,12 +638,17 @@ void Player::playOneShot(int upper, int legs, bool flip) {
     animUpper_ = upper + bodySet * 0x113;
     animLegs_ = legs + bodySet * 0x113;
     frameUpper_ = frameLegs_ = 0;
+    oneShotTicks_ = 0;
     doneUpper_ = doneLegs_ = false;
     flip_ = flip;
     level_ = 0;
 }
 
 bool Player::stepOneShot(const PedSprites* sprites) {   // cOneShotAnimationTask::Process
+    // A one-frame sprite can finish immediately while a replacement mesh's
+    // animation still needs to run. This clock follows simulation, even once
+    // the sprite holds its final frame; it never advances from rendering.
+    if (oneShotTicks_ < UINT32_MAX) ++oneShotTicks_;
     if (!sprites || !sprites->ok()) return true;
     if (doneUpper_ && doneLegs_) return true;
     const int step = 0x88 >> 4;   // (0x88 << timeslice) >> 4
@@ -442,10 +670,33 @@ void Player::render(const PedSprites* sprites, const PedLight* light) const {
     float p[3];
     posf(p);
     float h = -heading() * 3.14159265f / 32768.f;   // PedSprites: radians, counter-clockwise
-    // cPed::Render: legs first (heights 1.0 / 0.5), then the upper body (2.0 / 1.5)
-    sprites->draw(p, h, animLegs_, frameLegs_, palUpper, palLegs, 1.0f, 0.5f, light, flip_);
-    sprites->draw(p, h, animUpper_, frameUpper_, palUpper, palUpper, 2.0f, 1.5f, light, flip_);
+    // cAnimation selects sprite pose 3 while fallen (0x733 high), pose 0
+    // for an impact's upper half, and restores the legs first in state 1.
+    const int animation = animUpper_ - bodySet * 0x113;
+    const bool fallen = reaction_ == 2 || reaction_ == 5 || (!reacting() && (animation == 0x18 || animation == 0x1a));
+    const bool lowUpper = fallen || reaction_ == 1;
+    const bool lowLegs = fallen || reaction_ == 7 || reaction_ == 14;
+    const float low = 0x733 / 4096.f;
+    sprites->draw(p, h, animLegs_, frameLegs_, palUpper, palLegs, lowLegs ? low : 1.0f, lowLegs ? low : 0.5f, light, flip_);
+    const float hu = upperAim && !lowUpper ? atan2f((float)-fireDir[0], (float)fireDir[1]) : h;
+    sprites->draw(p, hu, animUpper_, frameUpper_, palUpper, palUpper, lowUpper ? low : 2.0f, lowUpper ? low : 1.5f, light, flip_);
     glDisable(GL_ALPHA_TEST);
     glDisable(GL_BLEND);
     glDisable(GL_TEXTURE_2D);
+}
+
+CtwCharacterPose Player::renderPose(const PedSprites* sprites, uint32_t id, int type, uint32_t flags, float alpha) const {
+    CtwCharacterPose p{};p.size=sizeof p;p.id=id;p.flags=flags|(attached?CTW_CHARACTER_ATTACHED:0)|(dead?CTW_CHARACTER_DEAD:0)|(flip_?CTW_CHARACTER_FLIPPED:0);
+    p.ped_type=type;p.body_set=bodySet;p.speed_level=level_;posf(p.position);p.heading=-heading()*360.f/65536.f;
+    p.upper_animation=animUpper_-bodySet*0x113;p.legs_animation=animLegs_-bodySet*0x113;
+    const int upper=sprites?sprites->numFrames(animUpper_):0,legs=sprites?sprites->numFrames(animLegs_):0;
+    p.upper_phase=upper>1?std::clamp(frameUpper_/(float)((upper-1)*256),0.f,1.f):0;
+    p.legs_phase=legs>1?std::clamp(frameLegs_/(float)((legs-1)*256),0.f,1.f):0;
+    p.one_shot_seconds = oneShotTicks_ ? (oneShotTicks_ - 1 + std::clamp(alpha, 0.f, 1.f)) / 30.f : 0;
+    p.reaction_state = reaction_;
+    p.reaction_seconds = reactionAge_ ? (reactionAge_ - 1 + std::clamp(alpha, 0.f, 1.f)) / 30.f : 0;
+    if (reacting()) p.flags |= CTW_CHARACTER_KNOCKED_DOWN;
+    if (reacting() && reactionForward_) p.flags |= CTW_CHARACTER_FALL_FORWARD;
+    p.recovery_seconds = recoveryAge_ ? (recoveryAge_ - 1 + std::clamp(alpha, 0.f, 1.f)) / 30.f : 0;
+    return p;
 }

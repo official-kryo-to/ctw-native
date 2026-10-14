@@ -29,7 +29,7 @@ static void normalise(int32_t v[3]) {
 }
 
 // ------------------------------------------------------------------------------------------------ candidates
-void Collision::candidates(const int32_t p[3], int32_t R, bool groundSlab, Candidates& out) {
+void Collision::candidates(const int32_t p[3], int32_t R, bool groundSlab, Candidates& out, bool physicalProps) {
     out.boxes.clear(); out.cyls.clear(); out.tris.clear();
     int cx, cy;
     cellOf(p[0], p[1], &cx, &cy);
@@ -40,7 +40,18 @@ void Collision::candidates(const int32_t p[3], int32_t R, bool groundSlab, Candi
     for (int y = std::max(0, cy - ring); y <= std::min(99, cy + ring); ++y) {
         const Cell* C = cell(x, y);
         if (!C) continue;
+        auto separate = [&](size_t index, int type) {
+            if (physicalProps) return false;
+            for (const auto& ps : C->propShapes) {
+                if (!ps.physical) continue;
+                const size_t first = type == 0 ? ps.box0 : type == 1 ? ps.cyl0 : ps.mesh0;
+                const size_t count = type == 0 ? ps.boxes : type == 1 ? ps.cyls : ps.meshes;
+                if (index >= first && index-first < count) return true;
+            }
+            return false;
+        };
         for (const Box& b : C->boxes) {   // GenerateBoxCandidateList (63 + the slab)
+            if (separate(&b-C->boxes.data(),0)) continue;
             int32_t dx = p[0] - b.cx, dy = p[1] - b.cy;
             if (b.angle == 0) {
                 if (std::abs(dx) <= b.hx + R && std::abs(dy) <= b.hy + R) out.boxes.push_back(&b);
@@ -50,10 +61,12 @@ void Collision::candidates(const int32_t p[3], int32_t R, bool groundSlab, Candi
             }
         }
         for (const Cyl& c : C->cyls) {    // GenerateCylinderCandidateList
+            if (separate(&c-C->cyls.data(),1)) continue;
             int64_t dx = p[0] - c.x, dy = p[1] - c.y, rr = (int64_t)c.r + R;
             if (dx * dx + dy * dy < rr * rr) out.cyls.push_back(&c);
         }
         for (const Mesh& m : C->meshes) { // GenerateMeshCandidateList
+            if (separate(&m-C->meshes.data(),2)) continue;
             if (!(m.minX <= p[0] + R && p[0] - R <= m.maxX && m.minY <= p[1] + R && p[1] - R <= m.maxY)) continue;
             for (const Tri& t : m.tris) {
                 if (t.v[0] * 3 + 2 >= (int)m.verts.size() || t.v[1] * 3 + 2 >= (int)m.verts.size() || t.v[2] * 3 + 2 >= (int)m.verts.size()) continue;

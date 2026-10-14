@@ -47,12 +47,22 @@ private:
     void ambience(Game& game);
     // radio app state (cRadioApp +0x183C scroll position, +0x1848 icon offsets, +0x1860 volume icon alpha)
     bool app_ = false;
+    bool appTuning_ = false;
     float appScroll_ = 0.f;
     double appLast_ = 0.0, volumeShownAt_ = -10.0;
+    double listenClock_ = 0.0;
+    bool pointerDown_ = false, pointerSwiped_ = false;
+    float pointerX_ = 0.f, pointerY_ = 0.f;
     std::vector<int> appOrder_;           // available stations, left to right
     std::vector<float> appOffset_;        // InitScrolling: x of each icon, width + 40 apart
     float appWidth_ = 0.f;
     void appStation(int step, Game& game);
+    void advanceCarousel(float frames, Game& game);
+    void appPointer(float x, float y, bool down, bool pressed, Game& game);
+    void appClick(float x, float y, Game& game);
+    void countListening();
+    int favoriteStars(int station) const;
+    float volumeAlpha(double now) const;
     void select(int station, Game& game);
     void cycle(int step, Game& game);
     void sync(Game& game);

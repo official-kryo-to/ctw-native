@@ -15,6 +15,36 @@ Particles& TheParticles() { return g_particles; }
 
 static uint32_t randNC(uint32_t n) { return Rand32NonCritical(n); }
 
+// cParticleEmitterWaterSplash, type 1 (CWaterCannon's nozzle spray).
+WaterSplashEmitter::WaterSplashEmitter(const int32_t at[3], const int32_t velocity[3], uint16_t colour)
+    : Emitter(at,20,0x4000,15,false) {
+    pos[2]+=0x199;
+    tmpl_.colour=colour; tmpl_.life=80; tmpl_.alpha=30;
+    tmpl_.size=tmpl_.grow=(int16_t)(((0x999/2)*0x199)>>12);
+    tmpl_.angle=(uint16_t)((Rand16NonCritical(0x2000)-0x39)&0xFF);
+    direction(velocity);
+    addParticle();
+}
+
+void WaterSplashEmitter::direction(const int32_t velocity[3]) {
+    for(int k=0;k<3;++k) {
+        int32_t v=(int16_t)(((int32_t)(int16_t)velocity[k]*0x1333)>>12);
+        if(k==2) v+=0x800;
+        tmpl_.v[k]=(int16_t)(((int64_t)v*inv_)>>12);
+    }
+}
+
+void WaterSplashEmitter::updateParticle(Particle& p) {
+    for(int k=0;k<3;++k) p.v[k]=(int16_t)(((int32_t)p.v[k]*0xE66)>>12);
+    p.v[2]=(int16_t)(p.v[2]-((0x10B*inv_)>>12));
+    if(p.life<=9 && p.alpha>=6) p.alpha-=5;
+    else if(!(frame_&1) && p.alpha) --p.alpha;
+    for(int k=0;k<3;++k) if(p.p[k] < -0x5000 || p.p[k]>0x5000) {
+        p.life=0; p.active=0; --alive_; return;
+    }
+    Emitter::updateParticle(p);
+}
+
 GarbageEmitter::GarbageEmitter(const int32_t at[3], int16_t size, bool attached)
     : Emitter(at, attached ? 12 : 8, 0x4000, 19, false), size_(size), attached_(attached) {
     if (!attached) dying = true;
@@ -152,14 +182,132 @@ void GlassEmitter::updateParticle(Particle& p) {
     p.v[2] -= 40;
 }
 
-ExplosionFlash::ExplosionFlash(const int32_t at[3]) : Emitter(at, 2, 0x4000, 5, true) {
+SlatsEmitter::SlatsEmitter(const int32_t at[3], const int32_t velocity[3], const int32_t endA[3], const int32_t endB[3],
+                           uint32_t colourA, uint32_t colourB, bool textured, bool slow, uint32_t ambient)
+    : Emitter(at,6,0x70000,textured ? 24 : 0,false) {
+    const uint16_t colours[2] = {propColour(colourA,true,ambient),propColour(colourB,true,ambient)};
+    const int scale = slow ? 0x199 : 0x800;
+    const int64_t speed2 = (int64_t)velocity[0]*velocity[0] +
+        (int64_t)velocity[1]*velocity[1] + (int64_t)velocity[2]*velocity[2];
+    int32_t launch[2]{};
+    if (speed2) {
+        const float reciprocal = 1.f/std::sqrt((float)speed2);
+        for (int k=0;k<2;++k) {
+            const float f = reciprocal*velocity[k];
+            const int32_t n = (int32_t)std::fma(f,4096.f,f < 0 ? -.5f : .5f);
+            launch[k] = slow ? (int32_t)((int64_t)n*scale >> 12) : n >> 1;
+        }
+    }
+    struct Side { int32_t delta[3], half, quarter, velocity[2], spinSpread; } sides[2]{};
+    for (int i=0;i<2;++i) {
+        Side& side = sides[i]; const int32_t* end = i ? endB : endA;
+        for (int k=0;k<3;++k) side.delta[k] = end[k]-at[k];
+        side.half = (int32_t)std::sqrt((double)side.delta[0]*side.delta[0] +
+            (double)side.delta[1]*side.delta[1] + (double)side.delta[2]*side.delta[2]) >> 1;
+        side.quarter = side.half >> 2;
+        side.spinSpread = std::abs((0x4000-side.half) >> 2);
+        for (int k=0;k<2;++k) side.velocity[k] = launch[k] + (int32_t)((int64_t)scale*(side.delta[k] >> 8) >> 12);
+    }
+    const int jitter = (int)((int64_t)inv_*(scale << 4) >> 12);
+    for (int i=0;i<6;++i) {
+        Particle p{};
+        p.colour = colours[Rand16NonCritical(2)]; p.alpha = 31; p.life = 300;
+        const bool useA = sides[0].half >= 0x52 && !(i & 1);
+        const Side& side = sides[useA ? 0 : 1];
+        // Invalid endpoints leave uninitialised fields in the reference; skip those fragments here.
+        if (side.half < 0x52) continue;
+        int32_t vx = side.velocity[0], vy = side.velocity[1];
+        if (jitter) { vx += (int32_t)Rand32NonCritical(jitter*2)-jitter; vy += (int32_t)Rand32NonCritical(jitter*2)-jitter; }
+        const int size = (int)Rand32NonCritical(side.half-side.quarter)+side.quarter;
+        // ATan2 uses atan2f and truncates to the signed 16-bit turn before the negation.
+        const int angle = std::clamp((int)(std::atan2(-(float)side.delta[0],(float)side.delta[1])*10430.f),-32768,32767);
+        p.angle = (uint16_t)-angle;
+        const int spin = 0x71C + (int)((Rand16NonCritical(0xE39)*side.spinSpread) >> 12);
+        p.spin = (int16_t)(useA ? -spin : spin);
+        for (int k=0;k<2;++k) p.p[k] = (int16_t)((int64_t)inv_*side.delta[k] >> 12);
+        p.p[2] = (int16_t)((int64_t)inv_*0x2000 >> 12);
+        p.v[0] = (int16_t)((int64_t)inv_*vx >> 12); p.v[1] = (int16_t)((int64_t)inv_*vy >> 12);
+        p.v[2] = (int16_t)((int64_t)inv_*-40 >> 12); p.size = (int16_t)((int64_t)inv_*size >> 12);
+        addFromData(p);
+    }
+    dying = true;
+}
+
+void SlatsEmitter::updateParticle(Particle& p) {
+    Emitter::updateParticle(p);
+    const int32_t range = (int32_t)((0x100000000000LL/inv_) >> 20);
+    if ((int64_t)range*p.p[2] + (int64_t)pos[2]*4096 < 0) {
+        p.v[0] = p.v[1] = p.v[2] = p.spin = 0;
+        p.p[2] = (int16_t)((inv_*0x199) >> 12);
+    } else {
+        for (int k=0;k<2;++k) p.v[k] = (int16_t)((p.v[k]*0xF33) >> 12);
+        p.spin = (int16_t)((p.spin*0xE66) >> 12);
+        p.v[2] = (int16_t)((p.v[2]*0x1199) >> 12);
+    }
+    if (p.life <= 15) p.alphaStep = -3;
+}
+
+void SlatsEmitter::vertices(const Particle& p, float out[4][3]) const {
+    // ManagedRender reconstructs the range from its quantised reciprocal, and rounds both axes to Q12.
+    const int32_t range = (int32_t)((0x100000000000LL/inv_) >> 20);
+    const int32_t sn = (int32_t)(std::sin(p.angle*9.587378e-05f)*4096);
+    const int32_t cs = (int32_t)(std::sin((uint16_t)(p.angle+0x4000)*9.587378e-05f)*4096);
+    const int32_t along[2] = {(int32_t)((((int64_t)sn*p.size) >> 12)*range >> 12),
+                              (int32_t)((((int64_t)-cs*p.size) >> 12)*range >> 12)};
+    const int32_t across[2] = {(int32_t)((((int64_t)cs*(inv_ >> 2)) >> 12)*range >> 12),
+                               (int32_t)((((int64_t)sn*(inv_ >> 2)) >> 12)*range >> 12)};
+    for (int k=0;k<3;++k) {
+        // Positions use Q16 at the renderer boundary, retaining four more bits than the axes.
+        const int64_t centre = (int64_t)pos[k]*16 + (((int64_t)p.p[k]*range) >> 8);
+        const int32_t a = k < 2 ? along[k]*16 : 0, b = k < 2 ? across[k]*16 : 0;
+        out[0][k] = (centre-a-b)/65536.f;
+        out[1][k] = (centre+a-b)/65536.f;
+        out[2][k] = (centre+a+b)/65536.f;
+        out[3][k] = (centre-a+b)/65536.f;
+    }
+}
+
+void SlatsEmitter::render(const WorldCamera&) const {
+    if (!alive_) return;
+    int texture; uint16_t rect[4];
+    if (!Assets_EffectSprite(sprite_,texture,rect)) return;
+    int tw=256, th=256; Assets_TextureSize(texture,&tw,&th);
+    glEnable(GL_TEXTURE_2D); glBindTexture(GL_TEXTURE_2D,Assets_Texture(texture));
+    glBegin(GL_QUADS);
+    for (const Particle& p : parts_) {
+        if (!p.active) continue;
+        float quad[4][3]; vertices(p,quad);
+        float uv[4][2];
+        if (sprite_) {
+            // Textured strips sample a section proportional to their length; the far edge shifts one pixel.
+            const int portion = (int16_t)((p.size*4096-(p.size < 0 ? 121 : 0))/122);
+            const float u0=rect[0]/(float)tw, u1=(rect[0]+rect[2])/(float)tw;
+            const float v0=rect[1]/(float)th, v1=(rect[1]+((portion*rect[3]) >> 12))/(float)th;
+            uv[0][0]=uv[1][0]=u0; uv[2][0]=uv[3][0]=u1;
+            uv[0][1]=v0+1.f/th; uv[1][1]=v1; uv[2][1]=v1+1.f/th; uv[3][1]=v0;
+            glColor4ub(255,255,255,255); // the reference ignores particle tint and alpha on this branch
+        } else {
+            for (auto& v : uv) { v[0]=(rect[0]+(rect[2] >> 1))/(float)tw; v[1]=(rect[1]+(rect[3] >> 1))/(float)th; }
+            glColor4ub((p.colour & 31) << 3,((p.colour >> 5) & 31) << 3,((p.colour >> 10) & 31) << 3,p.alpha*255/31);
+        }
+        for (int i=0;i<4;++i) { glTexCoord2f(uv[i][0],uv[i][1]); glVertex3fv(quad[i]); }
+    }
+    glEnd();
+}
+
+ExplosionFlash::ExplosionFlash(const int32_t at[3], int type, int32_t scale)
+    : Emitter(at, 2, 0x4000, type == 5 ? 14 : 5, false) {
+    additive_ = true;
     Particle p{};
-    p.colour = 0x37F; p.alpha = 15; p.alphaStep = -2; p.life = 24;
-    p.size = 0x333 / 4; p.grow = 0x5000 / 4;
-    p.angle = (uint16_t)randNC(0xFFFF); p.spin = 0x1000;
-    p.p[2] = 0x800 / 4; p.v[0] = 0x1000;
+    p.colour = type == 2 ? 0x7C00 : type == 5 ? 0x7FFF : 0x37F;
+    p.alpha = type == 2 ? 10 : 15; p.alphaStep = type == 2 ? -1 : -2;
+    p.life = type == 2 ? 48 : 24;
+    p.size = (int16_t)((((int16_t)((int64_t)0x333*scale >> 12))*inv_) >> 12);
+    p.grow = (int16_t)((((int16_t)((int64_t)0x5000*scale >> (type == 2 ? 13 : 12)))*inv_) >> 12);
+    p.spin = 0x800; p.p[2] = (int16_t)(0x800*inv_ >> 12);
+    if (type == 2) p.v[0] = 0x1000; // growth-damping sentinel, not a physical velocity
     addFromData(p);
-    p.p[2] = 0; p.v[0] = 0; p.grow = -p.grow;
+    p.angle = 0x8000; p.spin = -0x800;
     addFromData(p);
     dying = true;
 }
@@ -172,56 +320,108 @@ void ExplosionFlash::updateParticle(Particle& p) {
     if (p.v[0] == 0x1000 && p.grow > 0) p.grow = (int16_t)((p.grow * 0xE66) >> 12);
 }
 
-ExplosionCloud::ExplosionCloud(const int32_t at[3]) : Emitter(at, 16, 0x4000, 7, true) {
+ExplosionCloud::ExplosionCloud(const int32_t at[3], int type, unsigned phase, int16_t scale,
+                               int32_t vx, int32_t vy, unsigned count)
+    : Emitter(at, (int)count, 0x4000, 7, true), scale_(scale) {
+    additive_ = true;
     Particle p{};
     p.colour = 0x7FFF; p.alpha = 28; p.life = 60; p.alphaStep = -1;
-    p.size = 0x6000 / 4; p.grow = 0x400 / 4; p.v[2] = 0x1000 / 4;
-    addFromData(p);
-    for (int i = 0; i < 7; ++i) {
-        float a = i * 6.2831853f / 7;
-        p.v[0] = (int16_t)(std::sin(a) * 0x800 / 4);
-        p.v[1] = (int16_t)(std::cos(a) * 0x800 / 4);
-        p.v[2] = 0xA66 / 4;
-        p.size = (int16_t)((0x3800 + randNC(0x800)) / 4);
-        p.angle = (uint16_t)randNC(0xFFFF);
+    if (!phase) {
+        p.size = (int16_t)(6*inv_);
+        p.v[0] = (int16_t)(((int16_t)vx*inv_) >> 12);
+        p.v[1] = (int16_t)(((int16_t)vy*inv_) >> 12);
+        p.v[2] = (int16_t)(0x1000*inv_ >> 12);
+        addFromData(p);
+    } else for (unsigned i = 0; i < count; ++i) {
+        // AddParticle converts the standard data in place. Its height survives between births.
+        const int spread = type == 0 ? 0x1998 : 0x1000, bias = type == 0 ? 0xCCC : 0x800;
+        p.v[0] = (int16_t)(((int64_t)((int)randNC(spread)-bias)*scale) >> 12);
+        p.v[1] = (int16_t)(((int64_t)((int)randNC(spread)-bias)*scale) >> 12);
+        p.size = (int16_t)(((int64_t)(randNC(0x800)+0x3800)*scale) >> 12);
+        p.v[2] = (int16_t)(((int64_t)(randNC(0x3AF)+0x51)*scale) >> 12);
+        p.grow = (int16_t)(((int64_t)(randNC(0xA4)+0x28)*scale) >> 12);
+        p.p[2] = (int16_t)(p.p[2]+(p.size >> 1));
+        for (int k = 0; k < 3; ++k) {
+            p.p[k] = (int16_t)((p.p[k]*inv_) >> 12);
+            p.v[k] = (int16_t)((p.v[k]*inv_) >> 12);
+        }
+        p.size = (int16_t)((p.size*inv_) >> 12); p.grow = (int16_t)((p.grow*inv_) >> 12);
         addFromData(p);
     }
     dying = true;
 }
 
+void ExplosionCloud::process(uint32_t hours) {
+    smoke_.clear();
+    Emitter::process(hours);
+    if (owner_ && !smoke_.empty()) {
+        auto* smoke = owner_->add<SmokeEmitter>(smokeOrigin_,(int)smoke_.size());
+        smoke->followPlayer = true; smoke->dying = true;
+        for (const Particle& p : smoke_) smoke->addParticleFromData(p);
+    }
+}
+
 void ExplosionCloud::updateParticle(Particle& p) {
     for (int k = 0; k < 3; ++k) {
         p.p[k] = (int16_t)(p.p[k] + p.v[k]);
-        p.v[k] = (int16_t)((p.v[k] * 0xE66) >> 12);
+        p.v[k] = (int16_t)(p.v[k]-((p.v[k]*0x199) >> 12));
     }
     p.life = (uint16_t)(p.life - 2); p.size = (int16_t)(p.size + p.grow);
-    if (p.life < 5) { p.alpha = (uint8_t)std::max(1, (int)p.alpha - 5); p.life = p.alpha > 1 ? 4 : 0; }
-    uint16_t colour = 0;
-    for (int shift = 0; shift <= 10; shift += 5) colour |= std::max(1, ((p.colour >> shift) & 31) - 1) << shift;
-    p.colour = colour;
+    if (!(frame_ & 1)) p.alpha = (uint8_t)std::clamp((int)p.alpha-(p.life < 5 ? 5 : 0),1,31);
+    if (p.life <= 2 && p.alpha >= 2) p.life |= 4;
+    for (int shift = 0; shift <= 10; shift += 5)
+        if (((p.colour >> shift) & 31) > -p.alphaStep)
+            p.colour = (uint16_t)(p.colour+p.alphaStep*(1 << shift));
+    if (p.life != 24) return;
+    Particle smoke = p;
+    for (int k = 0; k < 3; ++k) {
+        const int64_t relative = ((((int64_t)pos[k]-smokeOrigin_[k])*inv_ >> 12)*0x333) >> 12;
+        if (relative < INT16_MIN || relative > INT16_MAX) return;
+        smoke.p[k] = (int16_t)(relative+((p.p[k]*0x333) >> 12));
+        smoke.v[k] = (int16_t)((p.v[k]*0x333) >> 13);
+    }
+    smoke.size = (int16_t)((p.size*0x333) >> 12);
+    smoke.grow = (int16_t)((((int64_t)scale_*0x33300000 >> 32)*0x333) >> 13);
+    smoke.alpha = 30; smoke.life = 20;
+    smoke_.push_back(smoke);
 }
 
-ExplosionDebris::ExplosionDebris(const int32_t at[3]) : Emitter(at, 5, 0x4000, 19, true) {
+ExplosionDebris::ExplosionDebris(const int32_t at[3], int type) : Emitter(at,5,0x4000,19,false) {
+    Particle p{};
+    p.p[2] = 0x1000; p.life = 31; p.alpha = 31;
+    p.alphaStep = -1; // reference stores its trail handle here; -1 while trails are unavailable
     for (int i = 0; i < 5; ++i) {
-        Particle p{};
-        int shade = (int)randNC(25);
-        p.colour = (uint16_t)((shade + randNC(5)) | ((shade + randNC(5)) << 5) | ((shade + randNC(5)) << 10));
-        float a = randNC(0xFFFF) * 9.587378e-05f;
-        p.v[0] = (int16_t)((std::sin(a) - std::cos(a)) * 0x2000 / 4);
-        p.v[1] = (int16_t)((std::cos(a) + std::sin(a)) * 0x2000 / 4);
-        p.v[2] = 0x2000 / 4; p.p[2] = 0x1000 / 4;
-        p.size = (int16_t)((0x800 + randNC(0x800)) / 4);
-        p.spin = (int16_t)randNC(0x1000); p.life = 31; p.alpha = 31;
+        if (type == 2) p.colour = 0x1D8E;
+        else {
+            const int shade = (int)Rand16NonCritical(25);
+            const int red = shade+Rand16NonCritical(5), green = shade+Rand16NonCritical(5), blue = shade+Rand16NonCritical(5);
+            p.colour = (uint16_t)(red | (green << 5) | (blue << 10));
+        }
+        const uint16_t angle = (uint16_t)Rand16NonCritical(0xFFFF);
+        const int sn = (int)(std::sin(angle*9.587378e-05f)*4096.f);
+        const int cs = (int)(std::sin((uint16_t)(angle+0x4000)*9.587378e-05f)*4096.f);
+        p.v[0] = (int16_t)((sn-cs)*2); p.v[1] = (int16_t)((cs+sn)*2); p.v[2] = 0x2000;
+        p.angle = 0; p.spin = (int16_t)randNC(0x1000);
+        p.size = (int16_t)(randNC(0x800)+0x800);
+        // AddDebrisParticle mutates its standard data: the height is converted again for each birth.
+        for (int k = 0; k < 3; ++k) {
+            p.p[k] = (int16_t)((p.p[k]*inv_) >> 12); p.v[k] = (int16_t)((p.v[k]*inv_) >> 12);
+        }
+        p.size = (int16_t)((p.size*inv_) >> 12);
         addFromData(p);
     }
     dying = true;
 }
 
 void ExplosionDebris::updateParticle(Particle& p) {
+    // Update samples one shared X/Y jitter for its trail point even if no trail was allocated.
+    randNC(0x1000);
     if (p.p[2] > 0) p.v[2] -= 0x199;
-    Emitter::updateParticle(p);
-    for (int k = 0; k < 3; ++k) p.v[k] = (int16_t)((p.v[k] * 0xE66) >> 12);
-    if (p.size < 1 || p.life <= 10) p.life = 0;
+    for (int k = 0; k < 3; ++k) {
+        p.p[k] = (int16_t)(p.p[k]+p.v[k]); p.v[k] = (int16_t)((p.v[k]*0xE66) >> 12);
+    }
+    p.angle = (uint16_t)(p.angle+p.spin); p.size = (int16_t)(p.size+p.grow); p.life -= 2;
+    if (p.size < 1 || (p.alpha == 0 && p.life <= 10)) p.life = 0;
 }
 
 Emitter::Emitter(const int32_t p[3], int count, int32_t range, uint8_t sprite, bool billboard)
@@ -427,10 +627,16 @@ void Particles::remove(const Emitter* e) {
         if (p.get() == e) p->dying = true;
 }
 
-void Particles::update(uint32_t frame, uint32_t hours) {
-    for (auto& e : emitters_) {
+void Particles::update(uint32_t frame, uint32_t hours, const int32_t* playerPos) {
+    // Complex explosions can add smoke during Process. Heap objects stay stable if the vector grows.
+    const size_t count = emitters_.size();
+    for (size_t i = 0; i < count; ++i) {
+        Emitter* e = emitters_[i].get();
+        e->frame_ = frame;
+        for (int k = 0; k < 3; ++k) e->smokeOrigin_[k] = playerPos ? playerPos[k] : e->pos[k];
+        if (auto* smoke = dynamic_cast<SmokeEmitter*>(e); smoke && smoke->followPlayer && playerPos) smoke->setPos(playerPos);
         if (!e->dying)
-            if (auto* steam = dynamic_cast<SteamEmitter*>(e.get())) steam->tick(frame);
+            if (auto* steam = dynamic_cast<SteamEmitter*>(e)) steam->tick(frame);
         e->process(hours);
     }
     emitters_.erase(std::remove_if(emitters_.begin(), emitters_.end(), [](const std::unique_ptr<Emitter>& e) { return e->finished(); }),
@@ -498,12 +704,16 @@ void RainEmitter::render(const WorldCamera&) const {   // cParticleEmitterRain::
 
 void Particles::render(const WorldCamera& cam) const {
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE);
     glDisable(GL_LIGHTING);
     glDisable(GL_CULL_FACE);
+    glDisable(GL_ALPHA_TEST);
     glEnable(GL_DEPTH_TEST);
-    for (const auto& e : emitters_) e->render(cam);
+    // cEffectManager::Render draws emissive effects first, then smoke and other ordinary alpha effects.
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    for (const auto& e : emitters_) if (e->additive_) e->render(cam);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    for (const auto& e : emitters_) if (!e->additive_) e->render(cam);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
     glDisable(GL_TEXTURE_2D);

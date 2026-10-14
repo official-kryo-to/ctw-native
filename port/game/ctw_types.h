@@ -85,4 +85,32 @@ typedef struct CtwGameEvent {
     int32_t value;                  /* RADIO_CHANGED: station id; PED_KNOCKED_DOWN: ped id; otherwise 0 */
 } CtwGameEvent;
 typedef void (*CtwGameEventCallback)(const CtwGameEvent* event, void* user);
+/* Rendered character pose. Transforms match the current interpolated frame.
+   id=0 for the player; pedestrian ids are stable. Return 1 from the callback only after drawing.
+   phases are 0..1 along each CTW sprite cycle; animation ids exclude the body-set offset. */
+enum CtwCharacterFlags { CTW_CHARACTER_PLAYER=1, CTW_CHARACTER_ATTACHED=2, CTW_CHARACTER_DEAD=4, CTW_CHARACTER_RIDING=8, CTW_CHARACTER_FLIPPED=16, CTW_CHARACTER_ATTACHMENT_FRAME=32, CTW_CHARACTER_KNOCKED_DOWN=64, CTW_CHARACTER_FALL_FORWARD=128 };
+typedef uint32_t CtwCharacterModel;
+typedef struct CtwCharacterPose {
+    uint32_t size, id, flags;
+    int32_t ped_type, body_set, speed_level, upper_animation, legs_animation;
+    float position[3], heading, upper_phase, legs_phase;
+    /* v8 tail: elapsed simulation time since playOneShot, independent of sprite frame count.
+       Read only when size includes this field. Pauses with the game. */
+    float one_shot_seconds;
+    /* v9 tail. Native right/forward/up, column-major, each axis three floats;
+       native upper-body rider anchor. Valid only with ATTACHMENT_FRAME.
+       Bone choice/fitting belongs to the replacement mod, not the game. */
+    float attachment_basis[9], attachment_anchor[3];
+    int32_t reaction_state; /* -1 locomotion; 7/14 impact, 2 fallen, 5 rising, 1 recovery */
+    float reaction_seconds; /* elapsed since impact, survives reaction-state transitions */
+    float recovery_seconds; /* elapsed since rising, survives the final recovery state */
+    CtwVehicle attachment_vehicle; /* vehicle frame owner; 0 when unattached */
+} CtwCharacterPose;
+/* Bounds of a skinned clip at an absolute time, in unscaled donor coordinates.
+   min/max precede the renderer's floor adjustment. Missing clips return zero. */
+typedef struct CtwCharacterBounds {
+    uint32_t size;
+    float minimum[3], maximum[3], duration;
+} CtwCharacterBounds;
+typedef int (*CtwCharacterCallback)(const CtwCharacterPose* pose, void* user);
 #endif

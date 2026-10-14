@@ -79,9 +79,24 @@ struct RadioTestAccess {
         check(Audio_SfxPaused(), "changing station keeps the paused game's sounds silent");
         check(radio.key(SDL_SCANCODE_W, game) && radio.volumeLevel() == 5, "the app raises the volume");
         check(radio.key(SDL_SCANCODE_F, game), "the paused game takes no other keys while the app is open");
-        radio.renderApp(640, 448, game);
+        draw();
+        uint8_t background[4] = {255,255,255,255};
+        glReadPixels(0,0,1,1,GL_RGBA,GL_UNSIGNED_BYTE,background);
+        check(background[0] == 0 && background[1] == 0 && background[2] == 0,
+              "the radio screen completely hides the world as in the original disabled renderer");
         check(radio.key(SDL_SCANCODE_TAB, game) && !radio.appOpen() && !game.uiPaused && !Audio_SfxPaused(),
               "Tab closes the app and resumes the game and its sounds");
+        radio.key(SDL_SCANCODE_TAB, game);
+        // Logical app coordinates map into its centred 480 x 340 viewport.
+        Host_TestMouse(387,370,1,0); draw();
+        check(radio.volumeLevel() == 6, "radio receives the frame's click even after the plugin HUD reads its input");
+        Host_TestMouse(253,370,1,0); draw();
+        check(radio.volumeLevel() == 5, "the rendered minus control uses the same scaled hit region");
+        Host_TestMouse(74,411,1,0); draw();
+        check(!radio.appOpen() && !game.uiPaused && !Audio_SfxPaused(), "the rendered Back control restores simulation and sound");
+        glReadPixels(0,0,1,1,GL_RGBA,GL_UNSIGNED_BYTE,background);
+        check(background[0] == 255 && background[1] == 0 && background[2] == 255,
+              "closing the app by mouse reveals the already-drawn world without a black display frame");
         game.playerCar = -1;
         check(!radio.key(SDL_SCANCODE_TAB, game) && !radio.appOpen(), "the app needs a car with a radio");
         game.playerCar = 0;

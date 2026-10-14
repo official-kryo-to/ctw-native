@@ -34,6 +34,12 @@ public:
     void propSmash(const int32_t pos[3], int effect, int radius);
     void pedDeath(const int32_t pos[3], bool male, bool inWater);   // cAudioManager::PlayDeathSound
     void playResident(int sample, int volume);                     // cAudioManager::PlaySfx: not positional
+    void waterStream(uint32_t id, const int32_t pos[3], int volume); // cannon event 0x6C, refreshed each tick
+    void playerEvent(int event, int volume, int radius);           // AddSoundEvent on the player ped (weapons)
+    void scriptSfx(const int32_t pos[3], int sample, int volume, int radius);   // cAudioManager::PlayScriptSfx
+    // AddSoundEvent on a short-lived object (projectiles): objectTick keeps it alive and moves it each frame
+    void objectEvent(uint32_t id, const int32_t pos[3], int event, int volume, int radius);
+    void objectTick(uint32_t id, const int32_t pos[3]);
     bool horn = false;                                           // the player holds the horn
     bool ok() const { return !res_.data.empty(); }
 
@@ -55,6 +61,7 @@ private:
                   bool active = false; int voice = 0; uint32_t rate = 22050; };
     struct Entity { Slot s[5]; int32_t pos[3] = {0, 0, 0}; bool seen = false; };
     std::map<uint32_t, Entity> ents_;
+    std::map<uint32_t, Entity> water_;
     uint32_t ticks_ = 0;
     uint32_t lastCollision_ = 0;
 

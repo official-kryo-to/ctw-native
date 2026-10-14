@@ -4,6 +4,8 @@
 // Implementations for the append-only gameplay SDK. No engine internals cross the C ABI.
 #include "gameplayapi.h"
 #include "game.h"
+#include "weaponhud.h"
+#include "os/os.h"
 #include <algorithm>
 #include <cmath>
 
@@ -209,6 +211,48 @@ void GameplayApi_Fill(CtwHostApi& api) {
         TheGame().fovOverride = std::isfinite(degrees) && degrees > 0.f ? std::clamp(degrees, 20.f, 120.f) : 0.f;
     };
     api.world_line = worldLine;
+    api.weapon_type_count = [] { return Weapons_Ok() ? 25 : 0; };
+    api.weapon_name = [](int type) -> const char* {
+        static std::string names[25];
+        if (!Weapons_Ok() || type < 0 || type >= 25) return nullptr;
+        if (names[type].empty()) names[type] = Weapons_Name(type);
+        return names[type].c_str();
+    };
+    api.weapon_givable = [](int type) { return Weapons_Ok() && type >= 1 && type <= 23 ? 1 : 0; };
+    api.give_weapon = [](int type, int ammo) -> int {
+        if (!Weapons_Ok() || type < 1 || type > 23) return 0;
+        Game& g = TheGame();
+        if (ammo <= 0) ammo = Weapons_DefaultAmmo(type);
+        // cPlayer::GiveWeapon (as a pickup does: an existing weapon in the slot is replaced)
+        return g.playerWeapons.give(type, ammo, true) ? 1 : 0;
+    };
+    api.draw_weapon_icon = [](int type, float x, float y, float w, float h) -> int {
+        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(w) || !std::isfinite(h) || w <= 0 || h <= 0) return 0;
+        return WeaponHud_DrawIcon(type, x, y, w, h, 1.f) ? 1 : 0;
+    };
+    api.set_aim_override = [](int enabled, const float* target) {
+        Game& g = TheGame();
+        g.aimOverride.on = enabled && target && std::isfinite(target[0]) && std::isfinite(target[1]) && std::isfinite(target[2]);
+        if (g.aimOverride.on) for (int k = 0; k < 3; ++k) g.aimOverride.target[k] = (int32_t)(std::clamp(target[k], -9000.f, 9000.f) * 4096.f);
+    };
+    api.screen_to_world = [](float x, float y, float* out) -> int {
+        if (!out || !std::isfinite(x) || !std::isfinite(y)) return 0;
+        return TheGame().screenToWorld(x, y, (int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight(), out) ? 1 : 0;
+    };
+    api.cycle_weapon = [](int direction) -> int {   // the next frame's Q / E (cPed::HandleWeapons)
+        Game& g = TheGame();
+        if (!direction || g.playerCar >= 0 || !Weapons_Ok()) return 0;
+        g.weaponCycle = direction > 0 ? 1 : -1;
+        return 1;
+    };
+    api.get_player_weapon = [](int* type, int* ammo, int* clip) -> int {
+        const Weapon* w = TheGame().playerWeapons.current();
+        if (!w) return 0;
+        if (type) *type = w->type;
+        if (ammo) *ammo = w->ammoCount();
+        if (clip) *clip = w->ammoInClip();
+        return 1;
+    };
     api.ped_count = [] { return (int)TheGame().peds.peds.size(); };
     api.get_ped_state = [](int index, CtwPedState* out) -> int {
         const auto& list = TheGame().peds.peds;
@@ -245,4 +289,5 @@ void GameplayApi_Fill(CtwHostApi& api) {
         if (!std::isfinite(scale) || scale < 0 || scale > 4) return 0;
         TheGame().peds.densityScale = scale; return 1;
     };
+    api.get_camera_shake = [](float out[3]) { TheGame().cameraShake(out); };
 }

@@ -10,6 +10,7 @@ import {
   cancelPort,
   freeFolder,
   inspectApk,
+  inspectLcsApk,
   minimize,
   onFileDrop,
   onPortEvents,
@@ -34,6 +35,8 @@ type Screen =
   | { kind: 'idle' }
   | { kind: 'checking'; path: string }
   | { kind: 'ready'; apk: ApkSummary; folder: string }
+  | { kind: 'mods' | 'lcs-offer'; apk: ApkSummary; folder: string }
+  | { kind: 'lcs'; apk: ApkSummary; folder: string; path: string; checking: boolean; valid: boolean; error: string }
   | { kind: 'working'; apk: ApkSummary; folder: string; progress: PortProgress | null }
   | { kind: 'done'; result: PortResult }
   | { kind: 'error'; message: string; apk: ApkSummary | null; folder: string | null }
@@ -50,6 +53,8 @@ export function App() {
   const [hasGame, setHasGame] = useState(true)
   const [withModkit, setWithModkit] = useState(true)
   const [shortcut, setShortcut] = useState(true)
+  const [mods, setMods] = useState(['Enhancements'])
+  const [lcsApk, setLcsApk] = useState<string | null>(null)
   const screenRef = useRef(screen)
   screenRef.current = screen
 
@@ -61,6 +66,17 @@ export function App() {
     if (!path) return
     const busy = screenRef.current.kind
     if (busy === 'working' || busy === 'checking') return
+    if (busy === 'lcs') {
+      const previous = screenRef.current
+      if (previous.kind !== 'lcs' || previous.checking) return
+      setScreen({ ...previous, path, checking: true, valid: false, error: '' })
+      try {
+        await inspectLcsApk(path, '2.4.379')
+        setScreen({ ...previous, path, checking: false, valid: true, error: '' })
+      } catch (e) { setScreen({ ...previous, path, checking: false, valid: false, error: errorText(e) }) }
+      return
+    }
+    setLcsApk(null)
     setScreen({ kind: 'checking', path })
     try {
       const apk = await inspectApk(path)
@@ -93,10 +109,10 @@ export function App() {
     return () => void off.then((f) => f())
   }, [])
 
-  const port = async (apk: ApkSummary, folder: string) => {
+  const port = async (apk: ApkSummary, folder: string, donor: string | null = lcsApk) => {
     setScreen({ kind: 'working', apk, folder, progress: null })
     try {
-      await startPort({ apk: apk.path, folder, withModkit, shortcut })
+      await startPort({ apk: apk.path, folder, withModkit, shortcut, mods, lcsApk: withModkit && mods.includes('Enhancements') ? donor : null })
     } catch (e) {
       setScreen({ kind: 'error', message: errorText(e), apk, folder })
     }
@@ -109,8 +125,40 @@ export function App() {
         <Hero />
         <section className="relative z-10 -mt-24 px-10 pb-5">
           {!hasGame ? <NoGameNotice /> : null}
-          <div className="kryo-radius border border-border bg-card/95 p-6 shadow-2xl shadow-black/70 backdrop-blur">
-            <Body
+          <div className="kryo-radius max-h-[70vh] overflow-y-auto border border-border bg-card/95 p-6 shadow-2xl shadow-black/70 backdrop-blur">
+            {screen.kind === 'mods' ? <div className="grid gap-4">
+              <Label>Choose premade mods</Label>
+              <Caption>Each mod can combine code, textures and other assets. You can change enabled mods later with F4.</Caption>
+              {([
+                ['Enhancements', 'Enhancements — third person and PSP-style lighting'],
+                ['CheatExample', 'Cheats — vehicle spawning, time and speed controls'],
+                ['Trumpify', 'Trumpify — example appearance replacement'],
+              ] as const).map(([id, label]) => <Check key={id} checked={mods.includes(id)} onChange={(on) => setMods((current) => on ? [...current, id] : current.filter((m) => m !== id))} label={label} />)}
+              <div className="flex gap-2">
+                <Button onClick={() => setScreen({ kind: 'ready', apk: screen.apk, folder: screen.folder })}>Back</Button>
+                <Button variant="primary" onClick={() => mods.includes('Enhancements') && !lcsApk ? setScreen({ kind: 'lcs-offer', apk: screen.apk, folder: screen.folder }) : void port(screen.apk, screen.folder)}>Continue</Button>
+              </div>
+            </div> : screen.kind === 'lcs-offer' ? <div className="grid gap-4">
+              <Label>Enhancements: optional 3D characters</Label>
+              <p className="text-sm leading-relaxed">This mod needs an extra Liberty City Stories APK for its 3D people to work. Choose your own Android version 2.4.379 APK to import the models, animations and textures.</p>
+              <Caption>You can skip this. The third-person camera and lighting still work with Chinatown Wars’ original sprites. Imported people use LCS appearances, including Toni as the player.</Caption>
+              <div className="flex gap-2">
+                <Button onClick={() => { setLcsApk(null); void port(screen.apk, screen.folder, null) }}>Skip 3D characters</Button>
+                <Button variant="primary" onClick={() => setScreen({kind:'lcs', apk:screen.apk, folder:screen.folder, path:'', checking:false, valid:false, error:''})}>Okay, choose APK</Button>
+              </div>
+            </div> : screen.kind === 'lcs' ? <div className="grid gap-4">
+              <Label>Import Liberty City Stories characters</Label>
+              <p className="text-sm">Choose Liberty City Stories for Android <strong>2.4.379</strong>.</p>
+              <Button disabled={screen.checking} onClick={() => void pickApk(true).then(choose)}><FileArchive className="size-4" />Choose LCS APK</Button>
+              <Caption>{screen.path ? fileName(screen.path) : 'You can also drop the LCS APK here.'}</Caption>
+              {screen.checking ? <Caption>Checking the package, version and character archive…</Caption> : null}
+              {screen.valid ? <Caption>Liberty City Stories 2.4.379 verified. Its character assets will be imported into Enhancements.</Caption> : null}
+              {screen.error ? <p role="alert" className="text-sm text-destructive">{screen.error}</p> : null}
+              <div className="flex gap-2">
+                <Button disabled={screen.checking} onClick={() => { setLcsApk(null); void port(screen.apk, screen.folder, null) }}>Skip</Button>
+                <Button variant="primary" disabled={!screen.valid || screen.checking} onClick={() => {setLcsApk(screen.path);void port(screen.apk, screen.folder, screen.path)}}>Import and port</Button>
+              </div>
+            </div> : <Body
               screen={screen}
               withModkit={withModkit}
               shortcut={shortcut}
@@ -118,9 +166,9 @@ export function App() {
               onShortcut={setShortcut}
               onPick={() => void pickApk().then(choose)}
               onFolder={(folder) => setScreen((s) => (s.kind === 'ready' ? { ...s, folder } : s))}
-              onPort={port}
+              onPort={(apk, folder) => withModkit ? setScreen({kind:'mods',apk,folder}) : void port(apk,folder)}
               onReset={() => setScreen({ kind: 'idle' })}
-            />
+            />}
           </div>
           <Footer />
         </section>
@@ -233,6 +281,7 @@ function Body(props: {
 }) {
   const { screen } = props
   switch (screen.kind) {
+    case 'mods': case 'lcs-offer': case 'lcs': return null
     case 'idle':
       return <DropZone onPick={props.onPick} />
     case 'checking':
@@ -378,7 +427,7 @@ function Ready(props: {
       </div>
       <div className="flex items-center justify-between gap-6">
         <div className="grid gap-2.5">
-          <Check checked={props.withModkit} onChange={props.onModkit} label="Mod menu and example mods (F4 in game)" />
+          <Check checked={props.withModkit} onChange={props.onModkit} label="Enable mods (choose premade mods next)" />
           <Check checked={props.shortcut} onChange={props.onShortcut} label="Shortcut on the desktop" />
         </div>
         <Button variant="primary" size="lg" onClick={props.onPort}>
@@ -395,6 +444,7 @@ const STAGES: { stage: Stage; label: string }[] = [
   { stage: 'tables', label: "Reading the game's tables" },
   { stage: 'assets', label: 'Copying the game files' },
   { stage: 'installing', label: 'Installing the game' },
+  { stage: 'mod-assets', label: 'Importing LCS characters' },
 ]
 
 function Working({ progress, folder }: { progress: PortProgress | null; folder: string }) {

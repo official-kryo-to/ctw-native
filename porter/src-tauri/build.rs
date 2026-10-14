@@ -9,13 +9,16 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Files the game writes into mods/ at run time; never shipped.
-const NOT_MODS: [&str; 2] = ["log.txt", "enabled.ini"];
+const NOT_MODS: [&str; 4] = ["log.txt", "enabled.ini", "settings.ini", "lcs"];
 
 fn add_dir(zip: &mut zip::ZipWriter<fs::File>, root: &Path, dir: &Path, options: zip::write::SimpleFileOptions) {
     let mut entries: Vec<PathBuf> = fs::read_dir(dir).expect("read mods").map(|e| e.unwrap().path()).collect();
     entries.sort();
     for path in entries {
         let name = path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+        if NOT_MODS.contains(&path.file_name().unwrap().to_str().unwrap_or("")) {
+            continue; // user imports/settings must never enter the distributed Porter payload
+        }
         if path.is_dir() {
             add_dir(zip, root, &path, options);
         } else if !NOT_MODS.contains(&path.file_name().unwrap().to_str().unwrap_or("")) {

@@ -4,6 +4,7 @@
 #define SDL_MAIN_HANDLED
 #include "game.h"
 #include "plugins.h"
+#include "random.h"
 #include "os/os.h"
 #include <SDL.h>
 #include <cmath>
@@ -38,8 +39,22 @@ int main() {
     SDL_Init(0);
     Game& g = TheGame();
     const auto& api = Plugins_HostApi();
-    check(api.version == 5 && CTW_HOST_HAS(&api, consume_mouse_wheel) && CTW_HOST_HAS(&api, world_line),
-          "v5 append-only host is available");
+    check(api.version == 11 && CTW_HOST_HAS(&api, cycle_weapon) && CTW_HOST_HAS(&api, consume_mouse_wheel) && CTW_HOST_HAS(&api, world_line) &&
+          CTW_HOST_HAS(&api, get_camera_shake) && CTW_HOST_HAS(&api, get_character_bounds) &&
+          CTW_HOST_HAS(&api, draw_character_model_at_time) && CTW_HOST_HAS(&api, draw_character_model_attached) &&
+          CTW_HOST_HAS(&api, give_weapon) && CTW_HOST_HAS(&api, get_player_weapon), "v11 append-only host is available");
+    check(!api.cycle_weapon(1), "without weapon_tables.bin the weapon cannot be switched");
+    check(!api.give_weapon(5, 10) && !api.weapon_name(5) && api.weapon_type_count() == 0,
+          "without weapon_tables.bin no weapon can be given");
+    const int32_t origin[3] = {};
+    g.camera.reset(origin,0); g.camera.shake(8192,2867); RandInit(0);
+    g.camera.update(origin,0,origin,nullptr);
+    float shake[3]{}; api.get_camera_shake(shake); api.get_camera_shake(nullptr);
+    check(shake[0] == -8183/4096.f && shake[1] == -2709/4096.f && shake[2] == 5144/4096.f &&
+          Rand32Critical(0) == 0xC910A194, "shake getter reads the simulated offset without advancing random numbers");
+    g.player.dead = true; api.get_camera_shake(shake);
+    check(shake[0] == 0 && shake[1] == 0 && shake[2] == 0, "death camera does not expose stale follow-camera shake");
+    g.player.dead = false; g.camera.reset(origin,0);
     check(api.get_capabilities() == CTW_CAP_GAME_EVENTS, "missing game data does not advertise unsupported systems");
     api.on_game_event(event, nullptr);
     g.vehicleInfos.resize(2);
@@ -99,7 +114,7 @@ int main() {
     check(!api.set_player_appearance(0,0,0) && !api.player_enter_vehicle(second), "missing sprite data is reported instead of starting broken animations");
     check(api.set_traffic_density(0) && api.get_traffic_density() == 0 && !api.set_traffic_density(5) &&
           !api.set_traffic_density(std::numeric_limits<float>::infinity()), "traffic density validates its documented limits");
-    g.traffic.update(g); check(g.traffic.maxCars == 0, "zero density actually suppresses traffic generation");
+    g.updatePopulation(); check(g.traffic.maxCars == 0, "zero density actually suppresses traffic generation");
     CtwGround ground{}; ground.size = sizeof ground;
     float fraction = 0;
     check(!api.get_ground(pos,&ground) && api.line_hits_world_boxes(pos,moved) == -1 && api.world_line(pos,moved,&fraction) == -1,

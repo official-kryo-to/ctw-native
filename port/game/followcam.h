@@ -16,6 +16,7 @@
 #pragma once
 #include <cstdint>
 #include "cameraobstruction.h"
+#include "camerashake.h"
 
 class Collision;
 struct WorldCamera;
@@ -26,6 +27,8 @@ public:
     // one 30 fps game frame; pedVel is the ped's velocity (units per second, 20.12)
     void update(const int32_t target[3], int16_t pedHeading, const int32_t pedVel[3], Collision* col);
     void toWorldCamera(WorldCamera& out) const;
+    void shake(int32_t amplitude, int32_t decay) { shake_.start(amplitude,decay); }
+    void shakeOffset(int32_t out[3]) const { shake_.offset(out); }
 
     int32_t height = 0;          // 20.12, set from heightScale in reset()
     float heightScale = 0.72f;   // GetCamHeightScale(): 0.72 on phone-form devices
@@ -39,6 +42,7 @@ public:
         for (int i = 0; i < 3; ++i) { pos_[i] = pos[i]; vel_[i] = 0; }
         yaw = angle; pitch_ = pitch; pitchVel_ = 0;
         obstruction_.reset(blockedFrames);
+        shake_.clear();
     }
 private:
     bool canSeeTarget(Collision* col) const;
@@ -49,4 +53,5 @@ private:
     uint16_t pitch_ = 55000;                            // +0xE4
     int32_t pitchVel_ = 0;                              // +0x140
     CameraObstruction obstruction_;
+    CameraShake shake_;
 };

@@ -67,6 +67,33 @@ struct WeatherTables {
     bool load(const std::string& path);
 };
 
+// cWeaponInfo::msWeaponInfos, indexed by eWeaponType (0 fists .. 24 thrown objects; 25..27 unused), and
+// cWeaponManager::GetDefaultWeaponAmmo's table.
+struct WeaponInfo {
+    int32_t aimClass;          // +0x00
+    int32_t maxAmmo;           // +0x04: -1 = infinite (melee)
+    int32_t clip;              // +0x08: clip size (0: no clip)
+    int32_t pickupAmmo;        // +0x0C
+    int32_t damage;            // +0x10
+    int32_t fireDelay;         // +0x14: cWeapon::SetState(1/2) timer, counted down by 2 a frame
+    int32_t reloadTime;        // +0x18: SetState(4) timer
+    int32_t range;             // +0x1C: 20.12 units (cPed::PrimaryWeaponRange)
+    int16_t spread[4];         // +0x20: CalcAccuracyDir: base, then + walking / running / sprinting (AccuracyModifyer)
+    int32_t textId;            // +0x28: e_main.gxt string
+    int32_t slot;              // +0x2C: cWeaponManager slot (byte)
+    int32_t effect;            // +0x30: sDamageInfo +0x24
+    int16_t scale[2];          // +0x34: (+0x36 > 0: AnimateWalkRunCycle's strafe pair)
+    int32_t rank;              // +0x38
+};
+static_assert(sizeof(WeaponInfo) == 60, "cWeaponInfo");
+
+struct WeaponTables {
+    WeaponInfo info[28]{};
+    uint16_t defaultAmmo[28]{};
+    int32_t traceLife[3]{};         // cBulletTraces::AddTrace: frames per trace type
+    bool load(const std::string& path);
+};
+
 struct RestartTables {
     struct Point { int32_t pos[3], heading; };
     std::vector<Point> hospitals;

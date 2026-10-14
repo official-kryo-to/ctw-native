@@ -126,6 +126,11 @@ const Collision::Cell* Collision::cell(int cx, int cy) {
                 ps.boxes = (uint32_t)C.boxes.size() - ps.box0;
                 ps.cyls = (uint32_t)C.cyls.size() - ps.cyl0;
                 ps.meshes = (uint32_t)C.meshes.size() - ps.mesh0;
+                PropLibrary::Physics primitive{};
+                const auto* kind = propLibrary_->kindForProp(C.props[i].prop);
+                ps.physical = C.props[i].kind != 1 && kind &&
+                    (kind->uprootForce >= 0 || kind->smashForce >= 0) &&
+                    propLibrary_->physics(C.props[i].prop,primitive);
             }
         }
     }

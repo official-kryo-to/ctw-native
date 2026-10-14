@@ -142,7 +142,7 @@ fn export_builds_the_game_folder() {
             &path,
             &out,
             &payload,
-            &ExportOptions { with_modkit },
+            &ExportOptions { with_modkit, ..Default::default() },
             &mut |_| {},
             &AtomicBool::new(false),
             &stub_tables,
@@ -159,7 +159,7 @@ fn export_builds_the_game_folder() {
         &path,
         &dir.path().join("x"),
         b"",
-        &ExportOptions { with_modkit: true },
+        &ExportOptions { with_modkit: true, ..Default::default() },
         &mut |_| {},
         &AtomicBool::new(false),
         &stub_tables,
@@ -177,4 +177,65 @@ fn shortcut_points_at_the_exe() {
     crate::export::write_shortcut(&link, std::path::Path::new("C:\\Games\\GTA CTW\\GTACTW.exe")).unwrap();
     let text = std::fs::read_to_string(link).unwrap();
     assert!(text.contains("URL=file:///C:/Games/GTA%20CTW/GTACTW.exe"), "{text}");
+}
+
+#[test]
+fn premade_selection_and_failed_donor_do_not_publish_partial_games() {
+    let payload = zip_of(&[
+        ("GTACTW.exe", b"MZ game"),
+        ("mods/ModMenu.dll", b"MZ menu"),
+        ("mods/Enhancements/mod.ini", b"name = Enhancements"),
+        ("mods/CheatExample/mod.ini", b"name = Cheats"),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("game.apk");
+    let mut extra = GAME.to_vec();
+    extra.push(("lib/arm64-v8a/libGame.so", b""));
+    std::fs::write(&path, apk(&extra)).unwrap();
+    for mods in [vec![], vec!["Enhancements".to_owned()]] {
+        let out = dir.path().join(format!("selected-{}", mods.len()));
+        let options = ExportOptions { with_modkit: true, mods: Some(mods.clone()), ..Default::default() };
+        export_with(&path, &out, &payload, &options, &mut |_| {}, &AtomicBool::new(false), &stub_tables).unwrap();
+        assert!(out.join("mods/ModMenu.dll").is_file());
+        assert_eq!(out.join("mods/Enhancements/mod.ini").is_file(), !mods.is_empty());
+        assert!(!out.join("mods/CheatExample").exists());
+    }
+    let donor = dir.path().join("donor.apk");
+    std::fs::write(&donor, b"invalid APK").unwrap();
+    let out = dir.path().join("failed");
+    let options = ExportOptions { with_modkit: true, mods: Some(vec!["Enhancements".into()]), lcs_apk: Some(donor) };
+    assert!(export_with(&path, &out, &payload, &options, &mut |_| {}, &AtomicBool::new(false), &stub_tables).is_err());
+    assert!(!out.exists());
+    assert!(std::fs::read_dir(dir.path()).unwrap().all(|e| !e
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .starts_with(".ctw-")));
+}
+
+#[test]
+fn cancelling_at_installation_does_not_publish() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("game.apk");
+    let mut extra = GAME.to_vec();
+    extra.push(("lib/arm64-v8a/libGame.so", b""));
+    std::fs::write(&path, apk(&extra)).unwrap();
+    let out = dir.path().join("out");
+    let payload = zip_of(&[("GTACTW.exe", b"MZ game")]);
+    let cancel = AtomicBool::new(false);
+    let result = export_with(
+        &path,
+        &out,
+        &payload,
+        &ExportOptions::default(),
+        &mut |p| {
+            if p == Progress::Installing {
+                cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        },
+        &cancel,
+        &stub_tables,
+    );
+    assert!(matches!(result, Err(PortError::Cancelled)));
+    assert!(!out.exists());
 }

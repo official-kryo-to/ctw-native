@@ -23,6 +23,7 @@ void FollowPedCam::reset(const int32_t t[3], int16_t heading) {
     pitch_ = 55000;
     pitchVel_ = 0;
     obstruction_.reset();
+    shake_.clear();
 }
 
 // cFollowPedCam::CanSeeTargetFromDefaultPos: the line from 2 units above the target to where the camera would
@@ -110,6 +111,7 @@ void FollowPedCam::update(const int32_t t[3], int16_t pedHeading, const int32_t 
     pos_[0] = want[0]; pos_[1] = want[1]; pos_[2] = want[2];
     obstruction_.recover(t, pos_, col);
     obstruction_.count(t, pos_, true, col);
+    shake_.apply(pos_); // cBaseCam::Update: after the follow/collision pass, before RecalculateMatrix
 }
 
 void FollowPedCam::position(float out[3]) const {

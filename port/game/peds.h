@@ -37,14 +37,15 @@
 // Fleeing (cFleeOnFoot): sprint along the pavement network, at each node taking the link that leads most directly
 // away from the threat (cSectorNodeData::sRandomNode::SetBestDir), reaching nodes within 2 units; off the network,
 // straight away from it for 200 units. A ped flees until it is removed.
-// A vehicle explosion (cExplosionBigVehicle, type 4) damages every ped within 22 units with weapon type 6 (action 3);
-// the damage itself (within 15 units, cPed::Damage) is not ported yet, the reaction is.
+// Generic type-0/type-4 blasts apply distance-based damage and effect-2 knockdowns to on-foot peds;
+// seated occupants are protected from direct blast damage and die through their vehicle instead.
 //
 // Not ported yet (approximations are marked in peds.cpp): attractors and doors, talking, mooching, the roll's
 // facing quadrants, combat and ped-on-ped collision. Being run over knocks a ped down with the on-ground death
 // animation.
 #pragma once
 #include "player.h"
+#include "traffic.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -58,7 +59,7 @@ public:
     bool init(const std::string& dataDir);   // pedinfo.bin
     bool ok() const { return !records_.empty(); }
     void update(Game& g);                     // once per game frame, after traffic
-    void render(const PedSprites* sprites, const PedLight* light) const;
+    void render(const PedSprites* sprites, const PedLight* light, float alpha = 1.f) const;
     void clear() { peds.clear(); }
 
     struct NodeRef {
@@ -72,6 +73,11 @@ public:
         uint32_t uid = 0;
         int type = 1, subtype = 0;
         bool male = true;
+        uint32_t vehicle = 0;       // stable vehicle uid, never a cars[] index
+        int seat = -1;
+        bool exiting = false;
+        int32_t seatPosition[3]{}, exitTarget[3]{};
+        int16_t exitVelocity[3]{};
         NodeRef cur, prev;           // walking from prev towards cur
         int32_t target[2] = {0, 0};  // cWanderPath's cTarget
         int deadFrames = -1;         // >= 0: knocked down
@@ -79,6 +85,7 @@ public:
         bool evading = false;        // cWanderPath +0x6A: rolled away from the player's car, sprints while it is near
         int rollFrames = -1;         // >= 0 while rolling (cRollOutOfVehicle)
         int32_t rollVel[2] = {0, 0}; // units/s
+        bool movementPrepared = false;
         struct Flee {                // cFleeOnFoot
             bool on = false, straight = false;
             int32_t from[3] = {0, 0, 0};   // the threat
@@ -91,6 +98,7 @@ public:
     float densityScale = 1.f;        // PC mod API: scales the target population; 1 = the original
 
     int alive() const;
+    static bool vehicleAbove(const Game& g, const Player& body); // cAnimation::NextState's radius-0.75 query
 
     // Record of pedinfo.bin for a type and subtype (nullptr if there is none).
     struct Reaction { uint8_t chance, reaction, action; };
@@ -104,20 +112,35 @@ public:
     int reactionFor(const Ped& p, int action) const;   // cPed::GetReactionHelper
     // cPed::HandleReaction on foot: the threat is a point, or follows a vehicle (fromCar != 0)
     void react(Game& g, Ped& p, int action, const int32_t from[3], uint32_t fromCar);
-    void explosion(Game& g, const int32_t pos[3]);   // peds near an explosion react to it
+    void explosion(Game& g, const struct ExplosionBlast& blast);
+    // cPed::Damage for a bullet (sDamageInfo type 1): FixDamageForArmour (armour 100), the health, death, then
+    // ReactToDamage (cSimpleMover::GetAction: action 0). from: the shooter's position.
+    void bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], int effect, const int32_t from[3]);
+    // cPed::Damage for a melee hit (sDamageInfo type 0, or 12 for the chainsaw): the health and death, the hit
+    // animation roll (Rand16Critical(2): +0xEB) and ReactToDamage (action 0).
+    void meleeHit(Game& g, Ped& p, int damage, int type, const int32_t from[3]);
+    // cPopulationManager::GenerateRandomPed (from Game::updatePopulation): roll a type from the zone's profile and
+    // create the ped at the next cLocalAreaKnowledge pavement crossing of the 60-unit circle
+    void generate(Game& g, const Traffic::ZoneInfo& z);
+    void collect(Game& g);   // cWorld::GarbageCollection: peds in unloaded sectors are deleted
+    bool createDriver(Game& g, Vehicle& car, int type, const Traffic::ZoneInfo& zone);
+    bool exitOccupant(Game& g, Vehicle& car, int seat); // true when the seat is free
+    void releaseOccupants(Game& g, Vehicle& car, bool killed);
+    void discardOccupants(Vehicle& car); // removal of an offscreen generated car
 
 private:
     std::vector<Record> records_;
     std::vector<uint16_t> firstRecord_;      // per ped type
     uint32_t nextUid_ = 1;
-    uint32_t linkCursor_ = 0;
 
-    void spawn(Game& g, int type);
-    bool createPos(Game& g, int32_t pos[3], NodeRef& from, NodeRef& to);
+    void spawn(Game& g, int type, const Traffic::ZoneInfo& z);
+    bool appearance(Game& g, Ped& p, int type, const Traffic::ZoneInfo& z);
+    void updateOccupant(Game& g, Ped& p);
     void wander(Game& g, Ped& p);
     bool advance(Game& g, Ped& p);
     void setTarget(Game& g, Ped& p);
     void runOver(Game& g, Ped& p);
+    void contacts(Game& g); // dynamic sphere contacts, after Act and before Integrate
     bool evade(Game& g, Ped& p);   // true while the ped evades the player's car
     void startRoll(Ped& p, const int32_t dir[2]);   // dir: unit vector (Q12)
     bool roll(Game& g, Ped& p);                     // true while rolling
@@ -128,4 +151,5 @@ private:
     // cSectorNodeData::GetRandomNode: best = a Q12 direction to follow (nullptr: random)
     bool nextNode(Game& g, const NodeRef& cur, const int32_t from[2], const int32_t* best, NodeRef& out) const;
     friend struct PedsTestAccess;
+    friend class LocalArea;   // AddPathingNodes resolves bridge nodes
 };

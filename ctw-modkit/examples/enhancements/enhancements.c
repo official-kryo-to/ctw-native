@@ -9,7 +9,7 @@
 const CtwApi* api;
 CtwMod* self;
 
-static const CtwFeature* const features[] = {&third_person, &psp_lighting};
+static const CtwFeature* const features[] = {&third_person, &pc_aiming, &psp_lighting, &lcs_characters};
 enum { FEATURES = sizeof features / sizeof features[0], MAX_SAVED = 64 };
 
 static int mod_on = 1, frame_hook = 0;

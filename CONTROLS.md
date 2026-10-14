@@ -6,6 +6,10 @@
 | Shift | Sprint |
 | Ctrl | Walk |
 | F / Enter | Get in a vehicle |
+| Space / left mouse | Fire (aims at the nearest target in front, as the original does) |
+| G / right mouse (hold) | Throw a grenade, molotov or flash bang: hold longer to throw further; drops a mine |
+| Q / E | Previous / next weapon |
+| Tab | Weapon wheel |
 
 | In a vehicle | |
 | --- | --- |
@@ -34,10 +38,12 @@
 | V | Third-person camera |
 | Mouse | Look around |
 | C (held, in a vehicle) | Look behind |
+| Mouse (PC aiming, when switched on) | Aim at the cursor; throws land on it |
+| Mouse wheel (PC aiming) | Next / previous weapon |
 
 | Cheat Example mod | |
 | --- | --- |
-| F7 | Vehicle spawner (Enter spawns the first match) |
+| F7 | Spawn menu: vehicles and weapons (Enter spawns the first match) |
 | Shift (in a vehicle) | Nitro, when switched on |
 | F8 | Free camera |
 | W A S D, mouse | Free camera: move, look |

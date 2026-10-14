@@ -67,7 +67,8 @@ bool PropLibrary::load() {
             memcpy(&mass, &d[at + 8], 2);
             memcpy(&smash, &d[at + 10], 2);
             memcpy(&uproot, &d[at + 12], 2);
-            kinds_.push_back({d[at], d[at + 2], smash / 4096.f, uproot / 4096.f, d[at + 1], mass, d[at + 7] != 0});
+            kinds_.push_back({d[at], d[at + 2], smash / 4096.f, uproot / 4096.f, d[at + 1], mass,
+                              d[at + 7] != 0, d[at + 3] != 0, d[at + 4] != 0});
         }
     return !defs_.empty();
 }

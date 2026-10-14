@@ -3,7 +3,7 @@
 // See LICENSE in the repository root.
 /*
  * Cheat Example - cheats, and a tour of the C API:
- *   - vehicle spawner (F7) and free camera (F8)
+ *   - spawn menu (F7): vehicles and weapons in one list; free camera (F8)
  *   - vehicle cheats: repair, invincibility, nitro (hold Shift while driving), flip upright, new paint
  *   - world cheats: time of day, frozen clock, weather, traffic and pedestrian density, clearing the area
  *   - speed, time speed and render distance
@@ -35,11 +35,12 @@ static int cam_on = 0, cam_was_on = 0;
 static float cam_eye[3], cam_yaw, cam_pitch, cam_speed = 30.f;
 static double last_time;
 
-/* ---- vehicle spawner ---------------------------------------------------------------------------------- */
-#define MAX_VEHICLES 512
+/* ---- spawn menu: weapons (version 10 games) and vehicles in one list ------------------------------------- */
+#define MAX_ENTRIES 560
+#define WEAPON_ENTRY 0x10000       /* shown[] holds a vehicle id, or WEAPON_ENTRY + a weapon type */
 static int spawner_open = 0, search_focused = 0;
 static char filter[32];
-static int shown[MAX_VEHICLES], shown_count;
+static int shown[MAX_ENTRIES], shown_count;
 static CtwUi ui;
 static CtwUiScroll scroll;
 static float spin;                 /* the hovered car turns */
@@ -60,7 +61,16 @@ static int contains_nocase(const char* text, const char* what) {
 static void refilter(void) {
     int count = api->vehicle_count();
     shown_count = 0;
-    for (int id = 0; id < count && shown_count < MAX_VEHICLES; ++id) {
+    if (CTW_MOD_HAS(api, give_weapon) && CTW_MOD_HAS(api, weapon_type_count)) {
+        const int weapons = api->weapon_type_count();
+        for (int type = 0; type < weapons && shown_count < MAX_ENTRIES; ++type) {
+            if (!api->weapon_givable(type)) continue;
+            const char* name = api->weapon_name(type);
+            if (contains_nocase(name ? name : "", filter) || contains_nocase("weapon", filter))
+                shown[shown_count++] = WEAPON_ENTRY + type;
+        }
+    }
+    for (int id = 0; id < count && shown_count < MAX_ENTRIES; ++id) {
         if (!api->vehicle_spawnable(id)) continue;
         const char* name = api->vehicle_name(id);
         char number[16];
@@ -178,8 +188,15 @@ static void cheat_tick(void) {
 }
 
 static void spawn(int id) {
-    const char* name = api->vehicle_name(id);
     char text[96];
+    if (id >= WEAPON_ENTRY) {      /* the game's default amount of ammo */
+        const char* name = api->weapon_name(id - WEAPON_ENTRY);
+        snprintf(text, sizeof text, api->give_weapon(id - WEAPON_ENTRY, 0) ? "Got %s (Q / E to switch)" : "Could not give %s",
+                 name ? name : "weapon");
+        say(text);
+        return;
+    }
+    const char* name = api->vehicle_name(id);
     snprintf(text, sizeof text, api->spawn_vehicle(id) ? "Spawned %s" : "Could not spawn %s", name ? name : "vehicle");
     say(text);
 }
@@ -299,12 +316,12 @@ static void draw_spawner(void) {
     const float px = r.x, py = r.y, pw = r.w, ph = r.h, row = ctw_ui_row_h(&ui);
     char line[64];
     snprintf(line, sizeof line, "%d", shown_count);
-    if (ctw_ui_panel(&ui, px, py, pw, ph, "VEHICLES", line)) { set_spawner(0); return; }
+    if (ctw_ui_panel(&ui, px, py, pw, ph, "SPAWN", line)) { set_spawner(0); return; }
 
     const float top = py + ctw_ui_title_h(&ui) + 12.f;
     int was_focused = search_focused;
     if (ctw_ui_textbox(&ui, px + 14.f, top, pw - 28.f, row, filter, sizeof filter, &search_focused,
-                       "Search by name or ID...")) {
+                       "Search vehicles and weapons...")) {
         refilter();
         scroll.target = 0.f;
     }
@@ -326,20 +343,32 @@ static void draw_spawner(void) {
         const int hot = in_grid && ctw_ui_in(&ui, cx, cy, cw, ch);
         api->draw_rect(cx, cy, cw, ch, hot ? 0xE0B02040u : CTW_UI_ROW);
         if (hot) api->draw_rect(cx, cy + ch - 3.f, cw, 3.f, CTW_UI_ACCENT);
-        api->draw_vehicle(id, cx + 4.f, cy + 4.f, cw - 8.f, pic_h, hot ? spin : 35.f);
+        const char* name;
+        if (id >= WEAPON_ENTRY) {   /* the game's own weapon picture, larger while hovered */
+            name = api->weapon_name(id - WEAPON_ENTRY);
+            const float grow = hot ? 1.f : 0.88f, iw = (cw - 8.f) * grow, ih = pic_h * grow;
+            if (!CTW_MOD_HAS(api, draw_weapon_icon) ||
+                !api->draw_weapon_icon(id - WEAPON_ENTRY, cx + 4.f + (cw - 8.f - iw) * 0.5f, cy + 4.f + (pic_h - ih) * 0.5f, iw, ih)) {
+                const float big = ctw_ui_lh(&ui, 1.6f);
+                ctw_ui_text_fit(&ui, cx + 14.f, cy + 4.f + (pic_h - big) * 0.5f, 1.6f, CTW_UI_DIM, "WEAPON", cw - 28.f);
+            }
+            snprintf(line, sizeof line, "Weapon %d", id - WEAPON_ENTRY);
+        } else {
+            api->draw_vehicle(id, cx + 4.f, cy + 4.f, cw - 8.f, pic_h, hot ? spin : 35.f);
+            name = api->vehicle_name(id);
+            snprintf(line, sizeof line, "Vehicle %d", id);
+        }
         api->set_clip(gx, gy, gw, gh);                   /* the picture changes the drawing state */
-        const char* name = api->vehicle_name(id);
         const float ty = cy + 4.f + pic_h + 8.f;
         ctw_ui_text_fit(&ui, cx + 10.f, ty, 1.05f, CTW_UI_TEXT, name ? name : "?", cw - 20.f);
-        snprintf(line, sizeof line, "ID %d", id);
         api->draw_text(cx + 10.f, ty + name_h + 2.f, 0.85f, CTW_UI_DIM, line);
         if (hot && ui.clicked) spawn(id);
     }
-    if (!shown_count) ctw_ui_text(&ui, gx + 6.f, gy + 10.f, 1.f, CTW_UI_DIM, "No vehicle matches.");
+    if (!shown_count) ctw_ui_text(&ui, gx + 6.f, gy + 10.f, 1.f, CTW_UI_DIM, "Nothing matches.");
     ctw_ui_scroll_end(&ui);
     /* what just happened, else how it works */
     if (message[0] && api->frame_count() < message_until) ctw_ui_footer(&ui, px, py, pw, ph, CTW_UI_ACCENT, message);
-    else ctw_ui_footer(&ui, px, py, pw, ph, CTW_UI_DIM, "Click to spawn.   Enter: first match.   F7 or Esc: close");
+    else ctw_ui_footer(&ui, px, py, pw, ph, CTW_UI_DIM, "Click: spawn.   Enter: first match.   Q / E: switch weapon.   Esc: close");
 }
 
 /* The free camera's keys, at the bottom above the game's help line. Only while nothing else is open: with a
@@ -387,8 +416,9 @@ CTW_MOD_EXPORT int ctw_mod_init(CtwMod* mod, const CtwApi* a) {
     weather = applied_weather = api->get_weather();
     time_of_day = applied_time = api->get_time_of_day();
     const int labels = CTW_MOD_HAS(api, menu_add_label), choices = CTW_MOD_HAS(api, menu_add_choice);
+    if (labels) api->menu_add_label(mod, "SPAWN");
+    api->menu_add_button(mod, "Spawn menu (F7)", open_spawner_button, 0);
     if (labels) api->menu_add_label(mod, "VEHICLES");
-    api->menu_add_button(mod, "Vehicle spawner (F7)", open_spawner_button, 0);
     if (has_gameplay()) {
         api->menu_add_button(mod, "Repair vehicle", repair_button, 0);
         api->menu_add_button(mod, "Flip vehicle upright", flip_button, 0);

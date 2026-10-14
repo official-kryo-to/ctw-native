@@ -137,6 +137,19 @@ bool WeatherTables::load(const std::string& path) {
     return true;
 }
 
+bool WeaponTables::load(const std::string& path) {
+    auto file = openTable(path);
+    WeaponTables next;
+    if (!magic(file, "CTWWPN01") || !read(file, next.info, sizeof next.info) ||
+        !read(file, next.defaultAmmo, sizeof next.defaultAmmo) || !read(file, next.traceLife, sizeof next.traceLife) ||
+        !end(file)) return false;
+    for (int32_t life : next.traceLife) if (life < 1 || life > 127) return false;
+    for (const WeaponInfo& w : next.info)
+        if (w.slot < 0 || w.slot > 10 || w.clip < 0 || w.clip > 255 || w.fireDelay < 0 || w.reloadTime < 0) return false;
+    *this = next;
+    return true;
+}
+
 bool RestartTables::load(const std::string& path) {
     hospitals.clear();
     auto file = openTable(path);

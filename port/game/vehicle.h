@@ -27,6 +27,7 @@
 
 class Collision;
 struct Model;
+struct NodeMatrix;
 class SmokeEmitter;
 class FireEmitter;
 
@@ -58,19 +59,23 @@ public:
     void openDoor(int seat);
     void closeDoor(int seat);
     bool doorOpen(int seat) const { return doorOpenBits_ >> seat & 1; }   // +0x944 bits 14..18
-    bool hasDoor(int seat) const { return seat >= 0 && seat < 4 && doorNode_[seat] > 0; }
+    bool hasDoor(int seat) const { return seat >= 0 && seat < 4 && doorNode_[seat] > 0 && !debris_[seat].detached; }
     void doorSpawnPoint(int seat, int32_t out[3]) const;   // cVehicle::GetDoorSpawnPointLocalPosition
     void seatOffset(int seat, int32_t out[3]) const;       // cVehicle::GetSeatOffsetLocalSpace
     void localToWorld(const int32_t local[3], int32_t out[3]) const;   // TransformCoords with the entity matrix
     int numSeats() const { return numSeats_; }
 
     // damage (cVehicle::DoOnCollisionWorking / Damage / SetHealth / Process / SetDead)
-    int health() const { return health_; }        // +0x99D: 255 = new; smoke below 190, burning below 31
+    int health() const { return health_; }
+    int32_t mass() const { return mass_; }        // cPhysical::GetMass (+0x1A8)        // +0x99D: 255 = new; smoke below 190, burning below 31
     bool dead() const { return dead_; }
     void damage(int amount);                      // cVehicle::Damage (collision damage)
+    void explosionHit(const struct ExplosionBlast& blast, bool occupiedByPlayer);
     bool repair();                               // mod API: restore a living vehicle, without resurrecting wrecks
     void teleport(const int32_t pos[3], int16_t heading); // rebuild the physics transform, upright and stationary
     void processDamage(uint32_t frame);           // the damage part of cVehicle::Process
+    void processDebris(const Model* model);
+    void explosionDebris(const Model* model);
     bool justDied = false;
     void releaseEffects();
     // what the sound code reads (CTyre +0x50 burst / +0x52 wheel spin / +0x53 on the ground, CEngine rpm, the
@@ -111,6 +116,7 @@ public:
 
     int16_t heading() const;
     int32_t speed() const;
+    void velocityAtWorldPos(const int32_t p[3], int32_t out[3]) const { velocityAt(p, out); }
     int gear() const { return gear_; }
     bool physicsActive() const { return physics_; }
     bool isBike() const { return bike_; }        // cBike (class 0x2E, vehicle type 1)
@@ -119,6 +125,7 @@ public:
     uint8_t bikeMounted = 1;                     // +0xB94 (set again when a rider gets on)
     // cBike::GetPedRenderPos: where the rider's upper body / legs are drawn (world, Q12)
     void riderRenderPos(int32_t upper[3], int32_t legs[3]) const;
+    void riderRenderBasis(float out[9]) const;
     bool simple() const { return simple_; }
     bool hasHeadlights() const { return infoFlags8e_ >> 8 & 1; }   // HeadLightsOn: info +0x8E bit 8
 
@@ -239,6 +246,18 @@ private:
     // doors
     struct Door { uint16_t angle = 0; int8_t speed = 0; uint8_t mode = 0; };   // cVehicleDoor (+0x930 + seat x 4)
     Door doors_[5];
+    struct Debris {
+        bool detached = false;
+        int32_t pos[3]{}, velocity[3]{}, angular[3]{}, q[4]{0,0,0,4096};
+    } debris_[5];
+    int32_t pendingDebris_[5]{};
+    uint8_t flapBits_ = 0;
+    int32_t flapPreviousVelocity_[3]{};
+    bool bootReverse_ = false;
+    void flapDoors();
+    void damageDoors(unsigned damage);
+    bool createDebris(int slot, int32_t strength, const Model& model);
+    bool debrisNode(int node, const float carMatrix[16], NodeMatrix& out) const;
     int8_t doorNode_[5] = {-1, -1, -1, -1, -1};   // info +0x94..+0x97, +0x110 (model node ids)
     int32_t doorOff_[4][2] = {};                   // info +0x98 (local x, y)
     int32_t seatOff_[4][3] = {};                   // info +0xDC

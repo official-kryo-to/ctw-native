@@ -18,3 +18,4 @@ bool Plugins_GameInput();                // false while a plugin (a menu) has ta
 void Plugins_Log(const std::string& line);
 const CtwHostApi& Plugins_HostApi();     // same public table used when loading DLLs
 void Plugins_EmitEvent(uint32_t type, CtwVehicle vehicle, int modelId, int value = 0);
+bool Plugins_RenderCharacter(const CtwCharacterPose& pose);

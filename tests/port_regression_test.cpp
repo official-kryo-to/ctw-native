@@ -28,6 +28,78 @@ struct VehicleTestAccess {
     }
     static bool fire(const Vehicle& v) { return v.fire_ != nullptr; }
     static void bike(Vehicle& v, bool bike) { v.bike_ = bike; }
+    static void flaps() {
+        VehicleInfo info{}; info.raw[0x94]=1; info.raw[0x110]=2;
+        const int32_t at[3]={};
+        Vehicle v; v.init(info,0,at,0,0);
+        v.flapBits_=1; v.flapDoors();
+        check(v.doors_[0].speed==11 && v.doors_[0].mode==0,
+              "a damaged door has the reference restoring force without a scripted opening animation");
+        v.doors_[0]={40,0,0}; v.vel[1]=30*4096; v.flapDoors();
+        check(v.doors_[0].speed==-33, "forward acceleration swings an unlatched door shut");
+        v.doors_[0]={40,0,0}; v.vel[1]=0; v.flapDoors();
+        check(v.doors_[0].speed==30, "deceleration swings an unlatched door outward");
+        v.doors_[0]={40,0,0}; v.angVel[2]=4096; v.flapDoors();
+        check(v.doors_[0].speed==2, "turning contributes twice the absolute spin along the car up axis");
+        v.debris_[0].detached=true; v.doors_[0]={25,10,0}; v.updateDoors();
+        check(v.doors_[0].angle==25 && v.doors_[0].speed==10,
+              "the hinge controller cannot move a detached panel");
+        v.flapBits_=16; v.angVel[2]=0; v.doors_[4]={40,0,0}; v.vel[1]=30*4096;
+        v.flapDoors();
+        check(v.doors_[4].speed==32, "the hatch uses its separate acceleration and gravity controller");
+        Model m; m.nodes.resize(3); m.nodes[2].t[1]=-1; v.processDebris(&m);
+        v.doors_[4]={40,0,0}; std::fill(v.flapPreviousVelocity_,v.flapPreviousVelocity_+3,0);
+        v.flapDoors();
+        check(v.bootReverse_ && v.doors_[4].speed==-33, "a rear hinge reverses the hatch response");
+        v.releaseEffects();
+    }
+    static void debris() {
+        VehicleInfo info{}; info.raw[0x94]=1; info.raw[0x95]=255; info.raw[0x96]=255; info.raw[0x97]=255;
+        info.raw[0x110]=255;
+        const int32_t at[3]={10*4096,20*4096,4096};
+        Vehicle v; v.init(info,0,at,0,0); v.vel[0]=2*4096;
+        Model model;
+        NodeMatrix root{}; root.r[0][0]=root.r[1][1]=root.r[2][2]=1;
+        model.world={root,root}; model.world[1].t[0]=-1; model.world[1].t[2]=2;
+        RandInit(0);
+        check(v.createDebris(0,0xA000,model) && !v.hasDoor(0), "detaching a door removes it from usable door slots");
+        check(v.debris_[0].pos[0]==at[0]-4096 && v.debris_[0].pos[2]==at[2]+2*4096,
+              "fragment starts at its model node in the vehicle's world transform");
+        check(!v.createDebris(0,0xA000,model) && !v.createDebris(1,0xA000,model),
+              "a missing node or already detached door cannot emit another fragment");
+        auto& d=v.debris_[0];
+        d.velocity[0]=d.velocity[1]=0; d.velocity[2]=40960;
+        std::fill(d.angular,d.angular+3,0);
+        const int32_t oldZ=d.pos[2]; v.processDebris(&model);
+        check(d.velocity[2]==35173 && d.pos[2]==oldZ+1167, "debris uses the reference gravity, drag and 17/512 time step");
+        const int32_t worldX=d.pos[0]; v.pos[0]+=100*4096;
+        float matrix[16]; v.modelMatrix(matrix); NodeMatrix node;
+        check(v.debrisNode(1,matrix,node) && std::abs(node.t[0]+matrix[12]-worldX/4096.f)<0.001f,
+              "moving the wreck cannot drag its detached door through the world");
+        d.pos[2]=-20*4096; v.processDebris(&model);
+        check(d.pos[2]==-20*4096, "debris stops below the original -20-unit cutoff");
+        check(v.repair() && v.hasDoor(0) && !v.debris_[0].detached, "repair restores missing door geometry and usability");
+        v.engineOn=true; v.indicators=3; v.setDead();
+        check(!v.engineOn && !v.indicators && v.dead(), "a burnt wreck cannot keep its engine or indicators running");
+        v.releaseEffects();
+    }
+};
+
+struct WaterTestAccess {
+    static void fountain(const Fountain& f, const int32_t at[3]) {
+        check(std::equal(f.pos_,f.pos_+3,at) && f.vel_[0]==-1024 && f.vel_[1]==0 && f.vel_[2]==6144,
+              "hydrant fountain stays at its base with the reference opposing horizontal jet and 1.5-unit lift");
+    }
+    static void run() {
+        WaterCannon jet; const int32_t at[3]={},v[3]={0,0,6144};
+        jet.input(at,v,0);
+        check(jet.splash_.has_value(), "water input creates the missing nozzle splash emitter");
+        jet.step();
+        for(int i=1;i<90;++i) { jet.input(at,v,i); jet.step(); }
+        check(jet.splash_.has_value() && jet.age_[(jet.head_-1)&15]==2, "sustained water input keeps its spray and ring stream alive");
+        WaterCannon dry; dry.flags&=~8; dry.input(at,v,0);
+        check(!dry.splash_, "the water splash flag controls spray emission");
+    }
 };
 
 struct PlayerTestAccess {
@@ -152,6 +224,16 @@ struct SoundTestAccess {
         for (auto& e : sound.script_) sound.stopSlots(e);
         sound.propSmash(at, 4); sound.script_[0].pos[0] = 1000 * 4096; sound.update(game);
         check(sound.script_[0].s[0].event == 0x9C, "distant object sounds expire and release their script slot");
+        sound.tables_.events[0x6C].mode=1; sound.tables_.events[0x6C].sfx=17;
+        sound.waterStream(100,at,60);
+        check(sound.water_.at(100).s[0].event==0x6C && sound.water_.at(100).s[0].radius==300,
+              "water streams use their resident looping event and reference positional radius");
+        sound.update(game); const int waterVoice=sound.water_.at(100).s[0].voice;
+        check(waterVoice && Audio_SfxPlaying(waterVoice), "water loop starts from the resident sound bank");
+        sound.waterStream(100,at,50); sound.update(game);
+        check(sound.water_.at(100).s[0].voice==waterVoice, "refreshing a water stream preserves its voice instead of restarting it");
+        sound.update(game);
+        check(sound.water_.empty() && !Audio_SfxPlaying(waterVoice), "removing a fountain stops its loop and releases its audio entity");
         Audio_SetSfxPaused(false);
     }
 };
@@ -232,10 +314,12 @@ struct CollisionTestAccess {
         g.props.shapes(p, cell->boxes, cell->cyls, cell->meshes);
         shapes.boxes = (uint32_t)cell->boxes.size() - shapes.box0;
         shapes.cyls = (uint32_t)cell->cyls.size(); shapes.meshes = (uint32_t)cell->meshes.size();
+        shapes.physical = true;
         cell->propShapes.push_back(shapes);
         g.collision.cells_[2020] = std::move(cell);
     }
     static bool solid(const Game& g) { return g.collision.cells_.at(2020)->propShapes[0].solid; }
+    static void physical(Game& g,bool on) { g.collision.cells_.at(2020)->propShapes[0].physical=on; }
     static void wall(Game& g) {
         const auto& p=g.collision.cells_.at(2020)->props[0];
         g.collision.setPropSolid(20,20,0,false);
@@ -254,6 +338,12 @@ struct CollisionTestAccess {
         for (int i = 0; i < 70; ++i) boxes.push_back(boxes[0]);
         col.candidates(p, 4096, false, candidates);
         check(candidates.boxes.size() == 71, "dense collision lists do not discard later prop shapes");
+        Collision::Cell::PropShapes dynamic; dynamic.box0=0; dynamic.boxes=1; dynamic.physical=true;
+        col.cells_[2020]->propShapes.push_back(dynamic);
+        col.candidates(p,4096,false,candidates,false);
+        check(candidates.boxes.size()==70, "vehicle world queries omit only props handled by the physical contact pass");
+        col.candidates(p,4096,false,candidates);
+        check(candidates.boxes.size()==71, "pedestrian and camera queries still collide with unbroken movable props");
     }
 };
 
@@ -280,6 +370,7 @@ struct PropTestAccess {
     }
     static void movable(Game& g) { g.props.kinds_[1].smashForce=-1; g.props.kinds_[1].uprootForce=.1f; }
     static void allowUproot(Game& g) { g.props.kinds_[1].uprootForce=.1f; }
+    static void wide(Game& g) { g.props.defs_[0].shapes={{1,{0,0,0,12*4096,4*4096,2*4096}}}; }
     static void run() {
         PropLibrary lib;
         PropLibrary::Def def{};
@@ -312,6 +403,21 @@ struct PropTestAccess {
 struct ParticlesTestAccess {
     static size_t count() { return TheParticles().emitters_.size(); }
     static const Emitter* at(size_t i) { return TheParticles().emitters_.at(i).get(); }
+    static const Emitter* at(const Particles& p, size_t i) { return p.emitters_.at(i).get(); }
+    static const Particle& particle(const Emitter& e, size_t i = 0) { return e.parts_.at(i); }
+    static bool billboard(const Emitter& e) { return e.billboard_; }
+    static bool additive(const Emitter& e) { return e.additive_; }
+    static int sprite(const Emitter& e) { return e.sprite_; }
+    static int active(const Emitter& e) { return e.alive_; }
+    static void step(Emitter& e, Particle& p, uint32_t frame) { e.frame_ = frame; e.updateParticle(p); }
+};
+
+struct GameTestAccess {
+    static void snapshot(Game& g) { g.snapshotPoses(); }
+    static size_t explosions(const Game& g) { return g.explosions_.size(); }
+    static void blastPosition(const Game& g, int32_t out[3]) { std::copy(g.explosions_.front().pos,g.explosions_.front().pos+3,out); }
+    static void processExplosions(Game& g) { g.processVehicleDeaths(); }
+    static unsigned cloudCount(const Game& g, const int32_t at[3]) { return g.explosionParticleCount(at); }
 };
 
 struct PropDynamicsTestAccess {
@@ -323,6 +429,19 @@ struct PropDynamicsTestAccess {
     }
     static void run() {
         const int32_t force[3] = {200*4096,0,0};
+        Game hydrant; PropTestAccess::furniture(hydrant,9,0xFFFF); CollisionTestAccess::propScene(hydrant);
+        auto tap=hydrant.propDynamics.makeBody(hydrant,20,20,0);
+        const int32_t tapAt[3]={tap.prop.x,tap.prop.y,tap.prop.z};
+        hydrant.propDynamics.applyForce(hydrant,tap,tapAt,force);
+        check(tap.broken && !tap.collidable && tap.fountain && !tap.body.active(),
+              "hydrant smash tilts its anchored model, clears contacts and starts a fountain");
+        if(tap.fountain) WaterTestAccess::fountain(*tap.fountain,tapAt);
+        float tilted[16]; tap.body.matrix(tilted);
+        check(std::abs(tilted[8])>0.4f && std::abs(tilted[8])<0.44f, "hydrant tilt is capped at 25 degrees");
+        auto upright=hydrant.propDynamics.makeBody(hydrant,20,20,0);
+        const int32_t vertical[3]={0,0,200*4096};
+        hydrant.propDynamics.applyForce(hydrant,upright,tapAt,vertical);
+        check(!upright.broken && !upright.fountain && upright.collidable, "vertical hydrant impacts cannot substitute a sideways break");
         Game newsstand; PropTestAccess::furniture(newsstand,42); CollisionTestAccess::propScene(newsstand);
         auto news = newsstand.propDynamics.makeBody(newsstand,20,20,0);
         int32_t newsAt[3] = {news.prop.x,news.prop.y,news.prop.z+4096};
@@ -334,6 +453,50 @@ struct PropDynamicsTestAccess {
               "newsstand breakage dispatches both wooden fragments and its distinct four-paper burst");
         newsstand.propDynamics.applyForce(newsstand,news,newsAt,force);
         check(ParticlesTestAccess::count() == firstEmitter+2, "hitting a broken prop cannot replay its smash burst");
+        Game explosive; PropTestAccess::furniture(explosive,28); PropTestAccess::allowUproot(explosive);
+        CollisionTestAccess::propScene(explosive);
+        auto barrel = explosive.propDynamics.makeBody(explosive,20,20,0);
+        int32_t blastCentre[3], blast[3]; barrel.body.worldCG(blastCentre);
+        RandInit(0); const size_t beforeBlast = ParticlesTestAccess::count();
+        explosive.propDynamics.applyForce(explosive,barrel,newsAt,force);
+        GameTestAccess::blastPosition(explosive,blast);
+        check(GameTestAccess::explosions(explosive) == 1 && !barrel.collidable &&
+              blast[0] == blastCentre[0]-409 && blast[1] == blastCentre[1]-136 && blast[2] == blastCentre[2]+104 &&
+              Rand32Critical(0) == 0xC910A194 && ParticlesTestAccess::count() == beforeBlast,
+              "explosive prop queues one blast at its jittered world centre using three critical draws and clears contacts");
+        explosive.propDynamics.applyForce(explosive,barrel,newsAt,force);
+        check(GameTestAccess::explosions(explosive) == 1, "a smashed explosive prop cannot queue a second explosion");
+        for (int i = 0; i < 2; ++i) GameTestAccess::processExplosions(explosive);
+        check(ParticlesTestAccess::count() == beforeBlast, "generic prop explosion waits through its first two Process calls");
+        GameTestAccess::processExplosions(explosive);
+        check(ParticlesTestAccess::count() == beforeBlast+2 &&
+              dynamic_cast<const ExplosionFlash*>(ParticlesTestAccess::at(beforeBlast)) &&
+              dynamic_cast<const ExplosionCloud*>(ParticlesTestAccess::at(beforeBlast+1)),
+              "third Process produces the typed flash and cloud without inventing vehicle debris");
+        for (int i = 0; i < 10; ++i) GameTestAccess::processExplosions(explosive);
+        check(GameTestAccess::explosions(explosive) == 1 && ParticlesTestAccess::count() == beforeBlast+2,
+              "generic blast remains in its final state without replaying particles");
+        GameTestAccess::processExplosions(explosive);
+        check(GameTestAccess::explosions(explosive) == 0, "generic explosion leaves its final state after eleven Process calls");
+        for (int effect : {23,30}) {
+            Game vendor; PropTestAccess::furniture(vendor,effect); CollisionTestAccess::propScene(vendor);
+            auto cart = vendor.propDynamics.makeBody(vendor,20,20,0);
+            const size_t before = ParticlesTestAccess::count();
+            const int32_t source[3] = {}, velocity[3] = {20*4096,0,0};
+            RandInit(0); vendor.propDynamics.applyForce(vendor,cart,newsAt,force,source,velocity,true);
+            check(GameTestAccess::explosions(vendor) == 1 && Rand32Critical(0) == 0x269EC3,
+                  "both hotdog cart variants queue a small generic vehicle-impact blast without jitter or camera-shake random draws");
+            for (int i = 0; i < 3; ++i) GameTestAccess::processExplosions(vendor);
+            const Emitter* flash = ParticlesTestAccess::at(before);
+            check(ParticlesTestAccess::count() == before+2 && dynamic_cast<const ExplosionFlash*>(flash) &&
+                  ParticlesTestAccess::particle(*flash).grow == 2815 && ParticlesTestAccess::particle(*flash).size == 112,
+                  "vehicle-struck hotdog cart preserves the reference 0x8CC scale through its delayed flash");
+            Game other; PropTestAccess::furniture(other,effect); CollisionTestAccess::propScene(other);
+            auto unported = other.propDynamics.makeBody(other,20,20,0);
+            other.propDynamics.applyForce(other,unported,newsAt,force);
+            check(GameTestAccess::explosions(other) == 0,
+                  "nonvehicle hotdog-cart damage cannot silently substitute a generic explosion for the unported gas-jet reaction");
+        }
         for (int effect : {10,41}) {
             Game glass; PropTestAccess::furniture(glass,effect); PropTestAccess::allowUproot(glass);
             CollisionTestAccess::propScene(glass);
@@ -357,6 +520,21 @@ struct PropDynamicsTestAccess {
             }
             glass.propDynamics.applyForce(glass,prop,newsAt,force);
             check(ParticlesTestAccess::count() == before+woodCount+6, "glass cannot replay on subsequent impacts");
+        }
+        for (int effect : {26,27}) {
+            Game gate; PropTestAccess::furniture(gate,effect); CollisionTestAccess::propScene(gate);
+            auto prop = gate.propDynamics.makeBody(gate,20,20,0);
+            const int32_t impact[3] = {prop.prop.x+2048,prop.prop.y+4096,prop.prop.z+1024};
+            const int32_t source[3] = {impact[0]-4096,impact[1],impact[2]}, velocity[3] = {0,20*4096,0};
+            const size_t before = ParticlesTestAccess::count();
+            gate.propDynamics.applyForce(gate,prop,impact,force,source,velocity);
+            const Emitter* debris = ParticlesTestAccess::at(before);
+            check(ParticlesTestAccess::count() == before+1 && dynamic_cast<const SlatsEmitter*>(debris) &&
+                  debris->pos[0] == impact[0] && debris->pos[1] == impact[1] && debris->pos[2] == impact[2],
+                  "both gate smash paths emit slats at the contact point rather than the prop placement");
+            gate.propDynamics.applyForce(gate,prop,impact,force,source,velocity);
+            check(prop.broken && !prop.uprooted && ParticlesTestAccess::count() == before+1,
+                  "gate debris emits once without inventing physics for its anchored remnant");
         }
         for (int effect : {11,12,20,24,29,32,33,34,36,39,43,44,45,46,47,48,49,50,51,52,53,54,55}) {
             Game furniture; PropTestAccess::furniture(furniture,effect); CollisionTestAccess::propScene(furniture);
@@ -488,6 +666,20 @@ struct PropDynamicsTestAccess {
               "prop pairs exchange mass and inertia based contact forces");
         moving.body.vel[0]=-20*4096; standing.body.vel[0]=20*4096;
         check(!impacts.propDynamics.hit(impacts,moving,standing), "separating props do not receive another collision impulse");
+        int reactions[2]{};
+        for(int separate=0;separate<2;++separate) {
+            Game scene; PropTestAccess::furniture(scene,0,0xFFFF); PropTestAccess::movable(scene); PropTestAccess::wide(scene);
+            CollisionTestAccess::propScene(scene); CollisionTestAccess::physical(scene,separate!=0);
+            int32_t from[3]={scene.player.pos[0],scene.player.pos[1]-12*4096,0};
+            scene.cars.resize(1); auto& vehicle=scene.cars[0]; vehicle.init(info,0,from,0,0);
+            vehicle.setToPhysics(true); vehicle.vel[1]=30*4096;
+            for(int frame=0;frame<90 && !scene.propDynamics.looseCount();++frame) {
+                scene.propDynamics.checkImpacts(scene); vehicle.integrate(&scene.collision);
+            }
+            reactions[separate]=scene.propDynamics.looseCount();
+        }
+        check(!reactions[0] && reactions[1]==1,
+              "a wide movable prop must receive its impact instead of stopping the car as an infinite-mass world box first");
     }
 };
 
@@ -531,6 +723,77 @@ public:
     int active() const { return alive_; }
 };
 
+class SlatsProbe : public SlatsEmitter {
+public:
+    using SlatsEmitter::SlatsEmitter;
+    const Particle& particle(int i) const { return parts_[i]; }
+    int active() const { return alive_; }
+    int sprite() const { return sprite_; }
+    void step(Particle& p) { updateParticle(p); }
+    void quad(const Particle& p, float out[4][3]) const { vertices(p,out); }
+};
+
+static void slats() {
+    const int32_t origin[3] = {}, a[3] = {-4*4096,0,0}, b[3] = {4*4096,0,0}, velocity[3] = {0,4096,0};
+    RandInit(0);
+    SlatsProbe textured(origin,velocity,a,b,0xFFFFFF,0xFFFFFF,true,true,0x808080);
+    check(textured.active() == 6 && textured.sprite() == 24, "textured gate fragments launch six strips during construction");
+    for (int i=0;i<6;++i) {
+        const Particle& p = textured.particle(i);
+        check(p.life == 300 && p.grow == 0 && p.alpha == 31 && p.colour == 0x5AD6 &&
+              p.p[0] == ((i & 1) ? 144 : -144) && p.p[1] == 0 && p.p[2] == 72 && p.v[2] == -1 &&
+              p.size >= 18 && p.size < 72 && ((i & 1) ? p.spin >= 0x71C : p.spin <= -0x71C) &&
+              p.angle == ((i & 1) ? 0x3FFF : 0xC001),
+              "gate strips alternate endpoints, retain inverse-range quantisation and spin in opposite directions");
+    }
+    Particle fall = textured.particle(0);
+    const Particle before = fall; textured.step(fall);
+    check(fall.p[2] == before.p[2]+before.v[2] && fall.v[2] == -2 &&
+          fall.spin == ((before.spin*0xE66) >> 12) && fall.life == 298 &&
+          fall.v[0] == ((before.v[0]*0xF33) >> 12),
+          "slats advance before damping horizontal motion and accelerating their downward speed");
+    fall.p[2] = 0; fall.v[2] = -2; fall.life = 16;
+    textured.step(fall);
+    check(fall.p[2] == 3 && !fall.v[0] && !fall.v[1] && !fall.v[2] && !fall.spin && fall.alphaStep == -3,
+          "slats stop below the original zero-height floor and begin fading in the final fifteen lifetime units");
+    textured.step(fall);
+    check(fall.p[2] == 3 && fall.alpha == 28, "resting slats stay at the reference offset while fading");
+    const int32_t raised[3] = {0,0,10*4096};
+    SlatsProbe elevated(raised,velocity,a,b,0xFFFFFF,0xFFFFFF,false,true,0);
+    Particle belowOrigin = before; belowOrigin.p[2] = -144; belowOrigin.v[2] = -2;
+    elevated.step(belowOrigin);
+    check(belowOrigin.v[2] == -3 && belowOrigin.p[2] == -146,
+          "slats below an elevated impact point still fall while they remain above the world-zero plane");
+    belowOrigin.p[2] = -400; elevated.step(belowOrigin);
+    check(belowOrigin.p[2] == 3 && !belowOrigin.v[2], "the slat floor test includes the emitter's world height");
+    for (int i=0;i<160;++i) textured.process();
+    check(textured.finished(), "six gate fragments expire and allow their emitter to be removed");
+    RandInit(0);
+    SlatsProbe slow(origin,velocity,a,b,0x4B74FD,0x4B74FD,false,true,0x808080);
+    RandInit(0);
+    SlatsProbe fast(origin,velocity,a,b,0x4B74FD,0x4B74FD,false,false,0x808080);
+    check(slow.sprite() == 0 && slow.particle(0).colour == 0x35F6 && fast.particle(0).v[1] > slow.particle(0).v[1],
+          "plain slats keep the warm ambient tint and the constructor distinguishes slow and fast launches");
+    const int32_t small[3] = {1,1,0}, large[3] = {4096,4096,0};
+    RandInit(0); SlatsProbe smallLaunch(origin,small,a,b,0xFFFFFF,0xFFFFFF,false,false,0);
+    RandInit(0); SlatsProbe largeLaunch(origin,large,a,b,0xFFFFFF,0xFFFFFF,false,false,0);
+    check(smallLaunch.particle(0).v[0] == largeLaunch.particle(0).v[0] &&
+          smallLaunch.particle(0).v[1] == largeLaunch.particle(0).v[1],
+          "slat launch normalisation rounds the original float result and is independent of force magnitude");
+    const int32_t tiny[3] = {1,1,1};
+    SlatsProbe invalid(origin,velocity,tiny,tiny,0xFFFFFF,0xFFFFFF,false,true,0);
+    check(invalid.finished(), "degenerate gate endpoints cannot emit uninitialised particle data");
+    Particle geometry{}; geometry.p[0]=144; geometry.p[2]=72; geometry.angle=0; geometry.size=64;
+    float quad[4][3]; slow.quad(geometry,quad);
+    check(std::abs(quad[0][0]-quad[1][0]) < 0.0001f && quad[0][1] > quad[1][1] &&
+          quad[3][0]-quad[0][0] > 0.49f && quad[3][0]-quad[0][0] < 0.51f &&
+          quad[0][1]-quad[1][1] > 3.5f && std::abs(quad[0][2]-2.f) < 0.05f,
+          "slats render as long narrow horizontal strips, using the reconstructed range rather than square debris");
+    geometry.angle=0x4000; slow.quad(geometry,quad);
+    check(quad[1][0] > quad[0][0] && std::abs(quad[1][1]-quad[0][1]) < 0.0001f && quad[3][1] > quad[0][1],
+          "slat geometry rotates both the long and short axes with its particle angle");
+}
+
 static void garbage() {
     int32_t origin[3] = {};
     GarbageProbe burst(origin, 0x300, false);
@@ -562,20 +825,6 @@ static void garbage() {
     check(night.first().colour != day.first().colour, "garbage is darker at night");
 }
 
-static void movingCars() {
-    Player player; player.pos[0] = player.pos[1] = player.pos[2] = 0;
-    int32_t previous[3] = {0,0,0};
-    Collision::Box before{-5*4096,0,4096,4096,8192,4096,0,0}, after = before; after.cx = 5*4096;
-    player.collideMovingCar(previous, before, after);
-    check(player.pos[0] >= after.cx + after.hx + Player::kSphere, "fast moving car cannot pass through a stationary pedestrian");
-    player.pos[0] = player.pos[1] = 0; player.pos[2] = 10*4096; previous[2] = player.pos[2];
-    player.collideMovingCar(previous, before, after);
-    check(player.pos[0] == 0, "cars do not collide with a pedestrian on an overhead level");
-    player.pos[2] = previous[2] = 0; player.attached = true;
-    player.collideMovingCar(previous, before, after);
-    check(player.pos[0] == 0, "attached pedestrian is not pushed out during entry animations");
-}
-
 static void randomStreams() {
     RandInit(0);
     const uint32_t values32[] = {0x269EC3,0x55AE9CB2,0xA0C3B2FD,0xC910A194};
@@ -598,6 +847,147 @@ static void randomStreams() {
     PaperProbe paper(origin,7,0x1EB,0xFFFFFF,0xFFFFFF,true,0x808080); paper.process();
     check(Rand32Critical(0) == values32[1] && Rand16Critical(0) == values16[0],
           "glass, wood and paper cannot consume traffic or other critical random streams");
+}
+
+static void explosionsAndShake() {
+    const int32_t origin[3] = {}, still[3] = {};
+    RandInit(0); ExplosionDebris debris(origin);
+    check(Rand16NonCritical(0) == 0x19D934AA && Rand32NonCritical(0) == 0xA9910645 &&
+          Rand16Critical(0) == 0x269EC3 && Rand32Critical(0) == 0x269EC3,
+          "debris birth consumes twenty-five 16-bit and ten 32-bit noncritical draws without changing simulation streams");
+    ExplosionDebris fuelDebris(origin,2);
+    const auto& chip = ParticlesTestAccess::particle(debris);
+    check(!ParticlesTestAccess::billboard(debris) && ParticlesTestAccess::active(debris) == 5 && chip.life == 31 &&
+          chip.alpha == 31 && chip.v[2] == 2048 && chip.p[2] == 1024 &&
+          ParticlesTestAccess::particle(debris,1).p[2] == 256 && ParticlesTestAccess::particle(debris,4).p[2] == 4 &&
+          ParticlesTestAccess::particle(fuelDebris).colour == 0x1D8E,
+          "debris uses five horizontal fragments, repeated height conversion and type-specific colour");
+    Particle falling{}; falling.active=1; falling.life=11; falling.alpha=31; falling.alphaStep=-1;
+    falling.p[2]=1024; falling.v[2]=2048; falling.v[0]=-100; falling.size=600; falling.spin=10;
+    ParticlesTestAccess::step(debris,falling,0);
+    check(falling.p[2] == 2663 && falling.v[2] == 1474 && falling.v[0] == -90 && falling.angle == 10 &&
+          falling.life == 9 && falling.alpha == 31, "debris applies gravity before travel and damping without fading or an early lifetime cutoff");
+    for (int i=0;i<16;++i) debris.process();
+    check(debris.finished(), "visible debris still expires at its original lifetime");
+    RandInit(0);
+    ExplosionFlash flash(origin,0), petrol(origin,2), white(origin,5,2048);
+    const Particle& first = ParticlesTestAccess::particle(flash), &second = ParticlesTestAccess::particle(flash,1);
+    FireEmitter fire(origin); SmokeEmitter ordinarySmoke(origin,1);
+    check(first.colour == 0x37F && ParticlesTestAccess::additive(flash) && ParticlesTestAccess::additive(petrol) &&
+          ParticlesTestAccess::additive(white) && ParticlesTestAccess::additive(fire) &&
+          !ParticlesTestAccess::additive(ordinarySmoke) && !ParticlesTestAccess::additive(debris),
+          "original flash tint stays yellow while flash/fire use additive blending and smoke/debris use ordinary alpha");
+    check(!ParticlesTestAccess::billboard(flash) && first.angle == 0 && second.angle == 0x8000 &&
+          first.spin == 2048 && second.spin == -2048 && first.p[2] == 512 && second.p[2] == 512 &&
+          first.grow == 5120 && second.grow == 5120 && first.size == 204 && second.size == 204,
+          "explosion flash consists of two horizontal expanding sprites with opposite spin and a shared height");
+    check(Rand32NonCritical(0) == 0x269EC3, "flash construction does not consume an invented random angle");
+    const auto& fuel = ParticlesTestAccess::particle(petrol);
+    check(fuel.colour == 0x7C00 && fuel.alpha == 10 && fuel.alphaStep == -1 && fuel.life == 48 &&
+          fuel.v[0] == 4096 && fuel.grow == 2560 && ParticlesTestAccess::sprite(white) == 14 &&
+          ParticlesTestAccess::particle(white).colour == 0x7FFF && ParticlesTestAccess::particle(white).grow == 2560,
+          "flash type controls colour, sprite, opacity, duration, damping and scale");
+    flash.process(); petrol.process();
+    check(ParticlesTestAccess::particle(flash).grow == 5120 && ParticlesTestAccess::particle(petrol).grow == 2303 &&
+          ParticlesTestAccess::particle(flash).angle == 2048 && ParticlesTestAccess::particle(flash,1).angle == 30720,
+          "only the petrol flash damps its growth while both flash layers rotate in opposite directions");
+    for (int i = 0; i < 12; ++i) flash.process();
+    check(flash.finished(), "flash layers fade and release their emitter");
+
+    RandInit(0); ExplosionCloud main(origin,4,0,4096,4096,-4096,8);
+    check(ParticlesTestAccess::additive(main), "the original complex explosion cloud belongs to the emissive pass");
+    const Particle& big = ParticlesTestAccess::particle(main);
+    check(ParticlesTestAccess::active(main) == 1 && big.size == 6144 && big.grow == 0 && big.v[0] == 1024 &&
+          big.v[1] == -1024 && big.v[2] == 1024 && big.p[2] == 0 && Rand32NonCritical(0) == 0x269EC3,
+          "phase-zero main cloud uses inherited velocity and emits exactly once without random draws");
+    RandInit(0); ExplosionCloud burst(origin,0,1,4096,0,0,2);
+    const Particle& a = ParticlesTestAccess::particle(burst), &b = ParticlesTestAccess::particle(burst,1);
+    check(a.v[0] == -819 && a.v[1] == -271 && a.v[2] == 205 && a.p[2] == 1952 && a.size == 3905 && a.grow == 13 &&
+          b.v[0] == -541 && b.v[1] == -470 && b.v[2] == 94 && b.p[2] == 2358 && b.size == 3741 && b.grow == 16 &&
+          !a.angle && !b.angle && Rand32NonCritical(0) == 0xA9910645 && Rand32Critical(0) == 0x269EC3,
+          "generic cloud retains Android birth values, in-place height conversion and five noncritical draws per particle");
+    Particle fade{}; fade.active=1; fade.life=6; fade.alpha=28; fade.alphaStep=-1;
+    fade.colour=0x7FFF; fade.v[0]=-100; fade.v[1]=100; fade.v[2]=10;
+    ParticlesTestAccess::step(burst,fade,1);
+    check(fade.life == 4 && fade.alpha == 28 && fade.colour == 0x7BDE && fade.v[0] == -90 && fade.v[1] == 91 && fade.v[2] == 10,
+          "cloud damps signed velocity and darkens RGB independently of the global frame's opacity cadence");
+    ParticlesTestAccess::step(burst,fade,2);
+    check(fade.life == 6 && fade.alpha == 23, "cloud fades only on even game frames and extends life while visible");
+    fade.colour = 1 | (0 << 5) | (2 << 10); fade.life=10;
+    ParticlesTestAccess::step(burst,fade,3);
+    check(fade.colour == (1 | (1 << 10)), "cloud darkening preserves zero channels and stops each channel at one");
+
+    Particles pool; const int32_t at[3] = {10*4096,0,0};
+    auto* cloud = pool.add<ExplosionCloud>(at,4,0,4096,0,0,1);
+    for (uint32_t i = 0; i < 17; ++i) pool.update(i,12u << 12,origin);
+    check(pool.emitterCount() == 1, "cloud waits until lifetime twenty-four before creating its secondary smoke");
+    pool.update(17,12u << 12,origin);
+    const Emitter* smoke = ParticlesTestAccess::at(pool,1);
+    const Particle& cloudParticle = ParticlesTestAccess::particle(*cloud), &smokeParticle = ParticlesTestAccess::particle(*smoke);
+    check(pool.emitterCount() == 2 && dynamic_cast<const SmokeEmitter*>(smoke) && smokeParticle.life == 20 &&
+          smokeParticle.alpha == 30 && smokeParticle.p[0] == 2047 && smokeParticle.size == 1228 && smokeParticle.grow == 81 &&
+          smokeParticle.p[2] == ((cloudParticle.p[2]*819) >> 12) &&
+          smokeParticle.v[2] == ((cloudParticle.v[2]*819) >> 13),
+          "cloud hands off a scaled particle to player-relative smoke at lifetime twenty-four without invalidating the update loop");
+    const int32_t moved[3] = {4096,0,0}; pool.update(18,12u << 12,moved);
+    check(smoke->pos[0] == moved[0] && ParticlesTestAccess::particle(*smoke).alpha == 29 &&
+          ParticlesTestAccess::particle(*smoke).p[0] == 1843,
+          "secondary smoke follows its player's controller while its world position remains fixed");
+    for (uint32_t i = 19; i < 100; ++i) pool.update(i,12u << 12,moved);
+    check(!pool.emitterCount(), "cloud and its secondary smoke both expire instead of accumulating");
+
+    RandInit(0); CameraShake shake; int32_t pos[3] = {100,200,300};
+    shake.start(8192,2867); shake.apply(pos);
+    check(pos[0] == 100-8183 && pos[1] == 200-2709 && pos[2] == 300+5144 &&
+          Rand32Critical(0) == 0xC910A194 && Rand32NonCritical(0) == 0x269EC3 && Rand16Critical(0) == 0x269EC3,
+          "camera shake samples signed horizontal and upward vertical offsets from the critical 32-bit stream only");
+    for (int i = 0; i < 20; ++i) shake.apply(pos);
+    check(pos[0] == 100 && pos[1] == 200 && pos[2] == 300, "shake subtracts its prior offset and returns to the unshaken pose at cutoff");
+    const int32_t near[3] = {50*4096-1,0,0}, boundary[3] = {50*4096,0,0}, above[3] = {0,0,50*4096};
+    check(CameraShake::nearExplosion(origin,near) && !CameraShake::nearExplosion(origin,boundary) &&
+          !CameraShake::nearExplosion(origin,above), "blast shake uses a strict fifty-unit three-dimensional distance");
+    Game game; game.camera.reset(origin,0); game.camera.shake(8192,2867);
+    Game clean; clean.camera.reset(origin,0); RandInit(0);
+    game.camera.update(origin,0,still,nullptr); clean.camera.update(origin,0,still,nullptr);
+    int32_t shaken[3], plain[3]; game.camera.position(shaken); clean.camera.position(plain);
+    check(shaken[0]-plain[0] == -8183 && shaken[1]-plain[1] == -2709 && shaken[2]-plain[2] == 5144,
+          "on-foot follow camera applies shake after following and collision recovery");
+    game.freeCam.on = true; GameTestAccess::snapshot(game);
+    game.camera.update(origin,0,still,nullptr);
+    int32_t current[3]; game.camera.shakeOffset(current); float offset[3];
+    game.renderAlpha = 0; game.cameraShake(offset);
+    check(offset[0] == -8183/4096.f, "custom camera reads the previous tick's shake at interpolation alpha zero");
+    game.renderAlpha = 0.5f; game.cameraShake(offset);
+    check(offset[0] == (-8183 + (int32_t)std::lround((current[0]+8183)*0.5))/4096.f,
+          "custom-camera shake interpolates even while a free camera supplies the view");
+    game.renderAlpha = 1; game.cameraShake(offset);
+    check(offset[0] == current[0]/4096.f, "custom-camera shake reads the current tick at alpha one");
+    game.freeCam.on = false;
+    Vehicle car; VehicleInfo info{}; car.init(info,0,origin,0,0);
+    game.carCam.setBehind(car); clean.carCam.setBehind(car); game.playerCar=0; game.cars.push_back(car);
+    game.shakeNearExplosion(near); RandInit(0); game.carCam.update(car,nullptr); clean.carCam.update(car,nullptr);
+    game.carCam.position(shaken); clean.carCam.position(plain);
+    check(shaken[0]-plain[0] == -8183 && shaken[1]-plain[1] == -2709 && shaken[2]-plain[2] == 5144,
+          "nearby explosion selects the active driving camera and shakes its completed follow pose");
+    clean.carCam.inherit(plain,0,0xD4E4); game.carCam.inherit(plain,0,0xD4E4);
+    game.carCam.update(car,nullptr); clean.carCam.update(car,nullptr);
+    game.carCam.position(shaken); clean.carCam.position(plain);
+    check(std::equal(shaken,shaken+3,plain), "camera handoff clears old shake offsets");
+    const int32_t eye[3] = {};
+    game.playerCar=-1; game.camera.inherit(eye,0,0);
+    const int32_t close[3]={15*4096,0,0}, far[3]={50*4096,0,0};
+    check(GameTestAccess::cloudCount(game,close) == 1 && GameTestAccess::cloudCount(game,far) == 8,
+          "generic explosion cloud count follows the original one-to-eight camera-distance rule");
+    Game exploding; exploding.cars.emplace_back(); exploding.cars.back().justDied = true;
+    const size_t before = ParticlesTestAccess::count(); RandInit(0);
+    GameTestAccess::processExplosions(exploding); GameTestAccess::processExplosions(exploding);
+    check(ParticlesTestAccess::count() == before && Rand32Critical(0) == 0x269EC3,
+          "type-four generic explosion waits two Process calls without an invented random delay or early flash");
+    GameTestAccess::processExplosions(exploding);
+    check(ParticlesTestAccess::count() == before+3 && GameTestAccess::explosions(exploding) == 1,
+          "type-four flash, debris and cloud start together on the third Process call");
+    for (int i=0;i<11;++i) GameTestAccess::processExplosions(exploding);
+    check(!GameTestAccess::explosions(exploding), "type-four generic explosion retains its eleven-call final state");
 }
 
 static void fireAndCamera() {
@@ -694,10 +1084,67 @@ static void fireAndCamera() {
           "taking the seat cannot run an extra walking update or move the hidden player outside the vehicle");
     check(std::equal(beforeView,beforeView+3,outgoingView) && !std::equal(beforeView,beforeView+3,afterView),
           "entry updates the inherited car camera immediately and leaves the outgoing camera alone");
+
+    Game wreck;
+    std::copy(origin,origin+3,wreck.player.pos);
+    wreck.cars.resize(2);
+    for (auto& car : wreck.cars) car.init(info,0,origin,0,0);
+    wreck.cars[0].damage(255);
+    wreck.startEnter(0);
+    check(wreck.task.op == Game::CarTask::None, "explicit entry cannot target a burnt wreck");
+    wreck.startEnter();
+    check(wreck.task.car == 1, "nearest-car entry skips the burnt wreck and finds an intact car");
+    wreck.task.op = Game::CarTask::SlideIn; wreck.player.attached = true;
+    wreck.cars[1].damage(255);
+    check(!wreck.tickTask(false,0) && wreck.task.op == Game::CarTask::None && !wreck.player.attached && wreck.playerCar < 0,
+          "a car destroyed during entry cancels the animation before taking the seat");
+    wreck.player.dead = true;
+    wreck.startEnter(1);
+    check(wreck.task.op == Game::CarTask::None, "a dead player cannot start vehicle entry");
+
+    Game occupant;
+    occupant.cars.emplace_back(); occupant.cars[0].init(info,0,origin,0,0);
+    occupant.cars[0].uid = 77; occupant.cars[0].seatUser[0] = -2;
+    occupant.playerCar = 0; occupant.player.hidden = occupant.player.attached = true;
+    occupant.carCam.setBehind(occupant.cars[0]);
+    occupant.cars[0].damage(255);
+    GameTestAccess::processExplosions(occupant);
+    check(occupant.player.dead && occupant.player.health == 0 && !occupant.player.hidden && !occupant.player.attached &&
+          occupant.playerCar == -1 && occupant.cars[0].seatUser[0] == -1,
+          "a destroyed occupied car kills the player with zero health and clears its driver rather than ejecting a living player");
+    for (auto& car : wreck.cars) car.releaseEffects();
+    occupant.cars[0].releaseEffects();
 }
 
 struct RadioTestAccess {
     static void run() {
+        Radio favourites;
+        favourites.stations_.resize(7);
+        for (int i = 0; i < 7; ++i) {
+            favourites.stations_[i].stream = i;
+            favourites.appOrder_.push_back(i);
+        }
+        favourites.stations_[0].listened = 5;
+        check(favourites.favoriteStars(0) == 1 && favourites.favoriteStars(1) == 0,
+              "zero-time stations are excluded before ranking the first listened station");
+        favourites.stations_[1].listened = 1; favourites.stations_[3].listened = 2;
+        favourites.stations_[4].listened = 3; favourites.stations_[5].listened = 4;
+        favourites.stations_[6].stream = -1; favourites.stations_[6].listened = 100;
+        check(favourites.favoriteStars(1) == 1 && favourites.favoriteStars(3) == 2 &&
+              favourites.favoriteStars(0) == 5 && favourites.favoriteStars(6) == 0,
+              "listening rank awards one through five stars and never ranks the off station");
+        favourites.stations_[2].listened = 10;
+        check(favourites.favoriteStars(2) == 5, "sixth and higher listening ranks remain capped at five stars");
+        favourites.stations_[3].listened = 1;
+        check(favourites.favoriteStars(1) == 1 && favourites.favoriteStars(3) == 2,
+              "equal listening times keep their original station order");
+        favourites.volumeShownAt_ = 10;
+        check(std::fabs(favourites.volumeAlpha(10)-0.4f) < 0.001f &&
+              std::fabs(favourites.volumeAlpha(10.11)-0.7f) < 0.001f && favourites.volumeAlpha(11) == 1,
+              "the volume meter brightens from forty percent in original thirty-Hz steps");
+        check(favourites.volumeAlpha(13) == 1 && std::fabs(favourites.volumeAlpha(13.44)-0.7f) < 0.001f &&
+              std::fabs(favourites.volumeAlpha(20)-0.4f) < 0.001f,
+              "the volume meter holds for one hundred frames and returns to forty percent without disappearing");
         const auto dir = std::filesystem::temp_directory_path() / ("ctw-radio-audio-test-" + std::to_string(SDL_GetTicks64()));
         std::filesystem::create_directories(dir);
         OS_SetDocumentsRoot(dir.string().c_str());
@@ -740,7 +1187,60 @@ struct RadioTestAccess {
         for (int i = 0; i < 50 && Audio_MusicPosition() <= before; ++i) SDL_Delay(20);
         check(Audio_MusicPlaying() && Audio_MusicPosition() > before,
               "Space and Enter cannot pause the broadcast while the radio app is open");
+        radio.countListening();
+        double listened = radio.stations_[0].listened;
+        SDL_Delay(80); radio.countListening();
+        check(radio.stations_[0].listened >= listened + 0.06,
+              "listening statistics advance while the radio app pauses simulation");
+        listened = radio.stations_[0].listened;
+        for (int i = 0; i < 100; ++i) radio.update(game);
+        check(radio.stations_[0].listened < listened + 0.5,
+              "listening time measures playback time rather than counting simulation ticks");
+        Audio_SetMusicPaused(true); radio.countListening(); listened = radio.stations_[0].listened;
+        SDL_Delay(60); radio.countListening();
+        check(radio.stations_[0].listened == listened, "paused audio does not earn listening time");
+        Audio_SetMusicPaused(false);
+        radio.appPointer(240,125,true,true,game); radio.appPointer(236,125,true,false,game);
+        check(radio.station() == 0, "a radio drag below five logical pixels does not tune");
+        radio.appPointer(235,125,true,false,game);
+        check(radio.station() == 2, "a left swipe tunes forward at the original five-pixel threshold");
+        radio.appPointer(200,125,true,false,game); radio.appPointer(200,125,false,false,game);
+        check(radio.station() == 2, "holding and releasing a swipe does not tune twice");
+        radio.appPointer(240,125,false,true,game);
+        check(radio.station() == 2, "clicking the centre station cannot pause or retune the radio");
+        radio.appPointer(240,125,true,true,game); radio.appPointer(245,125,true,false,game);
+        radio.appPointer(245,125,false,false,game);
+        check(radio.station() == 0, "a right swipe tunes backwards past unavailable stations");
+        radio.appPointer(-20,125,true,true,game); radio.appPointer(10,125,true,false,game);
+        radio.appPointer(10,125,false,false,game);
+        check(radio.station() == 0, "a drag starting outside the app cannot tune the radio");
+        radio.appPointer(240,260,true,true,game); radio.appPointer(260,260,true,false,game);
+        radio.appPointer(260,260,false,false,game);
+        check(radio.station() == 0, "a drag below the station region cannot tune the radio");
+        radio.appStation(1,game);
+        check(radio.station() == 2 && radio.playing_ == 0 && Audio_MusicPlaying(),
+              "the previous broadcast keeps playing while its replacement logo scrolls into place");
+        radio.update(game); radio.advanceCarousel(1,game);
+        check(radio.playing_ == 0 && radio.appTuning_, "simulation updates cannot switch a pending carousel station early");
+        for (int i = 0; i < 40; ++i) radio.advanceCarousel(1,game);
+        check(radio.playing_ == -1 && !radio.appTuning_, "the off station stops the broadcast after its carousel settles");
+        radio.appStation(-1,game); radio.advanceCarousel(1,game); radio.appStation(1,game);
+        for (int i = 0; i < 40; ++i) radio.advanceCarousel(1,game);
+        check(radio.station() == 2 && radio.playing_ == -1 && !radio.appTuning_,
+              "reversing a swipe before it settles cannot briefly play the skipped station");
+        radio.appStation(-1,game);
+        check(radio.tune(0,game) && radio.playing_ == 0 && !radio.appTuning_,
+              "explicit radio API tuning remains immediate while the app is open");
+        radio.appPointer(180,290,false,true,game);
+        check(radio.volumeLevel() == 9, "the radio minus sprite lowers volume by one step");
+        radio.appPointer(290,290,false,true,game);
+        check(radio.volumeLevel() == 10, "the radio plus sprite raises volume by one step");
+        radio.appPointer(180,290,true,true,game); radio.appPointer(180,290,false,true,game);
+        radio.appPointer(180,290,false,false,game);
+        check(radio.volumeLevel() == 9, "a completed click clears prior pointer state instead of repeating on the next frame");
         check(radio.key(SDL_SCANCODE_TAB,game) && !radio.appOpen(), "Tab closes the app and resumes the game");
+        radio.key(SDL_SCANCODE_TAB,game); radio.appStation(1,game); radio.key(SDL_SCANCODE_TAB,game);
+        check(radio.playing_ == -1 && !radio.appTuning_, "closing the app commits its pending station before resuming gameplay");
         radio.key(SDL_SCANCODE_TAB,game); game.playerCar = -1; radio.update(game);
         check(!radio.appOpen() && radio.playing_ == -1, "leaving a car closes the app and stops music");
         game.playerCar = 0; game.player.dead = true;
@@ -750,8 +1250,11 @@ struct RadioTestAccess {
         VehicleTestAccess::bike(game.cars[0], false);
         game.cars[0].infoId = 32;
         check(radio.key(SDL_SCANCODE_TAB,game) && radio.appOpen(), "vehicle model IDs are not mistaken for radio availability");
+        radio.dir_ = dir.string(); radio.tables_.streams.resize(25);
+        radio.tables_.streams[1] = radio.tables_.streams[3] = "station.mp3";
         game.playerCar = 100; radio.update(game);
-        check(!radio.appOpen(), "removed vehicle cannot leave the radio app open");
+        check(!radio.appOpen() && radio.ambience_ >= 0,
+              "removed vehicle closes the app and restores ambience without indexing the removed car");
         game.playerCar = 0; radio.key(SDL_SCANCODE_TAB,game);
         game.cars[0].act(Vehicle::Controls{},false,nullptr); game.cars[0].damage(255); radio.update(game);
         check(!radio.appOpen() && radio.playing_ == -1, "destroyed vehicle closes the radio and stops music");
@@ -778,8 +1281,7 @@ int main() {
     for (int i = 0; i < 50 && Audio_SfxPlaying(voice); ++i) SDL_Delay(20);
     check(!Audio_SfxPlaying(voice), "resumed sound effect finishes normally");
     SoundTestAccess::run(); CollisionTestAccess::run(); CollisionTestAccess::cameraTests(); PropTestAccess::run(); PropDynamicsTestAccess::run();
-    movingCars();
-    garbage(); randomStreams(); fireAndCamera(); RadioTestAccess::run();
+    slats(); garbage(); VehicleTestAccess::flaps(); VehicleTestAccess::debris(); WaterTestAccess::run(); randomStreams(); explosionsAndShake(); fireAndCamera(); RadioTestAccess::run();
     Audio_Shutdown();
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }

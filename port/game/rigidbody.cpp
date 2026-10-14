@@ -230,7 +230,7 @@ void RigidBody::process(Collision& col) {
 void RigidBody::fullCollision(Collision* col, bool) {   // cPhysicalIntegrator::FullCollision
     Collision::Candidates cand;
     int32_t R = speed() / 0x19 + (int32_t)(((int64_t)hy * 3) >> 1);
-    col->candidates(pos, R, false, cand);
+    col->candidates(pos, R, false, cand,false);
     int32_t frac = 0x1000;
     int iters = 8;
     std::vector<Rec> recs;
@@ -324,7 +324,7 @@ void RigidBody::fullCollision(Collision* col, bool) {   // cPhysicalIntegrator::
 void RigidBody::fullSprings(Collision* col) {   // cPhysicalIntegrator::FullSpringCollision
     Collision::Candidates cand;
     int32_t R = speed() / 0x19 + (int32_t)(((int64_t)hy * 3) >> 1);
-    col->candidates(pos, R, false, cand);
+    col->candidates(pos, R, false, cand,false);
     int32_t sp[6][4], vb[8][3];
     int n;
     spheres(sp, n);

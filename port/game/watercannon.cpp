@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 #include "watercannon.h"
+#include "sound.h"
 #include "cargens.h"   // Rand32Critical
 #include "gfx/assets.h"
 #include "world/worldrenderer.h"
@@ -10,14 +11,27 @@
 #include <cmath>
 
 void WaterCannon::input(const int32_t p[3], const int32_t v[3], uint32_t frame) {   // CWaterCannon::Update_NewInput
+    frame_=frame;
+    if(!audioId_) { static uint32_t next=1; audioId_=next++; }
     for (int k = 0; k < 3; ++k) { pos_[head_][k] = p[k]; vel_[head_][k] = v[k]; }
     age_[head_] = 1;
     if (flags & 1)   // a little extra lift that changes with the frame counter
         vel_[head_][2] += (int32_t)(((frame & 15) << 7) + Rand32Critical(0x51)) >> 1;
-    // (flag 8: cParticleEmitterWaterSplash at the nozzle - not ported yet)
+    if((flags&8) && maxPoints>=16) {
+        if(!splash_) { splash_.emplace(p,v,colour); splash_->addParticle(); }
+        else {
+            splash_->setPos(p); splash_->direction(v);
+            if((flags&1) ? Rand16NonCritical(3)==0 : !(frame&1)) splash_->addParticle();
+        }
+    }
 }
 
 void WaterCannon::step() {   // CWaterCannon::Update_OncePerFrame
+    if(splash_) splash_->tick(frame_);
+    if((flags&0x80) && audioId_) {
+        const int volume=(renderedVertices_<32 ? renderedVertices_*2 : 60) << ((flags&0x100) ? 0 : 1);
+        TheSound().waterStream(audioId_,pos_[head_],volume);
+    }
     head_ = (int16_t)((head_ + 1) & 15);
     age_[head_] = 0;
     for (int k = 0; k < 16; ++k) {
@@ -87,6 +101,8 @@ void WaterCannon::render(const WorldCamera& cam, uint32_t ambient) const {   // 
         ++drawn;
     }
     glEnd();
+    renderedVertices_=(uint8_t)(drawn*2);
+    if(splash_) splash_->render(cam);
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
     glDisable(GL_TEXTURE_2D);

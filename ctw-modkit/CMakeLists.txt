@@ -50,7 +50,37 @@ ctw_mod(cheat_example CheatExample)
 ctw_mod(enhancements Enhancements)
 ctw_mod(trumpify Trumpify)
 
+# Optional donor assets belong to the local Enhancements build, never the engine
+# or distributed mod sources. Normal development builds need no extra command.
+if(TARGET ctw_game AND NOT CTW_RELEASE)
+    option(CTW_IMPORT_LCS "Import an available local LCS APK for development" ON)
+    set(CTW_LCS_APK "${CMAKE_CURRENT_LIST_DIR}/../input/lcs/GTA-LCS-2.4.379.apk"
+        CACHE FILEPATH "Own LCS Android 2.4.379 APK for development characters")
+    if(CTW_IMPORT_LCS AND EXISTS "${CTW_LCS_APK}")
+        find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+        set(lcs_scripts "${CMAKE_CURRENT_LIST_DIR}/../scripts")
+        add_custom_target(lcs_dev_assets ALL
+            COMMAND "${Python3_EXECUTABLE}" "${lcs_scripts}/import_lcs_dev.py"
+                --apk "${CTW_LCS_APK}" --out "${CTW_MODS_OUT}/Enhancements/lcs"
+            BYPRODUCTS "${CTW_MODS_OUT}/Enhancements/lcs/.ctw-import.json"
+            DEPENDS "${CTW_LCS_APK}" "${lcs_scripts}/import_lcs_dev.py"
+                "${lcs_scripts}/lcs_assets.py" "${lcs_scripts}/apk_manifest.py"
+            COMMENT "Preparing local LCS characters for Enhancements"
+            VERBATIM)
+        add_dependencies(enhancements lcs_dev_assets)
+    endif()
+endif()
+
 if(BUILD_TESTING AND TARGET ctw_engine)
+    add_executable(lcscharacterstest ../tests/lcs_characters_test.c)
+    target_include_directories(lcscharacterstest PRIVATE ${CTW_INCLUDE})
+    add_test(NAME enhancements_characters COMMAND lcscharacterstest)
+    add_executable(enhancementscameratest ../tests/enhancements_camera_test.c)
+    target_include_directories(enhancementscameratest PRIVATE ${CTW_INCLUDE})
+    if(NOT MSVC)
+        target_link_libraries(enhancementscameratest PRIVATE m)
+    endif()
+    add_test(NAME enhancements_camera COMMAND enhancementscameratest)
     add_library(api_probe_mod SHARED ../tests/api_probe_mod.c)
     target_include_directories(api_probe_mod PRIVATE ${CTW_INCLUDE})
     set_target_properties(api_probe_mod PROPERTIES PREFIX "" RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/testmods

@@ -107,6 +107,11 @@ void Vehicle::init(const VehicleInfo& info, int id, const int32_t p[3], int16_t 
     infoFlags8e_ = (uint16_t)info.s16(0x8E);
     numSeats_ = info.s32(0x10C);
     for (Door& d : doors_) d = Door{};
+    for (Debris& d : debris_) d = Debris{};
+    std::fill(std::begin(pendingDebris_),std::end(pendingDebris_),0);
+    flapBits_ = 0;
+    std::fill(std::begin(flapPreviousVelocity_),std::end(flapPreviousVelocity_),0);
+    bootReverse_ = false;
     doorOpenBits_ = 0;
     for (int& u : seatUser) u = -1;
     maxRpm_ = info.s32(0x70);
@@ -493,6 +498,14 @@ void Vehicle::riderRenderPos(int32_t upper[3], int32_t legs[3]) const {   // cBi
     }
 }
 
+void Vehicle::riderRenderBasis(float out[9]) const {
+    float matrix[16]; modelMatrix(matrix);
+    for (int i = 0; i < 3; ++i) {
+        const float length = std::sqrt(matrix[4*i]*matrix[4*i] + matrix[4*i+1]*matrix[4*i+1] + matrix[4*i+2]*matrix[4*i+2]);
+        for (int k = 0; k < 3; ++k) out[3*i+k] = matrix[4*i+k] / length;
+    }
+}
+
 void Vehicle::updatePhysics(Collision* col) {   // cWheeledVehicle::UpdatePhysics (on land)
     updateSteering();
     updateEngine();
@@ -786,7 +799,7 @@ void Vehicle::integrate(Collision* col) {   // cPhysicalIntegrator::Process for 
 void Vehicle::simpleCollision(Collision* col) {   // cPhysicalIntegrator::SimpleCollision
     Collision::Candidates cand;
     int32_t R = speed() / 0x19 + (int32_t)(((int64_t)hy * 3) >> 1);
-    col->candidates(pos, R, false, cand);
+    col->candidates(pos, R, false, cand,false);
     int32_t frac = 0x1000;
     int iters = 8;
     std::vector<Rec> recs;
@@ -843,7 +856,7 @@ void Vehicle::simpleCollision(Collision* col) {   // cPhysicalIntegrator::Simple
 void Vehicle::fullCollision(Collision* col, bool) {   // cPhysicalIntegrator::FullCollision
     Collision::Candidates cand;
     int32_t R = speed() / 0x19 + (int32_t)(((int64_t)hy * 3) >> 1);
-    col->candidates(pos, R, false, cand);
+    col->candidates(pos, R, false, cand,false);
     int32_t frac = 0x1000;
     int iters = 8;
     std::vector<Rec> recs;
@@ -1015,7 +1028,7 @@ void Vehicle::springImpact(const Rec& rc) {   // cPhysicalIntegrator::SpringImpa
 void Vehicle::fullSprings(Collision* col) {   // cPhysicalIntegrator::FullSpringCollision
     Collision::Candidates cand;
     int32_t R = speed() / 0x19 + (int32_t)(((int64_t)hy * 3) >> 1);
-    col->candidates(pos, R, false, cand);
+    col->candidates(pos, R, false, cand,false);
     int32_t sp[6][4], vb[8][3];
     int n;
     spheres(sp, n);
@@ -1085,7 +1098,7 @@ void Vehicle::fullSprings(Collision* col) {   // cPhysicalIntegrator::FullSpring
 void Vehicle::simpleSprings(Collision* col) {   // cPhysicalIntegrator::SimpleSpringCollision
     Collision::Candidates cand;
     int32_t R = speed() / 0x19 + (int32_t)(((int64_t)hy * 3) >> 1);
-    col->candidates(pos, R, false, cand);
+    col->candidates(pos, R, false, cand,false);
     int32_t sp[6][4];
     int n;
     spheres(sp, n);
@@ -1247,7 +1260,9 @@ void Vehicle::setDoorClosed(int seat) {   // cVehicle::SetDoorClosed
 }
 
 void Vehicle::updateDoors() {   // cVehicle::UpdateDoorMatrices -> cVehicleDoor::Update (max angles DAT_0058718e)
+    flapDoors();
     for (int i = 0; i < 5; ++i) {
+        if(debris_[i].detached) continue;
         Door& d = doors_[i];
         uint16_t max = TheGameplayTables().doorMax[i];
         if (d.mode == 3) {
@@ -1426,6 +1441,7 @@ void Vehicle::onCollision(const int32_t F[3], const Vehicle* other) {
 
 void Vehicle::damage(int amount) {   // cVehicle::Damage (collision damage, 100 %)
     if (dead_ || amount <= 0) return;
+    damageDoors((unsigned)amount);
     int d = amount < 2 ? 1 : amount;
     if ((int)health_ <= d) {
         if (playerDriving_) health_ = 0x1E;   // the player's car does not blow up at once: it catches fire
@@ -1442,6 +1458,10 @@ bool Vehicle::repair() {
     health_ = 0xFF;
     burnTimer_ = 0x1E0;
     tyre_[0].burst = tyre_[1].burst = false;
+    for (Debris& d : debris_) d = Debris{};
+    for (Door& d : doors_) d = Door{};
+    std::fill(std::begin(pendingDebris_),std::end(pendingDebris_),0);
+    flapBits_ = doorOpenBits_ = 0;
     releaseEffects();
     return true;
 }
@@ -1464,7 +1484,12 @@ void Vehicle::releaseEffects() {
 }
 
 void Vehicle::setDead() {   // cVehicle::SetDead: the burnt wreck, black smoke and fire for 12 seconds
+    if (dead_) return;
     dead_ = true;
+    engineOn = false;
+    indicators = 0;
+    railBraking = false;
+    setToPhysics(true);
     justDied = true;
     palette = 25;
     burnTimer_ = 0x2D0;
@@ -1608,27 +1633,34 @@ void Vehicle::render(const Model* m) const {
     glEnable(GL_NORMALIZE);
     const float s = m->scale;
     uint32_t inst = 1u << palette;
-    // cVehicle::UpdateDoorMatrix: an open door's node = RotZ(angle x 64) x its initial matrix (right-hand doors
-    // turn the other way); the hierarchy is resolved again like cModelInstance::RefreshMatrices
+    // cVehicle::UpdateDoorMatrix: side doors rotate around Z, the hatch around X, with the
+    // reference hinge direction. Resolve the hierarchy again like cModelInstance::RefreshMatrices.
     std::vector<NodeMatrix> world;
     const std::vector<NodeMatrix>* W = &m->world;
     bool anyDoor = false;
-    for (int i = 0; i < 4; ++i) anyDoor |= doors_[i].angle != 0 && doorNode_[i] > 0 && doorNode_[i] < (int)m->nodes.size();
+    for (int i = 0; i < 5; ++i) anyDoor |= doors_[i].angle != 0 && doorNode_[i] > 0 && doorNode_[i] < (int)m->nodes.size();
+    for (const Debris& d : debris_) anyDoor |= d.detached;
     if (anyDoor) {
         std::vector<NodeMatrix> local = m->nodes;
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 5; ++i) {
             int n = doorNode_[i];
-            if (!doors_[i].angle || n <= 0 || n >= (int)local.size()) continue;
-            int a = ((i & 1) ? -doors_[i].angle : doors_[i].angle) * 64;
+            if (debris_[i].detached || !doors_[i].angle || n <= 0 || n >= (int)local.size()) continue;
+            int a = ((i==4 ? bootReverse_ : (i & 1)) ? -doors_[i].angle : doors_[i].angle) * 64;
+            if(i==4) a=-a;
             float c = fastsin((int16_t)a + 0x4000) / 4096.f, sn = fastsin((int16_t)a) / 4096.f;
             // (the game's row-vector RotZ; this port applies node matrices as columns, hence the transpose)
             float Rz[3][3] = {{c, sn, 0}, {-sn, c, 0}, {0, 0, 1}};
+            if(i==4) {
+                const float Rx[3][3]={{1,0,0},{0,c,sn},{0,-sn,c}};
+                for(int r=0;r<3;++r) for(int k=0;k<3;++k) Rz[r][k]=Rx[r][k];
+            }
             NodeMatrix L = m->nodes[n];
             for (int r = 0; r < 3; ++r)
                 for (int k = 0; k < 3; ++k) local[n].r[r][k] = Rz[r][0] * L.r[0][k] + Rz[r][1] * L.r[1][k] + Rz[r][2] * L.r[2][k];
         }
         world.resize(local.size());
         for (size_t k = 0; k < local.size(); ++k) {
+            if (debrisNode((int)k,M,world[k])) continue;
             const NodeMatrix& L = local[k];
             int p = L.parent;
             if (p <= 0 || (size_t)(p - 1) >= k) { world[k] = L; continue; }
@@ -1647,7 +1679,7 @@ void Vehicle::render(const Model* m) const {
             if (!(b.mask & inst)) continue;
             if (((b.flags & 0x08) != 0) != (pass == 1)) continue;
             if (b.flags & 0x10) glDisable(GL_CULL_FACE); else glEnable(GL_CULL_FACE);
-            if (b.flags & 0x07) glEnable(GL_LIGHTING); else glDisable(GL_LIGHTING);
+            if (!dead_ && (b.flags & 0x07)) glEnable(GL_LIGHTING); else glDisable(GL_LIGHTING);
             glDepthMask((b.flags & 0x20) ? GL_FALSE : GL_TRUE);
             if (pass == 1) { glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); glEnable(GL_ALPHA_TEST); }
             else { glDisable(GL_BLEND); glDisable(GL_ALPHA_TEST); }

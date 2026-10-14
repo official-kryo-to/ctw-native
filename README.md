@@ -44,6 +44,11 @@ port/build/GTACTW.exe --data port/data
 ```
 
 The build also makes `ctw_showcase.exe` (an asset and world viewer) and the mod kit in `port/build/mods/`.
+For optional 3D people in third person, place your own **LCS Android 2.4.379** APK at
+`input/lcs/GTA-LCS-2.4.379.apk` before configuring. Those same CMake commands prepare its character assets for
+Enhancements; press **V** in the game. Incremental builds reuse the import and repair missing files.
+`-DCTW_LCS_APK=PATH` selects another local donor; `-DCTW_IMPORT_LCS=OFF` stops automatic import.
+This development step is disabled for `CTW_RELEASE=ON`; standalone exports and the Porter use explicit imports.
 Building needs no game files; running does. `python scripts/export_pc.py` writes the same standalone folder as the
 Porter from a local build (`--with-modkit` adds the mod menu and the examples). The Porter itself is in
 [porter/](porter/README.md).
