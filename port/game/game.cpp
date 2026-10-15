@@ -63,6 +63,8 @@ bool Game::init(const std::string& data, const std::string& mods) {
     weather.reset(*this, 0);
     weather.rain = TheParticles().add<RainEmitter>(player.pos);
     blood = TheParticles().add<BloodEmitter>(player.pos);   // cGeneralParticleController::Init
+    sparks = TheParticles().add<SparksEmitter>(player.pos);
+    steamClouds = TheParticles().add<SteamEmitter>(player.pos, false);
     LoadVehicleInfos(vehicleInfos);   // parked cars come from the map's car generators (cargens.cpp)
     carGens.reset();
     // cPlayer::cPlayer: cPopulationManager's schedules (peds 64, vehicles 32), then cLocalAreaKnowledge's (16)
@@ -205,6 +207,8 @@ void Game::updateWorldObjects() {   // once per game frame, after the vehicles m
         int32_t at[3];
         focus(at);
         blood->setPos(at);
+        if (sparks) sparks->setPos(at);
+        if (steamClouds) steamClouds->setPos(at);
     }
     updateCityEmitters();
     for (auto& kv : fountains)
@@ -215,6 +219,15 @@ void Game::updateWorldObjects() {   // once per game frame, after the vehicles m
 void Game::addBlood(const int32_t pos[3], int count) {
     if (blood)
         for (int i = 0; i < count; ++i) blood->addParticle(pos);
+}
+
+void Game::addSpark(const int32_t pos[3], const int16_t dir[3], uint8_t life, bool useAngle, int16_t angle, bool jitter,
+                    uint16_t colour, uint16_t colourRand, int16_t scale) {
+    if (sparks) sparks->addParticle(pos, dir, life, useAngle, angle, jitter, colour, colourRand, scale);
+}
+
+void Game::addSteamCloud(const int32_t pos[3], uint16_t colour, int16_t scale) {
+    if (steamClouds) steamClouds->addCloud(pos, colour, scale);
 }
 
 void Game::focus(int32_t o[3]) const {
@@ -230,6 +243,7 @@ void Game::viewCamera(WorldCamera& cam) const {
         cam.setYawPitch(-(int16_t)deathYaw_ * 360.f / 65536, (int16_t)deathPitch_ * 360.f / 65536);
     }
     else if (playerCar >= 0) carCam.toWorldCamera(cam);
+    else if (scope.active) scope.toWorldCamera(*this, cam);
     else camera.toWorldCamera(cam);
     if (fovOverride > 0.f) cam.fovY = fovOverride;
     if (renderDistance > 120.f || freeCam.on)
@@ -284,6 +298,10 @@ void Game::updateView() {   // the game camera (not a mod's free camera), as cBa
         carCam.position(eye);
         yaw = carCam.yaw();
         pitch = carCam.pitch();
+    } else if (scope.active) {   // cSniperCam
+        std::copy(scope.pos, scope.pos + 3, eye);
+        yaw = scope.yaw;
+        pitch = 0xC000;
     } else {
         camera.position(eye);
         yaw = camera.yaw;
@@ -847,6 +865,16 @@ void Game::tick() {
         Plugins_Tick();
         return;
     }
+    {   // cPlayerOnFoot::HandlePlayerSniper: the sniper rifle on foot puts the player in the scope
+        const Weapon* current = playerWeapons.current();
+        const bool sniping = !player.dead && !player.attached && current && current->type == 18;
+        if (sniping && !scope.active) scope.enter(*this);
+        else if (!sniping) scope.active = false;
+        if (scope.active) {   // the stick moves the aim point, not the player
+            scope.update(*this, mx, my);
+            stickHeld = false;
+        }
+    }
     bool busy = player.dead || player.reacting() || tickTask(stickHeld, stickHeading);   // attached to a car / impact response
     Player::Input in;
     in.moving = stickHeld;
@@ -863,6 +891,13 @@ void Game::tick() {
     in.sprint = sprint;
     in.sprintReleased = sprintHeld_ && !sprint;
     in.maxLevel = walk ? 1 : 3;   // PC extra: hold Ctrl to walk (the phone game has no walk button)
+    if (scope.active) {   // cPlayerAsSniper: face the aim point, do not walk (ConstrainWalkSpeed(0, 0))
+        const int32_t dx = scope.pos[0] - player.pos[0], dy = scope.pos[1] - player.pos[1];
+        in.moving = std::abs(dx) + std::abs(dy) > 0x19A;
+        if (in.moving) in.heading = padAngle((float)dx, (float)dy);
+        in.maxLevel = 0;
+        in.sprint = false;
+    }
     if (task.op == CarTask::GotoDoor) in.maxLevel = 2;   // sVirtYoke::ConstrainWalkSpeed
     sprintHeld_ = sprint;
     player.obstacles.clear();
@@ -987,6 +1022,7 @@ void Game::render(int W, int H) {
     muzzleFlashes.render();
     fires.render(cam);
     if (playerCar < 0) FlameThrower_RenderJet(*playerWeapons.current());   // cFlameThrower::Render
+    if (playerCar < 0) Tazer_RenderWire(*playerWeapons.current());          // cTazer::Render
     Weapons_RenderThrowArc(*this);
     targeting.render(*this);
     glEnable(GL_DEPTH_TEST);
@@ -1024,6 +1060,7 @@ void Game::render(int W, int H) {
     float p[3];
     player.posf(p);
     if (showDebug) { collision.debugDraw(p[0], p[1], 40.f); roads.debugDraw(p[0], p[1], 80.f); }
+    if (scope.active && playerCar < 0) scope.renderScope(W, H);   // cSniperCam::Set's scope model
     glDisable(GL_DEPTH_TEST);
     applyGrade(W, H);
 
@@ -1071,6 +1108,7 @@ bool Game::key(int k) {
     if (radio.key(k, *this)) return true;
     if (WeaponHud_Key(*this, k)) return true;
     // PC: the phone game cycles weapons by tapping the HUD weapon icon (sVirtYoke +0x67 / +0x68)
+    if (scope.active && k == SDL_SCANCODE_Z) { scope.zoomPressed = true; return true; }   // the scope's zoom button
     if (playerCar < 0 && (k == SDL_SCANCODE_Q || k == SDL_SCANCODE_E)) { weaponCycle = k == SDL_SCANCODE_E ? 1 : -1; return true; }
     return false;
 }

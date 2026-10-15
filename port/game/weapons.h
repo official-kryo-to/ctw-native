@@ -37,6 +37,7 @@
 #pragma once
 #include "lookups.h"
 #include "flamethrower.h"
+#include "taser.h"
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -56,9 +57,11 @@ public:
     int8_t spin = 0;          // +0x18 (cMinigun: the barrel spin, fires above 8)
     uint8_t delayedHit = 0;   // cSword +0x14: seven sword-animation ticks before the hit
     FlameThrowerState flame;  // cFlameThrower +0x18..+0x39
+    TazerState tazer;         // cTazer +0x18..+0x30
     bool melee() const { return type <= 4; }
-    int ammoCount() const { return melee() ? -1 : ammo; }        // vfunc +0x48 Ammo
-    int ammoInClip() const { return melee() ? 1 : clip; }         // vfunc +0x50 AmmoLeftInClip
+    // vfunc +0x48 Ammo / +0x50 AmmoLeftInClip: the melee weapons and the taser keep cWeapon's -1 and 1
+    int ammoCount() const { return melee() || type == 19 ? -1 : ammo; }
+    int ammoInClip() const { return melee() || type == 19 ? 1 : clip; }
     void setState(int s, int t = 0);                              // cWeapon::SetState
     void addAmmo(int n);                                          // vfunc +0x40 AddAmmo
     void reload();                                                // vfunc +0x20 Reload

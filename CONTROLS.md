@@ -9,6 +9,7 @@
 | Space / left mouse | Fire (aims at the nearest target in front, as the original does) |
 | G / right mouse (hold) | Throw a grenade, molotov or flash bang: hold longer to throw further; drops a mine |
 | Q / E | Previous / next weapon |
+| Z | Sniper scope: zoom in or out (W A S D move the scope) |
 | Tab | Weapon wheel |
 
 | In a vehicle | |

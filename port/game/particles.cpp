@@ -758,6 +758,67 @@ void PetrolFlameEmitter::updateParticle(Particle& q) {
     if ((int8_t)q.alpha > 7) q.alphaStep = -2;
 }
 
+// ============================================================================================== sparks and steam
+
+void SparksEmitter::addParticle(const int32_t at[3], const int16_t dir[3], uint8_t life, bool useAngle, int16_t angle,
+                                bool jitter, uint16_t colour, uint16_t colourRand, int16_t scale) {
+    if (!init_) {   // cParticleEmitterSparks::AddParticle
+        tmpl_.size = (int16_t)((uint32_t)(inv_ * 0x6E1) >> 12);
+        init_ = true;
+    }
+    for (int k = 0; k < 3; ++k) tmpl_.v[k] = dir[k];
+    if (jitter) {
+        tmpl_.v[0] = (int16_t)(randNC(0x666) + tmpl_.v[0] - 0x333);
+        tmpl_.v[1] = (int16_t)(randNC(0x666) + tmpl_.v[1] - 0x333);
+    }
+    const int16_t heading = (int16_t)std::clamp((int)(atan2f((float)-tmpl_.v[0], (float)tmpl_.v[1]) * 10430.378f), -32768, 32767);
+    tmpl_.angle = (uint16_t)((uint16_t)(heading - (useAngle ? angle : 0)) ^ 0x8000);
+    tmpl_.alpha = (uint8_t)(((uint32_t)(scale * 0x1E) >> 12) + 1);
+    tmpl_.life = life;   // SetStandardDataLifeTime
+    tmpl_.alphaStep = -2;
+    tmpl_.colour = colour;
+    tmpl_.colour |= (uint16_t)(randNC((colourRand & 0x1F) + 1u) & 0x1F);
+    tmpl_.colour |= (uint16_t)((randNC((colourRand >> 5 & 0x1F) + 1u) & 0x1F) << 5);
+    tmpl_.colour |= (uint16_t)((randNC((colourRand >> 10 & 0x1F) + 1u) & 0x1F) << 10);
+    for (int k = 0; k < 3; ++k) tmpl_.v[k] = (int16_t)((uint32_t)(tmpl_.v[k] * inv_) >> 12);
+    int32_t rel[3];
+    for (int k = 0; k < 3; ++k) rel[k] = (int32_t)(((int64_t)inv_ * (at[k] - pos[k])) >> 12);
+    for (int k = 0; k < 3; ++k)   // DoesV3dOverflowV3d16
+        if (std::abs((rel[k] + tmpl_.size) >> 12) > 6) return;
+    for (int k = 0; k < 3; ++k) tmpl_.p[k] = (int16_t)rel[k];
+    addFromData(tmpl_);
+}
+
+void SparksEmitter::updateParticle(Particle& q) {   // cParticleEmitterSparks::UpdateParticle
+    Emitter::updateParticle(q);
+    unsigned c = q.colour;
+    if ((~c & 0x1F) != 0) ++c;
+    const unsigned g = (c & 0x3E0) == 0x3E0 ? c : c + 0x20;
+    if ((~q.colour & 0x1F) || (c & 0x3E0) != 0x3E0 || (g & 0x7C00) != 0x7C00)
+        q.colour = (uint16_t)((g & 0x7C00) == 0x7C00 ? g : g + 0x400);
+}
+
+void SteamEmitter::addCloud(const int32_t at[3], uint16_t colour, int16_t scale) {   // AddParticle(pos, colour, scale)
+    if (!init_) { tmpl_.spin = 0; tmpl_.active = 1; tmpl_.alphaStep = 0; init_ = true; }
+    tmpl_.colour = colour;
+    tmpl_.alpha = 0x1E;
+    tmpl_.size = (int16_t)((uint32_t)(scale * ((int32_t)randNC(0x333) + 0x800)) >> 12);
+    tmpl_.grow = (int16_t)((uint32_t)(scale * ((int32_t)randNC(0x7B) + 0x7A)) >> 12);
+    int32_t rel[3];
+    for (int k = 0; k < 3; ++k) rel[k] = (int32_t)(((int64_t)inv_ * (at[k] - pos[k])) >> 12);
+    for (int k = 0; k < 3; ++k)
+        if (std::abs((rel[k] + tmpl_.size) >> 12) > 6) return;
+    for (int k = 0; k < 3; ++k) tmpl_.p[k] = (int16_t)rel[k];
+    tmpl_.v[0] = tmpl_.v[1] = 0;
+    tmpl_.v[2] = (int16_t)((int32_t)randNC(0xCD) + 0xCC);
+    tmpl_.life = 200;
+    tmpl_.angle = (uint16_t)(((uint32_t)randNC(0x8000000) + 0xC000000u) >> 12);
+    for (int k = 0; k < 3; ++k) tmpl_.v[k] = (int16_t)((uint32_t)(tmpl_.v[k] * inv_) >> 12);
+    tmpl_.size = (int16_t)((uint32_t)(tmpl_.size * inv_) >> 12);
+    tmpl_.grow = (int16_t)((uint32_t)(tmpl_.grow * inv_) >> 12);
+    addFromData(tmpl_);
+}
+
 // ============================================================================================== blood
 
 void BloodEmitter::addParticle(const int32_t victim[3]) {   // cParticleEmitterBlood::AddParticle(cSimpleMover*)

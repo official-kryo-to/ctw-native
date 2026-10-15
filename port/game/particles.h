@@ -87,6 +87,9 @@ class SteamEmitter : public Emitter {
 public:
     SteamEmitter(const int32_t pos[3], bool on) : Emitter(pos, 15, 0x70000, 21, true), on_(on) {}
     void tick(uint32_t frame);                 // cParticleEmitterSteam::Process (before Emitter::process)
+    // AddParticle(pos, colour, scale): one cloud at pos in an RGB555 colour, 0.5..0.7 x scale wide, rising
+    // 0.05..0.1 a frame for 200 life steps (cGeneralParticleController::AddSteamCloud)
+    void addCloud(const int32_t at[3], uint16_t colour, int16_t scale);
 protected:
     void updateParticle(Particle& p) override;
 private:
@@ -246,6 +249,24 @@ private:
     Particle tmpl_{};
     bool init_ = false;
     int16_t size_;
+};
+
+// cParticleEmitterSparks: the local general particle controller's 15 sparks (range 7, flat additive quads of
+// sprite 10). AddParticle puts one at pos moving along dir (Q12 units a frame, optionally jittered by +-0.1 across),
+// turned to face its motion (less angle when useAngle), alpha 1 + 30 x scale, a colour of base plus a random part
+// within each channel of colourRand, fading by 2 a step; each frame its colour brightens towards white.
+class SparksEmitter : public Emitter {
+public:
+    explicit SparksEmitter(const int32_t pos[3], int count = 15) : Emitter(pos, count, 0x70000, 10, false) {
+        additive_ = true;
+    }
+    void addParticle(const int32_t at[3], const int16_t dir[3], uint8_t life, bool useAngle, int16_t angle, bool jitter,
+                     uint16_t colour, uint16_t colourRand, int16_t scale);
+protected:
+    void updateParticle(Particle& p) override;
+private:
+    Particle tmpl_{};
+    bool init_ = false;
 };
 
 class Particles {

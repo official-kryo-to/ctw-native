@@ -52,7 +52,7 @@ if(MINGW)   # windres run from the build folder with relative names (it breaks o
         DEPENDS ${CMAKE_BINARY_DIR}/gtactw.rc)
     set(CTW_RES ${CMAKE_BINARY_DIR}/gtactw_res.o)
 endif()
-add_library(ctw_gameplay STATIC game/game.cpp game/followcam.cpp game/player.cpp game/hud.cpp game/plugins.cpp game/vehicle.cpp game/carcam.cpp game/cargens.cpp game/random.cpp game/peds.cpp game/interpolation.cpp game/debughud.cpp game/postfx.cpp game/weather.cpp game/localarea.cpp game/weapons.cpp game/flamethrower.cpp game/fire.cpp game/projectiles.cpp game/targeting.cpp game/weaponhud.cpp game/roads.cpp game/aispline.cpp game/traffic.cpp game/particles.cpp game/sound.cpp game/skidmarks.cpp game/lookups.cpp game/watercannon.cpp game/propdynamics.cpp game/rigidbody.cpp game/radio.cpp game/stats.cpp)
+add_library(ctw_gameplay STATIC game/game.cpp game/followcam.cpp game/player.cpp game/hud.cpp game/plugins.cpp game/vehicle.cpp game/carcam.cpp game/cargens.cpp game/random.cpp game/peds.cpp game/interpolation.cpp game/debughud.cpp game/postfx.cpp game/weather.cpp game/localarea.cpp game/weapons.cpp game/flamethrower.cpp game/fire.cpp game/taser.cpp game/sniper.cpp game/projectiles.cpp game/targeting.cpp game/weaponhud.cpp game/roads.cpp game/aispline.cpp game/traffic.cpp game/particles.cpp game/sound.cpp game/skidmarks.cpp game/lookups.cpp game/watercannon.cpp game/propdynamics.cpp game/rigidbody.cpp game/radio.cpp game/stats.cpp)
 target_include_directories(ctw_gameplay PUBLIC game)
 target_sources(ctw_gameplay PRIVATE game/radar.cpp game/gamehud.cpp)
 target_sources(ctw_gameplay PRIVATE game/gameplayapi.cpp game/cameraobstruction.cpp)

@@ -77,6 +77,14 @@ int main() {
     table.info[3].range = 4 * 4096;
     table.info[3].fireDelay = 24;
     for (int32_t& life : table.traceLife) life = 3;   // the loader rejects trace lifetimes outside 1..127
+    {   // the sniper rifle: 40 units of range, 50 damage
+        WeaponInfo& s = table.info[18];
+        s.maxAmmo = 100; s.slot = 5; s.clip = 1; s.fireDelay = 10; s.reloadTime = 20; s.damage = 50; s.range = 40 * 4096;
+    }
+    {   // the taser: 12 units of range, 2 damage a shock
+        WeaponInfo& t = table.info[19];
+        t.maxAmmo = -1; t.slot = 4; t.fireDelay = 10; t.reloadTime = 0; t.damage = 2; t.range = 12 * 4096;
+    }
     {   // the flamethrower: 10 units of range, 5 damage
         WeaponInfo& f = table.info[16];
         f.maxAmmo = 500; f.slot = 6; f.fireDelay = 0; f.reloadTime = 20; f.damage = 5; f.range = 10 * 4096;
@@ -270,6 +278,94 @@ int main() {
         g.fires.process(g);
         check(g.fires.burning(Fires::Ped, g.peds.peds.back().uid), "a ped walking into a molotov fire catches fire");
         g.fires.clear();
+    }
+
+    {   // cTazer: the dart flies, wires up the ped it hits, shocks him while the button is held
+        scene(g);
+        g.fires.clear();
+        g.projectiles.clear();
+        ped(g, 0, 6);
+        check(g.playerWeapons.give(19, 0, true), "a taser can be equipped");
+        Weapon& taser = *g.playerWeapons.current();
+        check(taser.type == 19 && taser.ammoCount() == -1 && taser.tazer.charge == 0x65, "the taser has no ammo, full charge");
+        for (int i = 0; i < 10 && taser.state != 0; ++i) Weapons_PlayerFrame(g, false, 0);   // the switch-in reload
+        Weapons_PlayerFrame(g, true, 0);
+        check((taser.tazer.flags & 7) == 1 && g.projectiles.alive(taser.tazer.cartridge), "firing shoots a dart");
+        int frames = 0;
+        while ((taser.tazer.flags & 7) != 2 && frames < 20) {
+            ++g.frame;
+            g.projectiles.process(g);
+            Weapons_PlayerFrame(g, true, 0);
+            ++frames;
+        }
+        check((taser.tazer.flags & 7) == 2 && taser.tazer.ped == g.peds.peds[0].uid, "the dart wires up the ped it hits");
+        check(frames <= 4, "the dart crosses 6 units in a few frames (2.5 a frame)");
+        check(g.peds.peds[0].body.health == 125, "the dart's hit is a jolt of the weapon's damage");
+        const int charge = taser.tazer.charge;
+        int shocks = 0;
+        for (int i = 0; i < 300 && !Fires_PedOnFire(g, g.peds.peds[0].uid) && !g.peds.peds[0].body.dead; ++i) {
+            const int before = g.peds.peds[0].body.health;
+            ++g.frame;
+            g.projectiles.process(g);
+            Weapons_PlayerFrame(g, true, 0);
+            if (g.peds.peds[0].body.health < before) ++shocks;
+        }
+        check(Fires_PedOnFire(g, g.peds.peds[0].uid) && shocks == 6, "the sixth shock sets the ped on fire");
+        check(taser.tazer.charge < charge, "shocking drains the charge");
+        check(taser.tazer.wireReady && taser.tazer.arcCount >= 10 && taser.tazer.arcCount < 30,
+              "a shock draws the wire and a 10..29-point arc");
+        for (int i = 0; i < 60 && (taser.tazer.flags & 7); ++i) Weapons_PlayerFrame(g, false, 0);
+        check((taser.tazer.flags & 7) == 0 && taser.tazer.ped == 0, "letting go releases the ped after the shock");
+        const int low = taser.tazer.charge;
+        Weapons_PlayerFrame(g, false, 0);
+        check(taser.tazer.charge == low + 1, "the charge comes back by one an idle frame");
+        g.fires.clear();
+        g.projectiles.clear();
+    }
+    {   // a dart that misses comes back when the button is let go
+        scene(g);
+        g.projectiles.clear();
+        g.playerWeapons.give(19, 0, true);
+        Weapon& taser = *g.playerWeapons.current();
+        taser.tazer = TazerState{};
+        for (int i = 0; i < 10 && taser.state != 0; ++i) Weapons_PlayerFrame(g, false, 0);
+        Weapons_PlayerFrame(g, true, 0);
+        const uint32_t dart = taser.tazer.cartridge;
+        Weapons_PlayerFrame(g, false, 0);
+        ++g.frame;
+        g.projectiles.process(g);
+        check(!g.projectiles.alive(dart) && (taser.tazer.flags & 7) == 0, "releasing the button drops the dart");
+    }
+
+    {   // cSniperCam: 30 units up, 4 ahead; the stick moves the aim a unit a frame (0.4 zoomed), within range
+        scene(g);
+        g.player.fwd[0] = 0; g.player.fwd[1] = 0x1000;
+        SniperScope& s = g.scope;
+        s = SniperScope{};
+        s.enter(g);
+        check(s.active && s.pos[0] == 0 && s.pos[1] == 4 * 4096 && s.pos[2] == 0x1E000 && s.fov == 0x1555,
+              "the scope starts 4 units ahead of the player, 30 up, at 30 degrees");
+        s.update(g, 0.f, 1.f);
+        check(std::abs(s.pos[1] - 5 * 4096) <= 2 && std::abs(s.pos[0]) <= 2, "a full stick moves the aim a unit forward");
+        s.update(g, 1.f, 0.f);
+        check(std::abs(s.pos[0] - 4096) <= 2, "right on the stick moves the aim to the right of the view");
+        s.zoomPressed = true;
+        s.update(g, 0.f, 1.f);
+        check(s.zoomed && s.fov == 0x1555 - 0x38E && std::abs(s.pos[1] - (5 * 4096 + 0x666)) <= 4,
+              "zooming narrows the view by 5 degrees a frame and slows the aim to 0.4");
+        for (int i = 0; i < 5; ++i) s.update(g, 0.f, 0.f);
+        check(s.fov == 0xE39, "zoomed in, the view is 20 degrees");
+        for (int i = 0; i < 200; ++i) s.update(g, 0.f, 1.f);
+        check(std::abs(s.pos[1] - 40 * 4096) <= 8, "the aim point stays within the rifle's range");
+        // the shot hits the ped whose circle holds the aim point
+        s.pos[0] = 0; s.pos[1] = 20 * 4096;
+        ped(g, 1, 20);   // 1 unit off the aim point: inside its 1.25-unit circle
+        ped(g, 0, 23);
+        g.playerWeapons.give(18, 10, true);
+        Sniper_CreateBullet(g, *g.playerWeapons.current());
+        check(g.peds.peds[0].body.health == 77 && g.peds.peds[1].body.health == 127,
+              "a sniper shot takes the rifle's damage from the ped under the aim point only");
+        s.active = false;
     }
 
     g.cars.clear(); g.peds.clear();

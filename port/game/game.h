@@ -25,6 +25,7 @@
 #include "weapons.h"
 #include "particles.h"
 #include "fire.h"
+#include "sniper.h"
 #include "stats.h"
 #include "projectiles.h"
 #include "targeting.h"
@@ -57,6 +58,10 @@ public:
     void updateWorldObjects();               // city emitters, fountains and knocked-over props
     // cPed::Damage's blood: count calls of cGeneralParticleController::AddBlood for a victim at pos
     void addBlood(const int32_t pos[3], int count);
+    // cGeneralParticleController::AddSpark / AddSteamCloud
+    void addSpark(const int32_t pos[3], const int16_t dir[3], uint8_t life, bool useAngle, int16_t angle, bool jitter,
+                  uint16_t colour, uint16_t colourRand, int16_t scale);
+    void addSteamCloud(const int32_t pos[3], uint16_t colour, int16_t scale);
     std::map<int, std::vector<class Emitter*>> cityEmitters;   // cell key -> its emitters
     std::map<int, std::vector<std::unique_ptr<Fountain>>> fountains;   // cell key -> its fountains (type 1)
     PropDynamics propDynamics;               // street furniture knocked over by vehicles
@@ -80,7 +85,10 @@ public:
     BulletTraces traces;                     // cBulletTraces
     MuzzleFlashes muzzleFlashes;             // cMuzzleFlashes
     BloodEmitter* blood = nullptr;           // LocalGeneralParticles' cParticleEmitterBlood
+    SparksEmitter* sparks = nullptr;         // its cParticleEmitterSparks
+    SteamEmitter* steamClouds = nullptr;     // its cParticleEmitterSteam (AddSteamCloud)
     Fires fires;                             // cFire
+    SniperScope scope;                       // cPlayerAsSniper / cSniperCam
     Stats stats;                             // gStatsManager (cStatsManager)
     PlayerTargeting targeting;               // the player's auto-aim (cPlayerSensorCone, targeting.cpp)
     Projectiles projectiles;                 // grenades, molotovs, flashbangs, mines and rockets (projectiles.cpp)

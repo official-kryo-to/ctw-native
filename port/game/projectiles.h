@@ -35,12 +35,16 @@ struct Model;
 
 class Projectiles {
 public:
-    enum Kind { Grenade = 20, Molotov = 21, FlashBang = 22, Mine = 23, Rocket = 17 };
+    enum Kind { Grenade = 20, Molotov = 21, FlashBang = 22, Mine = 23, Rocket = 17, Tazer = 19 };
     void clear();
     // the launchers' CreateBullet for the player (fireDir: cPed::FireDirection; power 0..128)
     void throwGrenade(Game& g, int kind, int power);
     void dropMine(Game& g);
     void fireRocket(Game& g);
+    // cTazer::CreateBullet: a cTazerCartridge from `from` at `launch` a frame; returns its id
+    uint32_t fireTazer(Game& g, const int32_t from[3], const int32_t launch[3]);
+    bool alive(uint32_t id) const { return find(id) != nullptr; }
+    void expire(uint32_t id);   // lifetime 0: gone on its next Process
     bool mineWaiting() const;   // cMineLauncher::Reload: the last mine is not armed yet (IsMineActive)
     // cBaseProjectile::CalculateProjectileInitialVelocity: dir Q12 (horizontal), power Q12 (0..1 of the range)
     static void launchVelocity(const int32_t dir[3], int32_t power, int32_t out[3]);
@@ -58,7 +62,9 @@ public:
         bool hitCar = false;                              // cMolotov +0x113
         bool dead = false;
         uint32_t beepMs = 0;                              // cProximityMine +0x114
+        bool retracting = false;                          // cTazerCartridge +0x113
     };
+    const Projectile* find(uint32_t id) const;
     const std::vector<Projectile>& list() const { return list_; }
 private:
     std::vector<Projectile> list_;
@@ -68,6 +74,7 @@ private:
     void loadModels() const;
     void destroy(Game& g, Projectile& p);
     void onCollision(Game& g, Projectile& p, const int32_t normal[3], int entity, bool water);
+    void tazerRetract(Game& g, Projectile& p);   // the dart flies back to the shooter, or goes when close
 };
 
 // CCollision::GetSphereCollision against the statics (0xF00): the earliest contact of a sphere moving a -> b.

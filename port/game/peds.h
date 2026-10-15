@@ -122,8 +122,8 @@ public:
     // Blood: type 0 bleeds four drops unless the weapon's effect is 0x1D, other types one (the chainsaw's
     // type-12 cParticleEmitterBloodSpray is not ported).
     void meleeHit(Game& g, Ped& p, int damage, int type, const int32_t from[3], int effect = 0);
-    // cPed::Damage for burning (sDamageInfo type 5, effect 0x1D): the health and death, no blood, then
-    // ReactToDamage (GetAction: type 5 is action 0). from: whoever started the fire.
+    // cPed::Damage for burning (sDamageInfo type 5, effect 0x1D) and the taser (type 3, effect 0x13): the health and
+    // death, no blood, then ReactToDamage (GetAction: types 3 and 5 are action 0). from: the attacker.
     void fireHit(Game& g, Ped& p, int damage, const int32_t from[3]);
     // cPopulationManager::GenerateRandomPed (from Game::updatePopulation): roll a type from the zone's profile and
     // create the ped at the next cLocalAreaKnowledge pavement crossing of the 60-unit circle

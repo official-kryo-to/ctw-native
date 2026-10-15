@@ -5,6 +5,7 @@
 #include "fixedmath.h"
 #include "game.h"
 #include "particles.h"
+#include "sniper.h"
 #include "random.h"
 #include "sound.h"
 #include "text/gxt.h"
@@ -12,7 +13,9 @@
 #include <algorithm>
 #include <cmath>
 
+struct PlayerYoke { bool released = false, pressed = false, held = false; };   // sWeaponYoke +0x14..+0x16
 namespace {
+PlayerYoke gYoke;
 WeaponTables gTables;
 bool gOk = false;
 GxtFile gNames;
@@ -42,7 +45,7 @@ std::string Weapons_Name(int type) {
     return s;
 }
 bool Weapons_Fires(int type) {   // the weapons whose CreateBullet is ported
-    return (type >= 5 && type <= 17) || (type >= 20 && type <= 23);
+    return type >= 5 && type <= 23;
 }
 
 // ---- cWeapon ----------------------------------------------------------------------------------------------------
@@ -528,6 +531,7 @@ void createBullet(Game& g, Weapon& w) {
     if (w.type == 23) { g.projectiles.dropMine(g); return; }     // cMineLauncher
     if (w.type >= 20 && w.type <= 22) { g.projectiles.throwGrenade(g, w.type, g.player.throwPower); return; }
     if (w.type < 19 && kFireSfx[w.type][2]) TheSound().playerEvent(kFireSfx[w.type][0], kFireSfx[w.type][1], kFireSfx[w.type][2]);
+    if (w.type == 18) { Sniper_CreateBullet(g, w); return; }   // cSniperRifle: the scope's aim point, no trace
     const WeaponInfo& info = Weapons_Info(w.type);
     const int32_t range = info.range;   // cPlayer::PrimaryWeaponRange on foot
     const int32_t origin[3] = {g.player.pos[0], g.player.pos[1], g.player.pos[2]};   // GetBulletOrigin (on foot)
@@ -593,6 +597,7 @@ void hitStuff(Game& g, Weapon& w, int16_t angle, int pedDamage, int vehicleDamag
 
 void fireWeapon(Game& g, Weapon& w) {   // cBulletBasedWeapon::Fire / cMeleeBasedWeapon::Fire
     if (w.type == 16) { FlameThrower_Fire(g, w); return; }   // cFlameThrower::Fire
+    if (w.type == 19) { Tazer_Fire(g, w, gYoke.held); return; }   // cTazer::Fire
     if (w.state != 0) return;
     if (w.melee()) {   // the weapon's HitStuff, then the swing's timer
         const int dmg = Weapons_Info(w.type).damage;
@@ -643,6 +648,7 @@ void fireWeapon(Game& g, Weapon& w) {   // cBulletBasedWeapon::Fire / cMeleeBase
 
 void updateWeapon(Game& g, Weapon& w) {   // cWeapon::Update
     if (w.type == 16) FlameThrower_Update(g, w);   // cFlameThrower::Update, then cWeapon::Update
+    if (w.type == 19) Tazer_Update(g, w, gYoke.held && &w == g.playerWeapons.current());   // cTazer::Update
     if (w.type == 15 && w.spin - 1 >= 0) {   // cMinigun::Update: the spin winds down, its sound follows it
         --w.spin;
         TheSound().playerEvent(79, std::min(16 * w.spin, 127), 200);
@@ -689,8 +695,6 @@ void updateWeapon(Game& g, Weapon& w) {   // cWeapon::Update
     }
 }
 
-struct PlayerYoke { bool released = false, pressed = false, held = false; };   // sWeaponYoke +0x14..+0x16
-PlayerYoke gYoke;
 // cIPhonePad's secondary (thrown) weapon button in the controller mode (CheckSecondaryPressed, byte_E0E611): while
 // it is held the power (+0x638) grows by the frames it has been held (dword_105C7E4), up to 128; letting go throws
 // (cPlayer::ThrowSecondary -> cPed::FireSecondary -> cWeaponManager::Fire(secondary)).
@@ -855,6 +859,7 @@ void Weapons_PlayerFrame(Game& g, bool fireHeld, int cycle, bool throwHeld) {
     g.player.weaponFlags = c.flags;
     // cPed::Render -> cFlameThrower::Render -> CreateGasJet; built once per tick (its Rand32Critical)
     if (m.current()->type == 16) FlameThrower_Jet(g, *m.current());
+    if (m.current()->type == 19) Tazer_Wire(g, *m.current());   // cTazer::Render
     m.current()->flags = 0;
     if (Weapon* s = m.inSlot(m.secondary)) s->flags = 0;
 }

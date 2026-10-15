@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 #include "projectiles.h"
+#include "taser.h"
 #include "fixedmath.h"
 #include "game.h"
 #include "sound.h"
@@ -226,6 +227,37 @@ void Projectiles::fireRocket(Game& g) {   // cRocketLauncher::CreateBullet
         onCollision(g, list_.back(), n, -1, water);
 }
 
+uint32_t Projectiles::fireTazer(Game& g, const int32_t from[3], const int32_t launch[3]) {
+    (void)g;
+    // cTazerCartridge: cBaseProjectile(owner, pos, launch, 300, -1, 0), colliding with peds as well
+    Projectile p = make(Tazer, from, launch, nextId_++);
+    p.lifetime = 300;
+    p.collide |= 2;
+    list_.push_back(p);
+    return p.id;
+}
+
+const Projectiles::Projectile* Projectiles::find(uint32_t id) const {
+    if (!id) return nullptr;
+    for (const Projectile& p : list_) if (p.id == id && !p.dead) return &p;
+    return nullptr;
+}
+
+void Projectiles::expire(uint32_t id) {
+    for (Projectile& p : list_) if (p.id == id) p.lifetime = 0;
+}
+
+void Projectiles::tazerRetract(Game& g, Projectile& p) {
+    p.retracting = true;
+    int32_t d[3] = {g.player.pos[0] - p.pos[0], g.player.pos[1] - p.pos[1], g.player.pos[2] - p.pos[2] + 0x2000};
+    if ((int64_t)d[0] * d[0] + (int64_t)d[1] * d[1] + (int64_t)d[2] * d[2] > 0xFFFFFF) {
+        Normalise3(d);
+        for (int k = 0; k < 3; ++k) p.vel[k] = d[k] << 6;   // 64 units a second
+    } else {
+        p.dead = true;
+    }
+}
+
 void Projectiles::destroy(Game& g, Projectile& p) {   // the Destroy of each class: the explosion
     if (p.dead) return;
     p.dead = true;
@@ -285,6 +317,9 @@ void Projectiles::onCollision(Game& g, Projectile& p, const int32_t n[3], int en
         case Rocket:   // the direct hit's damage (sDamageInfo type 10) is not ported: the explosion follows
             destroy(g, p);
             return;
+        case Tazer:    // cTazerCartridge::OnCollision: anything but a ped pulls the dart back
+            tazerRetract(g, p);
+            return;
     }
 }
 
@@ -305,6 +340,14 @@ void Projectiles::process(Game& g) {
             p.lifetime = 0;
             destroy(g, p);
             continue;
+        }
+        if (p.kind == Tazer) {   // cTazerCartridge::Process: pulled back beyond 1.155 x the range, gone when home
+            const int64_t dx = p.pos[0] - g.player.pos[0], dy = p.pos[1] - g.player.pos[1], dz = p.pos[2] - g.player.pos[2];
+            const int64_t d2 = dx * dx + dy * dy + dz * dz;
+            const int64_t reach = (int32_t)(((int64_t)Weapons_Info(19).range * 0x127A00000LL) >> 32);
+            if (d2 >= reach * reach) tazerRetract(g, p);
+            if (!p.dead && d2 < 0xA000001 && p.retracting) p.dead = true;
+            if (p.dead) continue;
         }
         if (p.kind == Mine) {   // cProximityMine::Process
             if (p.lifetime >= 298) {
@@ -362,6 +405,11 @@ void Projectiles::process(Game& g) {
             for (const Pedestrians::Ped& ped : g.peds.peds) {
                 if (ped.vehicle || ped.deadFrames >= 0 || ped.body.dead) continue;
                 if (!spherePed(ped.body.pos, p.pos, p.radius)) continue;
+                if (p.kind == Tazer) {   // cTazerCartridge::OnCollision with a ped
+                    if (!p.retracting) Tazer_CartridgeHitPed(g, ped.uid, p.vel);
+                    tazerRetract(g, p);
+                    break;
+                }
                 const int32_t up[3] = {0, 0, 0x1000};
                 onCollision(g, p, up, -2, false);
                 break;
@@ -376,6 +424,7 @@ void Projectiles::render(Game& g) const {
     if (!modelsLoaded_) loadModels();
     const float t = g.interpolate ? g.renderAlpha : 1.f;
     for (const Projectile& p : list_) {
+        if (p.kind == Tazer) continue;   // the dart is drawn as the taser's wire
         const int which = p.kind == Molotov ? 1 : p.kind == Rocket ? 2 : 0;
         const Model* m = model(models_[which]);
         if (!m) continue;
