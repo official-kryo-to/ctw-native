@@ -4,7 +4,7 @@
 //! Synthetic APKs: what is refused, and the folder a successful port produces. Mirrors `tests/test_setup.py`.
 
 use crate::apk::{asset_entries, prepare_with};
-use crate::export::{export_with, payload_has_game, ExportOptions};
+use crate::export::{export_with, payload_has_game, payload_mods, ExportOptions, PayloadMod};
 use crate::manifest::tests::binary_manifest;
 use crate::tables::TableError;
 use crate::{PortError, Progress};
@@ -171,6 +171,36 @@ fn export_builds_the_game_folder() {
 }
 
 #[test]
+fn payload_lists_its_mods() {
+    let payload = zip_of(&[
+        ("GTACTW.exe", b"MZ game"),
+        ("mods/ModMenu.dll", b"MZ menu"),
+        ("mods/Trumpify/mod.ini", b"name = Trumpify\r\nversion = 1.1\nauthor = Kryo.to\ndescription = Adverts\n"),
+        ("mods/Trumpify/textures/960.png", b"png"),
+        ("mods/Trumpify/textures/961.PNG", b"png"),
+        ("mods/Cheats/mod.ini", b"; comment\nname = Cheat Example\ndll = cheats.dll\n"),
+        ("mods/NotAMod/readme.txt", b"no mod.ini"),
+    ]);
+    let mods = payload_mods(&payload);
+    assert_eq!(
+        mods,
+        vec![
+            PayloadMod { folder: "Cheats".into(), name: "Cheat Example".into(), code: true, ..Default::default() },
+            PayloadMod {
+                folder: "Trumpify".into(),
+                name: "Trumpify".into(),
+                version: "1.1".into(),
+                author: "Kryo.to".into(),
+                description: "Adverts".into(),
+                code: false,
+                textures: 2,
+            },
+        ]
+    );
+    assert!(payload_mods(b"not a zip").is_empty());
+}
+
+#[test]
 fn shortcut_points_at_the_exe() {
     let dir = tempfile::tempdir().unwrap();
     let link = dir.path().join("GTA.url");
@@ -200,6 +230,17 @@ fn premade_selection_and_failed_donor_do_not_publish_partial_games() {
         assert_eq!(out.join("mods/Enhancements/mod.ini").is_file(), !mods.is_empty());
         assert!(!out.join("mods/CheatExample").exists());
     }
+    let unknown = ExportOptions { with_modkit: true, mods: Some(vec!["Missing".into()]), ..Default::default() };
+    let rejected = export_with(
+        &path,
+        &dir.path().join("unknown"),
+        &payload,
+        &unknown,
+        &mut |_| {},
+        &AtomicBool::new(false),
+        &stub_tables,
+    );
+    assert!(matches!(rejected, Err(PortError::Unsafe(_))));
     let donor = dir.path().join("donor.apk");
     std::fs::write(&donor, b"invalid APK").unwrap();
     let out = dir.path().join("failed");

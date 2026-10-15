@@ -5,7 +5,7 @@
 //! background thread and reports progress to the page as events.
 
 use ctw_porter_core::export::{write_shortcut, ExportOptions};
-use ctw_porter_core::{check_apk, export, payload_has_game, PortError, Progress};
+use ctw_porter_core::{check_apk, export, payload_has_game, payload_mods, PortError, Progress};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -57,6 +57,35 @@ fn bundled_game() -> bool {
     payload_has_game(PAYLOAD)
 }
 
+/// A mod this Porter carries, for the selection screen.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BundledMod {
+    folder: String,
+    name: String,
+    version: String,
+    author: String,
+    description: String,
+    code: bool,
+    textures: usize,
+}
+
+#[tauri::command]
+fn bundled_mods() -> Vec<BundledMod> {
+    payload_mods(PAYLOAD)
+        .into_iter()
+        .map(|m| BundledMod {
+            folder: m.folder,
+            name: m.name,
+            version: m.version,
+            author: m.author,
+            description: m.description,
+            code: m.code,
+            textures: m.textures,
+        })
+        .collect()
+}
+
 /// `folder`, or "folder (2)", "(3)"... whichever does not exist yet.
 #[tauri::command]
 fn free_folder(folder: String) -> String {
@@ -94,13 +123,19 @@ async fn inspect_apk(path: String) -> Result<ApkSummary, String> {
     .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-async fn inspect_lcs_apk(path: String, version: String) -> Result<usize,String> {
-    if version != ctw_porter_core::lcs::VERSION {return Err("Supported LCS version: 2.4.379.".into());}
-    tauri::async_runtime::spawn_blocking(move || ctw_porter_core::lcs::inspect(Path::new(&path)).map_err(|e|e.to_string()))
-        .await.map_err(|e|e.to_string())?
+async fn inspect_lcs_apk(path: String, version: String) -> Result<usize, String> {
+    if version != ctw_porter_core::lcs::VERSION {
+        return Err("Supported LCS version: 2.4.379.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        ctw_porter_core::lcs::inspect(Path::new(&path)).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // a command's parameters are the page's call arguments
 fn start_port(
     app: AppHandle,
     state: State<'_, Porting>,
@@ -139,14 +174,25 @@ fn start_port(
                 Progress::Installing => {
                     ProgressEvent { stage: "installing", files_done: 0, files_total: 0, bytes_done: 1, bytes_total: 1 }
                 }
-                Progress::ModAssets {done,total} => {
-                    ProgressEvent {stage:"mod-assets",files_done:done,files_total:total,bytes_done:done as u64,bytes_total:total as u64}
-                }
+                Progress::ModAssets { done, total } => ProgressEvent {
+                    stage: "mod-assets",
+                    files_done: done,
+                    files_total: total,
+                    bytes_done: done as u64,
+                    bytes_total: total as u64,
+                },
             };
             let _ = emitter.emit("porter://progress", event);
         };
         let out = PathBuf::from(&folder);
-        let result = export(Path::new(&apk), &out, PAYLOAD, &ExportOptions { with_modkit, mods: Some(mods), lcs_apk: lcs_apk.map(PathBuf::from) }, &mut report, &cancel);
+        let result = export(
+            Path::new(&apk),
+            &out,
+            PAYLOAD,
+            &ExportOptions { with_modkit, mods: Some(mods), lcs_apk: lcs_apk.map(PathBuf::from) },
+            &mut report,
+            &cancel,
+        );
         app.state::<Porting>().running.store(false, Ordering::SeqCst);
         match result {
             Ok(exe) => {
@@ -197,7 +243,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(Porting::default())
-        .invoke_handler(tauri::generate_handler![bundled_game, free_folder, inspect_apk, inspect_lcs_apk, start_port, cancel_port, play])
+        .invoke_handler(tauri::generate_handler![
+            bundled_game,
+            bundled_mods,
+            free_folder,
+            inspect_apk,
+            inspect_lcs_apk,
+            start_port,
+            cancel_port,
+            play
+        ])
         .on_window_event(|window, event| {
             // Closing mid-port: stop first, so the half-written staging folder is removed before the process ends.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

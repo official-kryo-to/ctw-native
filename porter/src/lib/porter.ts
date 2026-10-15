@@ -54,6 +54,30 @@ export function overall(p: PortProgress | null): number {
   }
 }
 
+/** A mod the Porter carries (mods/<folder>/mod.ini in its payload). */
+export type BundledMod = {
+  folder: string
+  name: string
+  version: string
+  author: string
+  description: string
+  /** It runs code (a DLL). */
+  code: boolean
+  /** Its textures/*.png. */
+  textures: number
+}
+
+const MOCK_MODS: BundledMod[] = [
+  { folder: 'CheatExample', name: 'Cheat Example', version: '2.0', author: 'Kryo.to', description: 'Vehicle and world cheats, a spawn menu for vehicles and weapons (F7) and a free camera (F8).', code: true, textures: 0 },
+  { folder: 'Enhancements', name: 'Enhancements', version: '1.0', author: 'Kryo.to', description: 'Third-person camera, PSP-style lighting and optional 3D characters.', code: true, textures: 0 },
+  { folder: 'Trumpify', name: 'Trumpify', version: '1.1', author: 'Kryo.to', description: 'One picture on every advert in the city.', code: false, textures: 61 },
+]
+
+export async function bundledMods(): Promise<BundledMod[]> {
+  if (!isTauri()) return MOCK_MODS
+  return invoke<BundledMod[]>('bundled_mods')
+}
+
 export async function bundledGame(): Promise<boolean> {
   if (!isTauri()) return true
   return invoke<boolean>('bundled_game')

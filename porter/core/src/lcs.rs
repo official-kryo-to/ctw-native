@@ -129,9 +129,9 @@ fn open(apk: &Path, cancel: &AtomicBool) -> Result<Wad, PortError> {
         return Err(bad("invalid file count"));
     }
     let fat = wad.read(at + 4, count * 48, cancel)?;
-    for row in fat.chunks_exact(48) {
+    for row in fat.as_chunks::<48>().0 {
         let key = u32_at(row, 0)?;
-        let nums: Vec<_> = row[16..].chunks_exact(8).map(|v| u64::from_le_bytes(v.try_into().unwrap())).collect();
+        let nums: Vec<_> = row[16..].as_chunks::<8>().0.iter().map(|v| u64::from_le_bytes(*v)).collect();
         let (offset, size) = (nums[0], nums[1]);
         if offset > wad.length
             || size > wad.length - offset
@@ -253,7 +253,7 @@ pub fn extract(
     }
     let (img_at, img_size) = *wad.entries.get(&crc("models/gta3.img")).ok_or_else(|| bad("missing gta3.img"))?;
     let mut entries = BTreeMap::new();
-    for row in directory.chunks_exact(32) {
+    for row in directory.as_chunks::<32>().0 {
         let at = u32_at(row, 0)? as u64 * 2048;
         let size = u32_at(row, 4)? as u64 * 2048;
         let name = std::str::from_utf8(&row[8..])

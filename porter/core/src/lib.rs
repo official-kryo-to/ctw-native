@@ -18,7 +18,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 pub use apk::{check_apk, prepare, ApkInfo};
-pub use export::{export, payload_has_game, ExportOptions};
+pub use export::{export, payload_has_game, payload_mods, ExportOptions, PayloadMod};
 
 /// What the Porter is doing, for the progress bar.
 #[derive(Debug, Clone, PartialEq)]

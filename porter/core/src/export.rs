@@ -31,6 +31,67 @@ pub struct ExportOptions {
     pub lcs_apk: Option<PathBuf>,
 }
 
+/// A mod the payload carries in `mods/<folder>/`, as its `mod.ini` describes it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PayloadMod {
+    pub folder: String,
+    pub name: String,
+    pub version: String,
+    pub author: String,
+    pub description: String,
+    /// It runs code (a `dll =` in its mod.ini).
+    pub code: bool,
+    /// Its `textures/*.png`.
+    pub textures: usize,
+}
+
+/// The mods in a payload, sorted by folder. The mod menu itself (`mods/ModMenu.dll`) is not one of them.
+pub fn payload_mods(payload: &[u8]) -> Vec<PayloadMod> {
+    let Ok(mut archive) = ZipArchive::new(Cursor::new(payload)) else { return Vec::new() };
+    let mut mods: std::collections::BTreeMap<String, PayloadMod> = Default::default();
+    for index in 0..archive.len() {
+        let Ok(mut entry) = archive.by_index(index) else { continue };
+        let parts: Vec<&str> = entry.name().split('/').collect();
+        if parts.len() < 3 || parts[0] != "mods" || parts[1].is_empty() {
+            continue;
+        }
+        let folder = parts[1].to_owned();
+        let file = parts[2..].join("/");
+        if file == "mod.ini" {
+            let mut text = String::new();
+            if entry.read_to_string(&mut text).is_err() {
+                continue;
+            }
+            let m = mods
+                .entry(folder.clone())
+                .or_insert_with(|| PayloadMod { folder: folder.clone(), ..Default::default() });
+            for line in text.lines() {
+                let line = line.trim();
+                if line.starts_with([';', '#', '[']) {
+                    continue;
+                }
+                let Some((key, value)) = line.split_once('=') else { continue };
+                let value = value.trim().to_owned();
+                match key.trim() {
+                    "name" => m.name = value,
+                    "version" => m.version = value,
+                    "author" => m.author = value,
+                    "description" => m.description = value,
+                    "dll" => m.code = !value.is_empty(),
+                    _ => {}
+                }
+            }
+            if m.name.is_empty() {
+                m.name = folder;
+            }
+        } else if parts.len() == 4 && parts[2] == "textures" && file.to_ascii_lowercase().ends_with(".png") {
+            mods.entry(folder.clone()).or_insert_with(|| PayloadMod { folder, ..Default::default() }).textures += 1;
+        }
+    }
+    // a folder without a mod.ini is not a mod the menu would load
+    mods.into_values().filter(|m| !m.name.is_empty()).collect()
+}
+
 /// Whether a payload (a zip with `GTACTW.exe` and `mods/`) carries the game.
 pub fn payload_has_game(payload: &[u8]) -> bool {
     ZipArchive::new(Cursor::new(payload)).is_ok_and(|mut z| z.by_name(GAME_EXE).is_ok())
@@ -64,7 +125,8 @@ pub(crate) fn export_with(
         return Err(PortError::NoGame);
     }
     if let Some(mods) = &options.mods {
-        if mods.iter().any(|m| !["Enhancements", "CheatExample", "Trumpify"].contains(&m.as_str())) {
+        let bundled = payload_mods(payload);
+        if mods.iter().any(|m| !bundled.iter().any(|b| &b.folder == m)) {
             return Err(PortError::Unsafe("Unknown premade mod selection.".into()));
         }
     }

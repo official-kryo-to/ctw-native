@@ -7,6 +7,7 @@ import { KryoMark } from '@/ui/ascii/KryoMark'
 import { cn } from '@/lib/utils'
 import {
   bundledGame,
+  bundledMods,
   cancelPort,
   freeFolder,
   inspectApk,
@@ -23,6 +24,7 @@ import {
   showFolder,
   startPort,
   type ApkSummary,
+  type BundledMod,
   type PortProgress,
   type PortResult,
   type Stage,
@@ -54,6 +56,10 @@ export function App() {
   const [withModkit, setWithModkit] = useState(true)
   const [shortcut, setShortcut] = useState(true)
   const [mods, setMods] = useState(['Enhancements'])
+  const [available, setAvailable] = useState<BundledMod[]>([])
+  useEffect(() => {
+    void bundledMods().then(setAvailable).catch(() => setAvailable([]))
+  }, [])
   const [lcsApk, setLcsApk] = useState<string | null>(null)
   const screenRef = useRef(screen)
   screenRef.current = screen
@@ -127,13 +133,7 @@ export function App() {
           {!hasGame ? <NoGameNotice /> : null}
           <div className="kryo-radius max-h-[70vh] overflow-y-auto border border-border bg-card/95 p-6 shadow-2xl shadow-black/70 backdrop-blur">
             {screen.kind === 'mods' ? <div className="grid gap-4">
-              <Label>Choose premade mods</Label>
-              <Caption>Each mod can combine code, textures and other assets. You can change enabled mods later with F4.</Caption>
-              {([
-                ['Enhancements', 'Enhancements — third person and PSP-style lighting'],
-                ['CheatExample', 'Cheats — vehicle spawning, time and speed controls'],
-                ['Trumpify', 'Trumpify — example appearance replacement'],
-              ] as const).map(([id, label]) => <Check key={id} checked={mods.includes(id)} onChange={(on) => setMods((current) => on ? [...current, id] : current.filter((m) => m !== id))} label={label} />)}
+              <ModPicker available={available} selected={mods} onChange={setMods} />
               <div className="flex gap-2">
                 <Button onClick={() => setScreen({ kind: 'ready', apk: screen.apk, folder: screen.folder })}>Back</Button>
                 <Button variant="primary" onClick={() => mods.includes('Enhancements') && !lcsApk ? setScreen({ kind: 'lcs-offer', apk: screen.apk, folder: screen.folder }) : void port(screen.apk, screen.folder)}>Continue</Button>
@@ -567,4 +567,78 @@ function useEta(progress: PortProgress | null): string | null {
     setEta(seconds < 60 ? `${Math.max(1, Math.round(seconds))}s` : `${Math.round(seconds / 60)} min`)
   }, [progress])
   return eta
+}
+
+/** The mods to put into the game folder: one card per mod the Porter carries, with what it contains. */
+function ModPicker(props: { available: BundledMod[]; selected: string[]; onChange: (mods: string[]) => void }) {
+  const { available, selected, onChange } = props
+  const chosen = available.filter((m) => selected.includes(m.folder)).length
+  const toggle = (folder: string, on: boolean) =>
+    onChange(on ? [...selected.filter((m) => m !== folder), folder] : selected.filter((m) => m !== folder))
+  return (
+    <div className="grid gap-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <Label>Choose which mods to include</Label>
+        <Caption>
+          {chosen} of {available.length} selected
+        </Caption>
+      </div>
+      <Caption>
+        The mod menu (F4, or Start on a controller) is always included, so you can switch the chosen mods on and off in the
+        game. Mods you leave out here are not copied.
+      </Caption>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={() => onChange(available.map((m) => m.folder))} disabled={chosen === available.length}>
+          Select all
+        </Button>
+        <Button size="sm" onClick={() => onChange([])} disabled={chosen === 0}>
+          Select none
+        </Button>
+      </div>
+      {available.length === 0 ? <Caption>This Porter carries no premade mods.</Caption> : null}
+      <div className="grid gap-2" role="group" aria-label="Premade mods">
+        {available.map((m) => {
+          const on = selected.includes(m.folder)
+          return (
+            <button
+              key={m.folder}
+              type="button"
+              role="checkbox"
+              aria-checked={on}
+              onClick={() => toggle(m.folder, !on)}
+              className={cn(
+                'kryo-radius grid gap-1 border p-3 text-left transition-colors',
+                on ? 'border-primary bg-primary/10' : 'border-border hover:border-foreground/40',
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    'grid size-4 shrink-0 place-items-center border',
+                    on ? 'border-primary bg-primary text-primary-foreground' : 'border-border',
+                  )}
+                  style={{ borderRadius: 'min(var(--kryo-radius), 5px)' }}
+                >
+                  {on ? <CheckIcon className="size-3" /> : null}
+                </span>
+                <span className="text-sm font-medium">{m.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {[m.version && `v${m.version}`, m.author && `by ${m.author}`].filter(Boolean).join(' · ')}
+                </span>
+                <span className="ml-auto flex gap-1">
+                  {m.code ? <Tag>code</Tag> : null}
+                  {m.textures > 0 ? <Tag>{m.textures} textures</Tag> : null}
+                </span>
+              </span>
+              {m.description ? <span className="pl-6 text-xs leading-relaxed text-muted-foreground">{m.description}</span> : null}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function Tag({ children }: { children: ReactNode }) {
+  return <span className="rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">{children}</span>
 }

@@ -53,6 +53,32 @@ jobs:
           sudo apt-get update && sudo apt-get install -y g++-aarch64-linux-gnu
           python -m pip install -r ../requirements-setup.txt
           core/tests/parity.sh
+  linux:
+    name: Linux (game, showcase, mod kit, tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dependencies (SDL2's video and audio backends, OpenGL)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+            libxi-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libgl1-mesa-dev libegl1-mesa-dev \
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev
+      - name: Build game, showcase and mod kit (no game data needed)
+        run: |
+          cmake -S . -B port/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build port/build
+          ctest --test-dir port/build --output-on-failure
+      - name: Report failing tests
+        if: failure()
+        run: |
+          log=port/build/Testing/Temporary/LastTest.log
+          [ -f "$log" ] || exit 0
+          for t in $(cut -d: -f2 port/build/Testing/Temporary/LastTestsFailed.log 2>/dev/null); do
+            out=$(awk -v t="$t" '$0 ~ ("Test: " t "$") {on=1; next} on && /<end of output>/ {exit} on {print}' "$log" \
+                  | grep -Ev '^(Command|Directory|Output):|^---|start time' | tail -15 | tr '\n' '|')
+            echo "::error title=ctest $t::${out:-no output}"
+          done
   windows:
     runs-on: windows-latest
     steps:
@@ -60,17 +86,30 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      # UCRT64: the same C runtime as the WinLibs UCRT toolchain the port is developed with (MINGW64 is deprecated)
       - uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: true
-          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja git
+          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja git
       - name: Build game, showcase and mod kit (no game data needed)
         shell: msys2 {0}
         run: |
           cmake -S . -B port/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build port/build
           ctest --test-dir port/build --output-on-failure
+      # Workflow logs need a GitHub login; annotations do not. Report each failing test's FAIL lines as one.
+      - name: Report failing tests
+        if: failure()
+        shell: msys2 {0}
+        run: |
+          log=port/build/Testing/Temporary/LastTest.log
+          [ -f "$log" ] || exit 0
+          for t in $(cut -d: -f2 port/build/Testing/Temporary/LastTestsFailed.log 2>/dev/null); do
+            out=$(awk -v t="$t" '$0 ~ ("Test: " t "$") {on=1; next} on && /<end of output>/ {exit} on {print}' "$log" \
+                  | grep -Ev '^(Command|Directory|Output):|^---|start time' | tail -15 | tr '\n' '|')
+            echo "::error title=ctest $t::${out:-no output}"
+          done
       - uses: actions/setup-node@v4
         with:
           node-version: 22
