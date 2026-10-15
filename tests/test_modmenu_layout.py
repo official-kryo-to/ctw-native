@@ -4,7 +4,7 @@
 """The mod menu and the example mods' windows: no text on other text, nothing off screen, and nothing drawn over
 the game's own clock and help line - at several window sizes and font heights.
 
-Builds ModMenu and the example mods for the machine running the tests (with a GCC/Clang-style C++ compiler) and runs
+Builds ModMenu and the example mods for the machine running the tests (with GCC/Clang-style C and C++ compilers) and runs
 them against tests/layout_host.cpp, a stand-in for the game that records what they draw.
 """
 import json
@@ -20,6 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 KIT = ROOT / 'ctw-modkit'
 WINDOWS = sys.platform == 'win32'
 CXX = shutil.which('c++') or shutil.which('g++') or shutil.which('clang++')
+# The C++ driver can reset '-x c' after the first input; the multi-file mods need consistent C linkage.
+CC = shutil.which('cc') or shutil.which('gcc') or shutil.which('clang')
 SIZES = [(1024, 600), (1280, 720), (1920, 1080)]
 LINE_HEIGHTS = [16, 20]   # the game's font is 16; 20 checks that nothing depends on that exact number
 F4, F7, F8 = 'key:61', 'key:64', 'key:65'
@@ -69,7 +71,7 @@ def problems(frame):
     return found
 
 
-@unittest.skipUnless(CXX, 'needs a GCC/Clang-style C++ compiler')
+@unittest.skipUnless(CXX and CC, 'needs GCC/Clang-style C and C++ compilers')
 class ModMenuLayoutTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -84,9 +86,9 @@ class ModMenuLayoutTests(unittest.TestCase):
         examples = KIT / 'examples'
         build = [
             [CXX, '-std=c++17', *shared, *include, str(KIT / 'modmenu/modmenu.cpp'), '-o', str(cls.menu)],
-            [CXX, '-x', 'c', *shared, *include, str(examples / 'cheat_example/cheat_example.c'),
+            [CC, '-std=c11', *shared, *include, str(examples / 'cheat_example/cheat_example.c'),
              '-o', str(mods / 'CheatExample/cheat_example.dll'), '-lm'],
-            [CXX, '-x', 'c', *shared, *include, *map(str, sorted((examples / 'enhancements').glob('*.c'))),
+            [CC, '-std=c11', *shared, *include, *map(str, sorted((examples / 'enhancements').glob('*.c'))),
              '-o', str(mods / 'Enhancements/enhancements.dll'), '-lm'],
             [CXX, '-std=c++17', *include, str(ROOT / 'tests/layout_host.cpp'), '-o', str(cls.host)]
             + ([] if WINDOWS else ['-ldl']),

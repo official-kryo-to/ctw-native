@@ -5,6 +5,8 @@
 #include "game.h"
 #include "hud.h"
 #include "weapons.h"
+#include "plugins.h"
+#include "audio/audio.h"
 #include "gfx/spriteset.h"
 #include "os/datafile.h"
 #include "os/gamefs.h"
@@ -21,6 +23,12 @@ struct Sheet {   // a sprite set and its loose 2x PNG sheet
     SpriteSet set;
     GLuint texture = 0;
     int w = 0, h = 0;
+    void clear() {
+        if (texture) glDeleteTextures(1, &texture);
+        texture = 0;
+        w = h = 0;
+        set = SpriteSet{};
+    }
     bool load(const GameFs& fs, const std::string& dir, const char* bin, const char* png) {
         std::vector<uint8_t> data, pixels;
         if (!fs.read(bin, data) || !set.parse(data) || !Data_ReadAll(dir + "/" + png, pixels)) return false;
@@ -43,7 +51,7 @@ struct Sheet {   // a sprite set and its loose 2x PNG sheet
     // drawn in pixels: the anchor (cSprite position) at (x, y), offsets and size times scale
     void draw(int index, float x, float y, float scale, float alpha) const {
         const SpriteDef* s = def(index);
-        if (!s || !texture) return;
+        if (!s || !texture || !s->w || !s->h || w <= 0 || h <= 0) return;
         const float u0 = s->x * 2.f / w, v0 = s->y * 2.f / h, u1 = (s->x + s->w) * 2.f / w, v1 = (s->y + s->h) * 2.f / h;
         const float x0 = x - s->offX * scale, y0 = y - s->offY * scale, x1 = x0 + s->w * scale, y1 = y0 + s->h * scale;
         glEnable(GL_TEXTURE_2D);
@@ -64,8 +72,11 @@ Sheet gWeapons, gAlways, gHud;
 bool gOk = false;
 int16_t gButtonX = 860, gButtonY = 600;   // buttonConfig entry 15 (the weapon button on foot)
 bool gWheel = false;
+Game* gWheelGame = nullptr;                 // the wheel owns this game's pause until it closes
+bool gSoundWasPaused = false;
 int gPressed = -1;                         // the slot pressed on the wheel
 bool gWasDown = false;
+bool gPointerPressed = false;               // a press that began after the wheel opened
 
 // Gui::cHudWeaponSelect::GetSpriteFromWeaponType: true = SS_Weapons (the wheel), false = SS_AlwaysLoaded (button)
 int spriteFor(int type, bool big) {
@@ -115,11 +126,15 @@ int hit(const Space& sp, int mx, int my, const WeaponManager& m) {   // GetWeapo
 }   // namespace
 
 bool WeaponHud_Init(const std::string& dataDir) {
+    WeaponHud_Shutdown();
+    gButtonX = 860;
+    gButtonY = 600;
     GameFs fs;
     if (!fs.open(dataDir)) return false;
     gOk = gWeapons.load(fs, dataDir, "SS_Weapons.bin", "ss_weapons.png") &&
           gAlways.load(fs, dataDir, "SS_AlwaysLoaded.bin", "ss_alwaysloaded.png") &&
           gHud.load(fs, dataDir, "SS_Hud.bin", "ss_hud.png");
+    if (!gOk) { WeaponHud_Shutdown(); return false; }
     // cIPhonePad::LoadInitialButtons: the default buttonConfig (a byte, then 20 x {i32 id, i16 x, i16 y, f32})
     std::vector<uint8_t> cfg;
     if (Data_ReadAll(dataDir + "/buttonconfig", cfg) && cfg.size() >= 1 + 240) {
@@ -131,20 +146,44 @@ bool WeaponHud_Init(const std::string& dataDir) {
     return gOk;
 }
 
+void WeaponHud_Shutdown() {
+    if (gWheelGame) WeaponHud_SetWheel(*gWheelGame, false);
+    gOk = false;
+    gWeapons.clear();
+    gAlways.clear();
+    gHud.clear();
+    gPressed = -1;
+    gWasDown = gPointerPressed = false;
+}
+
 bool WeaponHud_Ok() { return gOk; }
 bool WeaponHud_WheelOpen() { return gWheel; }
 
 void WeaponHud_SetWheel(Game& g, bool open) {
-    if (open && (!gOk || g.playerCar >= 0 || g.player.dead || g.uiPaused)) return;
     if (open == gWheel) return;
+    if (open && (!gOk || !Weapons_Ok() || g.playerCar >= 0 || g.player.dead || g.uiPaused)) return;
     gWheel = open;
     gPressed = -1;
     gWasDown = Host_MouseDown(0);
-    g.uiPaused = open;   // the wheel shares the pause panel (cGame::Pause)
+    gPointerPressed = false;
+    if (open) {
+        gWheelGame = &g;
+        gSoundWasPaused = Audio_SfxPaused();
+        g.uiPaused = true;   // the wheel shares the pause panel (cGame::Pause)
+        Audio_SetSfxPaused(true);
+    } else {
+        if (gWheelGame) gWheelGame->uiPaused = false;
+        gWheelGame = nullptr;
+        Audio_SetSfxPaused(gSoundWasPaused);
+    }
 }
 
 bool WeaponHud_Key(Game& g, int k) {
-    if (k == SDL_SCANCODE_TAB && (gWheel || g.playerCar < 0)) { WeaponHud_SetWheel(g, !gWheel); return true; }
+    if (k == SDL_SCANCODE_TAB) {
+        const bool wasOpen = gWheel;
+        WeaponHud_SetWheel(g, !gWheel);
+        return wasOpen || gWheel;   // failed opens leave Tab available to other UI
+    }
     if (gWheel && k == SDL_SCANCODE_ESCAPE) { WeaponHud_SetWheel(g, false); return true; }
     return gWheel;   // the paused game takes no other keys while the wheel is open
 }
@@ -152,21 +191,26 @@ bool WeaponHud_Key(Game& g, int k) {
 bool WeaponHud_DrawIcon(int type, float x, float y, float w, float h, float alpha) {
     const int idx = spriteFor(type, true);
     const SpriteDef* s = gWeapons.def(idx);
-    if (!gOk || !s) return false;
+    if (!gOk || !s || !s->w || !s->h || !(w > 0) || !(h > 0) || !std::isfinite(w) ||
+        !std::isfinite(h) || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(alpha)) return false;
     const float scale = std::min(w / s->w, h / s->h);
     // centre the picture in the box: the anchor sits at the picture's centre plus its offset
     const float cx = x + w * 0.5f - (s->w * 0.5f - s->offX) * scale, cy = y + h * 0.5f - (s->h * 0.5f - s->offY) * scale;
-    gWeapons.draw(idx, cx, cy, scale, alpha);
+    gWeapons.draw(idx, cx, cy, scale, std::clamp(alpha, 0.f, 1.f));
     return true;
 }
 
 void WeaponHud_Render(Game& g, int W, int H) {
-    if (!gOk || !Weapons_Ok()) return;
+    if (gWheel && (!gOk || !Weapons_Ok() || g.playerCar >= 0 || g.player.dead)) WeaponHud_SetWheel(g, false);
+    if (!gOk || !Weapons_Ok() || W <= 0 || H <= 0) return;
     const Space sp(W, H);
     const WeaponManager& m = g.playerWeapons;
     const Weapon* cur = m.current();
+    int mx, my;
+    Host_GetMouse(&mx, &my);
+    const bool down = Host_MouseDown(0), clicked = Plugins_HostApi().mouse_clicked(0) != 0;
     // the weapon button (on foot)
-    if (cur && g.playerCar < 0 && !g.player.dead && !gWheel) {
+    if (cur && g.playerCar < 0 && !g.player.dead && !g.uiPaused && !gWheel) {
         const float scale = (float)(int)((60.f / 42.f * 0.8f) * 4096.f + 0.5f) / 4096.f;   // SetSpriteScaleNoClamp
         const float bx = sp.x(gButtonX), by = sp.y(gButtonY);
         gAlways.draw(spriteFor(cur->type, false), bx, by, scale * sp.k, 1.f);
@@ -174,12 +218,14 @@ void WeaponHud_Render(Game& g, int W, int H) {
     }
     if (!gWheel) return;
     // the wheel
-    int mx, my;
-    Host_GetMouse(&mx, &my);
-    const bool down = Host_MouseDown(0);
     const int over = hit(sp, mx, my, m);
-    if (down && !gWasDown) gPressed = over;               // OnPress: SelectWeapon(params, false)
-    if (!down && gWasDown) {                              // OnRelease: SelectWeapon(params, true)
+    const bool completeClick = clicked && !down && !gWasDown;
+    if ((down && !gWasDown) || completeClick) {          // OnPress: SelectWeapon(params, false)
+        gPressed = over;
+        gPointerPressed = true;
+    }
+    if (!down && (gWasDown || completeClick) && gPointerPressed) { // OnRelease: SelectWeapon(params, true)
+        gPointerPressed = false;
         if (over >= 0 && over == gPressed) {
             const Weapon* w = over == 8 ? m.current() : m.inSlot(over);
             if (w) g.playerWeapons.setUse(w->type, false);   // cPda::TsCommand(1, type)

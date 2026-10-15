@@ -16,8 +16,10 @@ public:
     void setJapanese(bool v) { japanese_ = v; }
     int lineHeight() const { return height_; }
     int glyphWidth(char16_t c) const;
+    // Width of the widest line; explicit newlines start another line.
     int textWidth(const std::u16string& s) const;
-    // Draws with the top-left of the first glyph at (x,y); returns the pen x after the text.
+    // Draws with the top-left of the first glyph at (x,y); newlines reset x and advance by lineHeight().
+    // Returns the pen x after the final line.
     // `colour` is the active text-colour index (0 = caller's glColor); colour tags in the string update it.
     float draw(const std::u16string& s, float x, float y, float scale, int* colour = nullptr) const;
     // Word-wraps to maxWidth pixels (at the given scale) and draws; returns total height.

@@ -7,6 +7,7 @@
 #include "carcam.h"
 #include "cargens.h"
 #include "followcam.h"
+#include "gamehud.h"
 #include "localarea.h"
 #include "peds.h"
 #include "player.h"
@@ -42,6 +43,7 @@ public:
     void render(int width, int height);
     bool key(int scancode);   // game input shared by interactive and scripted runs
     Radio radio;
+    GameplayHud gameplayHud;
 
     WorldRenderer world;
     Collision collision;

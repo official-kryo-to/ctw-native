@@ -22,6 +22,7 @@
 class Game;
 
 bool WeaponHud_Init(const std::string& dataDir);
+void WeaponHud_Shutdown();                             // before destroying the game or its OpenGL context
 bool WeaponHud_Ok();
 void WeaponHud_Render(Game& g, int width, int height);   // button and, when open, the wheel (in the HUD pass)
 bool WeaponHud_Key(Game& g, int scancode);              // Tab / Esc; true if used

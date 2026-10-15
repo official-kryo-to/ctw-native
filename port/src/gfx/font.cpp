@@ -6,6 +6,7 @@
 #include "os/datafile.h"
 #include <glad/gl.h>
 #include <stb_image.h>
+#include <algorithm>
 #include <cstring>
 
 bool BitmapFont::load(const std::vector<uint8_t>& bin, const std::string& pngPath) {
@@ -14,24 +15,28 @@ bool BitmapFont::load(const std::vector<uint8_t>& bin, const std::string& pngPat
     memcpy(&n, &bin[0], 2);
     memcpy(&h, &bin[2], 2);
     if (bin.size() != 4 + (size_t)n * 6) return false;
-    glyphs_.resize(n);
-    for (uint16_t i = 0; i < n; ++i) memcpy(&glyphs_[i], &bin[4 + i * 6], 6);
-    height_ = h;
-
     int w, hh, comp;
     std::vector<uint8_t> png;
     if (!Data_ReadAll(pngPath, png)) return false;
     unsigned char* px = stbi_load_from_memory(png.data(), (int)png.size(), &w, &hh, &comp, 4);
     if (!px) return false;
-    texW_ = w; texH_ = hh;
-    glGenTextures(1, &tex_);
-    glBindTexture(GL_TEXTURE_2D, tex_);
+    unsigned texture = 0;
+    glGenTextures(1, &texture);
+    if (!texture) { stbi_image_free(px); return false; }
+    glBindTexture(GL_TEXTURE_2D, texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, hh, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
     stbi_image_free(px);
+    // Keep a loaded font usable when a replacement atlas cannot be opened or decoded.
+    if (tex_) glDeleteTextures(1, &tex_);
+    tex_ = texture;
+    texW_ = w; texH_ = hh;
+    glyphs_.resize(n);
+    for (uint16_t i = 0; i < n; ++i) memcpy(&glyphs_[i], &bin[4 + i * 6], 6);
+    height_ = h;
     return true;
 }
 
@@ -70,9 +75,12 @@ int BitmapFont::glyphWidth(char16_t c) const {
 }
 
 int BitmapFont::textWidth(const std::u16string& s) const {
-    int w = 0;
-    for (char16_t c : s) w += glyphWidth(c);
-    return w;
+    int w = 0, widest = 0;
+    for (char16_t c : s) {
+        if (c == u'\n') { widest = std::max(widest, w); w = 0; }
+        else w += glyphWidth(c);
+    }
+    return std::max(widest, w);
 }
 
 float BitmapFont::draw(const std::u16string& s, float x, float y, float scale, int* colour) const {
@@ -84,7 +92,9 @@ float BitmapFont::draw(const std::u16string& s, float x, float y, float scale, i
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glBegin(GL_QUADS);
+    const float startX = x;
     for (char16_t c : s) {
+        if (c == u'\n') { x = startX; y += height_ * scale; continue; }
         int tc = tagColour(c);
         if (tc >= 0) cur = tc;
         c = glyphCode(replaceUnsupported(c, glyphs_.size(), japanese_));

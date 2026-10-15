@@ -33,6 +33,7 @@ bool Game::init(const std::string& data, const std::string& mods) {
     if (!world.init(dataDir)) return false;
     world.setRadius(1);   // the game keeps a 3 x 3 sector window; one block ring around the player covers it
     Hud_Init(dataDir);
+    if (!gameplayHud.init(dataDir)) fprintf(stderr, "radar map / SS_AlwaysLoaded missing: no radar HUD\n");
     if (props.load()) collision.setPropLibrary(&props);   // before any collision cell loads
     else fprintf(stderr, "prop definitions not found: no street furniture\n");
     if (!collision.init(dataDir)) fprintf(stderr, "world.bin not found: no collision\n");
@@ -998,6 +999,7 @@ void Game::render(int W, int H) {
     applyGrade(W, H);
 
     Hud_Begin(W, H);
+    gameplayHud.render(*this, W, H);
     if (showDebug) drawDebug(W, H);
     WeaponHud_Render(*this, W, H);   // the game's HUD, under the mods' windows
     Plugins_DrawHud(W, H);
@@ -1033,6 +1035,7 @@ void Game::run() {
 }
 
 bool Game::key(int k) {
+    if (WeaponHud_WheelOpen() && WeaponHud_Key(*this, k)) return true;
     if (k == SDL_SCANCODE_F3) { showDebug = !showDebug; return true; }
     if (Plugins_Key(k)) return true;
     if (!Plugins_GameInput()) return false;
@@ -1043,4 +1046,4 @@ bool Game::key(int k) {
     return false;
 }
 
-void Game::shutdown() { radio.shutdown(); Plugins_Shutdown(); }
+void Game::shutdown() { WeaponHud_Shutdown(); gameplayHud.shutdown(); radio.shutdown(); Plugins_Shutdown(); }

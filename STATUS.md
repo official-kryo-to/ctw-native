@@ -9,6 +9,12 @@ compatibility with the original.
   street furniture, street lights, steam vents and fountains.
 - **On foot:** the player character with movement, sprinting and collision. The follow camera counts consecutive
   blocked views and uses the original roof-edge escape and safe above-target recovery.
+- **Gameplay HUD:** the original north-up radar tiles, frame, north marker, rotating player/vehicle arrow and
+  health semicircle. The map follows the controlled character or vehicle and uses the original map coordinates,
+  clipping and colours. The PC uses the phone radar size. See [HUD coverage and evidence](HUD.md).
+  The weapon wheel pauses world sounds as well as simulation, accepts clicks completed between display frames,
+  and releases its pause and textures when closed, reloaded or shut down. Multiline font drawing and measurement
+  now agree; a failed font replacement preserves the loaded font.
 - **Vehicles:** cars and bikes with the game's handling, getting in and out, damage, lights, skidmarks and sounds.
   Damaged doors and hatches swing with acceleration, turning and gravity; detached panels have independent
   motion and the burnt palette. Explosive destruction can tear off the five supported panels.
@@ -67,7 +73,9 @@ compatibility with the original.
 
 ## Not there yet
 
-- Missions, save games, combat, wanted levels and the original gameplay HUD.
+- Missions, save games, full combat, wanted levels and the rest of the original gameplay HUD.
+- Radar GPS routes, mission/location blips, the rotating-map setting, armour ownership and its meter, HUD fades,
+  cash and the full pause/PDA layout. The radar work is a subset of the HUD, not complete UI parity.
 - Pedestrians do not talk, fight, or use building doors or attractors.
   Traffic is cars only.
 - Pedestrian physics still needs the full collision-cache ordering/limits, collision flags that stop AI movement,
