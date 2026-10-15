@@ -36,8 +36,13 @@ public:
     int currentLinkA() const { return t_[1].a; }
     int currentLinkB() const { return t_[1].b; }
     int lane() const { return t_[1].lane; }
-    bool indicateLeft() const { return left_; }
+    bool indicateLeft() const { return left_; }     // the turn at the coming junction (ComputeIntercept)
     bool indicateRight() const { return right_; }
+    // cAISpline::ShouldIndicate: while still on the link only in the last 10 units before the junction, and through
+    // the turn; left: which side
+    bool shouldIndicate(bool& left) const;
+    // cAISpline::InaugerateYoke's indicators: the yoke's left (+0xC3) and right (+0xC4) signals, always valid (+0xC5)
+    void yokeIndicators(bool& left, bool& right) const;
     int16_t param() const { return param_; }
     int32_t length() const { return len_; }
     const LinkTarget& target(int i) const { return t_[i]; }

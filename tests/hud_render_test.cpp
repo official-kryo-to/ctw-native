@@ -85,6 +85,50 @@ struct GameplayHudTestAccess {
         std::filesystem::remove(path);
     }
 };
+// Mod texture layers are composited on the GPU into the game's own texture object (Assets_PatchTexturePNG).
+static void layerPatch() {
+    auto writePng = [](const std::filesystem::path& path, int w, int h, const std::vector<uint8_t>& px) {
+        std::vector<uint8_t> png;
+        const auto append = [](void* out, void* bytes, int size) {
+            auto* buffer = static_cast<std::vector<uint8_t>*>(out);
+            buffer->insert(buffer->end(), (uint8_t*)bytes, (uint8_t*)bytes + size);
+        };
+        stbi_write_png_to_func(append, &png, w, h, 4, px.data(), w * 4);
+        std::ofstream(path, std::ios::binary).write((const char*)png.data(), (std::streamsize)png.size());
+    };
+    const auto dir = std::filesystem::temp_directory_path();
+    const auto base = dir / ("ctw-layer-base-" + std::to_string(SDL_GetTicks64()) + ".png");
+    const auto layer = dir / ("ctw-layer-top-" + std::to_string(SDL_GetTicks64()) + ".png");
+    std::vector<uint8_t> px(64 * 64 * 4);
+    for (size_t i = 0; i < px.size(); i += 4) { px[i] = 10; px[i + 1] = 20; px[i + 2] = 30; px[i + 3] = 255; }
+    writePng(base, 64, 64, px);
+    std::vector<uint8_t> top(32 * 32 * 4);
+    for (size_t i = 0; i < top.size(); i += 4) { top[i] = 250; top[i + 1] = 0; top[i + 2] = 0; top[i + 3] = 128; }
+    writePng(layer, 32, 32, top);
+    check(Assets_OverrideTexturePNG(65001, base.string()), "an opaque PNG replaces a texture");
+    const unsigned before = Assets_Texture(65001);
+    check(Assets_PatchTexturePNG(65001, 0.25f, 0.25f, 0.5f, 0.5f, layer.string()), "a transparent PNG patches a rectangle");
+    check(Assets_Texture(65001) == before, "patching keeps the texture object");
+    std::vector<uint8_t> out(64 * 64 * 4);
+    glBindTexture(GL_TEXTURE_2D, before);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, out.data());
+    const uint8_t* edge = &out[(8 * 64 + 8) * 4];
+    const uint8_t* mid = &out[(32 * 64 + 32) * 4];
+    check(edge[0] == 10 && edge[1] == 20 && edge[2] == 30 && edge[3] == 255, "pixels outside the rectangle are untouched");
+    check(std::abs(mid[0] - 130) <= 2 && std::abs(mid[1] - 10) <= 2 && std::abs(mid[2] - 15) <= 2 && mid[3] == 255,
+          "inside, the PNG is blended by its alpha and the texture keeps its own alpha");
+    // orientation: a patch over the first quarter of the rows and the left half lands on those rows
+    check(Assets_OverrideTexturePNG(65001, base.string()), "the opaque PNG again");
+    check(Assets_PatchTexturePNG(65001, 0.f, 0.f, 0.5f, 0.25f, layer.string()), "a corner patch");
+    glBindTexture(GL_TEXTURE_2D, Assets_Texture(65001));
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, out.data());
+    check(std::abs(out[(4 * 64 + 4) * 4] - 130) <= 2 && out[(60 * 64 + 4) * 4] == 10 && out[(4 * 64 + 40) * 4] == 10,
+          "patch rectangles are in texture rows (y) and columns (x) from the first row");
+    Assets_RestoreTexture(65001);
+    std::filesystem::remove(base);
+    std::filesystem::remove(layer);
+}
 static void pixel(int x, int y, int height, uint8_t out[4]) {
     glReadPixels(x, height - 1 - y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, out);
 }
@@ -169,6 +213,7 @@ int main() {
     pixel(145, 160, 768, p);
     check(p[1] == 255 && p[0] == 0, "half-turn north marker is clipped to the bottom circular edge");
     GameplayHudTestAccess::tile(game.gameplayHud);
+    layerPatch();
     game.player.pos[0] = -3220 * 4096; game.player.pos[1] = 2200 * 4096;
     game.gameplayHud.setRotation(false);
     glClear(GL_COLOR_BUFFER_BIT);

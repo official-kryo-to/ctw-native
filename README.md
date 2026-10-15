@@ -43,6 +43,8 @@ The bundled **Enhancements** mod adds a third-person camera (**V**, then the mou
 
 ## Build from source
 
+### Windows
+
 Windows x64 with Python 3.10+, Git, CMake 3.20+, Ninja and a MinGW-w64 toolchain (GCC or LLVM-MinGW) on your PATH.
 MSVC is not supported because of the game's fixed-point arithmetic.
 
@@ -60,6 +62,25 @@ For optional 3D people in third person, place your own **LCS Android 2.4.379** A
 Enhancements; press **V** in the game. Incremental builds reuse the import and repair missing files.
 `-DCTW_LCS_APK=PATH` selects another local donor; `-DCTW_IMPORT_LCS=OFF` stops automatic import.
 This development step is disabled for `CTW_RELEASE=ON`; standalone exports and the Porter use explicit imports.
+### Linux
+
+Any recent x86-64 or arm64 distribution with GCC 11+ (or Clang 14+), CMake 3.20+, Ninja, Python 3.10+ and the
+development packages SDL2 builds against. On Debian or Ubuntu:
+
+```text
+sudo apt install build-essential cmake ninja-build python3-pip libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+    libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libgl1-mesa-dev \
+    libegl1-mesa-dev libasound2-dev libpulse-dev libudev-dev libdbus-1-dev
+python3 -m pip install -r requirements-setup.txt
+python3 scripts/setup_game.py
+cmake -S . -B port/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build port/build
+port/build/GTACTW --data port/data --mods port/build/mods
+```
+
+The mod menu and the example mods build as `.so` files; a mod's `mod.ini` keeps naming `x.dll`, and the menu loads
+`x.so` in its place. CI builds and tests every push on Ubuntu as well as on Windows.
+
 Building needs no game files; running does. `python scripts/export_pc.py` writes the same standalone folder as the
 Porter from a local build (`--with-modkit` adds the mod menu and the examples). The Porter itself is in
 [porter/](porter/README.md).

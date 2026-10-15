@@ -86,6 +86,13 @@ public:
     // lights (cCar::RenderHeadlights, cWheeledVehicle::RenderBrakeLights / RenderIndicators)
     bool railBraking = false;                     // a traffic car slowing down (its yoke brake)
     uint8_t indicators = 0;                       // +0x948 bits 7 / 8: 1 left, 2 right
+    bool hazards = false;                         // +0x948 bit 9 (Vehicle::SetHazards): both indicators
+    // cVehicle::CommonActToSimpleAndPhysics for a yoke whose indicators are set (+0xC5): left +0xC3, right +0xC4.
+    // A yoke without them (the player's, or a car left to physics) keeps the last state.
+    void setIndicatorsFromYoke(bool left, bool right) {
+        indicators = (uint8_t)((left ? 1 : 0) | (right ? 2 : 0));
+        if (hazards) indicators = 3;
+    }
     void renderLights(const struct WorldCamera& cam, uint32_t frame, bool night, Collision* col) const;                        // the car is being removed: let its smoke fade out                        // set on the frame it blew up (the game ejects / kills occupants)
     int seatUser[4] = {-1, -1, -1, -1};
     bool generated = false;   // cVehicle::SetIsGeneratedCar

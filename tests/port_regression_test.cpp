@@ -3,6 +3,7 @@
 // See LICENSE in the repository root.
 #define SDL_MAIN_HANDLED
 #include "game.h"
+#include "padinput.h"
 #include "sound.h"
 #include "particles.h"
 #include "audio/audio.h"
@@ -80,7 +81,9 @@ struct VehicleTestAccess {
         check(d.pos[2]==-20*4096, "debris stops below the original -20-unit cutoff");
         check(v.repair() && v.hasDoor(0) && !v.debris_[0].detached, "repair restores missing door geometry and usability");
         v.engineOn=true; v.indicators=3; v.setDead();
-        check(!v.engineOn && !v.indicators && v.dead(), "a burnt wreck cannot keep its engine or indicators running");
+        // cVehicle::SetDead masks +0x948 with 0xFB_FFFF_FD7F: the left indicator and the hazards go, the right bit
+        // stays (a wreck has no driver, and without one only both bits together are drawn)
+        check(!v.engineOn && v.indicators == 2 && !v.hazards && v.dead(), "a burnt wreck keeps only the right indicator bit");
         v.releaseEffects();
     }
 };
@@ -1065,6 +1068,17 @@ static void fireAndCamera() {
     check(!game.showDebug, "prototype HUD and collision diagnostics are off by default");
     check(game.key(SDL_SCANCODE_F3) && game.showDebug, "F3 enables all debug drawing");
     check(game.key(SDL_SCANCODE_F3) && !game.showDebug, "F3 disables all debug drawing again");
+    // the pause menu (PC extra): Esc pauses instead of quitting
+    check(game.key(SDL_SCANCODE_ESCAPE) && game.pauseOpen && game.uiPaused && !game.quitRequested,
+          "Esc opens the pause menu and pauses the simulation");
+    check(game.key(SDL_SCANCODE_W) && game.pauseChoice == 3, "the pause menu wraps upwards");
+    game.key(SDL_SCANCODE_DOWN); game.key(SDL_SCANCODE_DOWN); game.key(SDL_SCANCODE_DOWN);
+    check(game.pauseChoice == 2 && game.key(SDL_SCANCODE_RETURN) && game.pauseControls, "Controls opens its page");
+    check(game.key(SDL_SCANCODE_BACKSPACE) && !game.pauseControls && game.pauseOpen, "B / Backspace leaves the page");
+    check(game.key(SDL_SCANCODE_ESCAPE) && !game.pauseOpen && !game.uiPaused, "Esc resumes");
+    game.key(SDL_SCANCODE_ESCAPE); game.key(SDL_SCANCODE_UP);
+    check(game.key(SDL_SCANCODE_RETURN) && game.quitRequested, "Quit to desktop asks the main loop to stop");
+    game.setPause(false); game.quitRequested = false;
     WorldCamera cam; game.setRenderDistance(720); game.viewCamera(cam);
     check(cam.zFar > 720 && cam.zFar > game.freeCam.cam.zFar, "freecam far plane includes the requested radius and camera altitude");
     game.setRenderDistance(120); game.viewCamera(cam);
@@ -1084,6 +1098,29 @@ static void fireAndCamera() {
           "taking the seat cannot run an extra walking update or move the hidden player outside the vehicle");
     check(std::equal(beforeView,beforeView+3,outgoingView) && !std::equal(beforeView,beforeView+3,afterView),
           "entry updates the inherited car camera immediately and leaves the outgoing camera alone");
+
+    {   // a controller (padinput.h): the keyboard wins, the pad fills in
+        HostPad pad; pad.connected = true; pad.lx = 0.3f; pad.ly = 0.1f; pad.rt = 0.75f; pad.a = true;
+        float mx = 0, my = 0; bool walk = false, sprint = false, fire = false, throwing = false, horn = false;
+        PadInput_OnFoot(pad, mx, my, walk, sprint);
+        check(mx == 0.3f && my == 0.1f && walk && sprint, "the left stick moves, a light push walks, A sprints");
+        PadInput_Weapons(pad, fire, throwing);
+        check(fire && !throwing, "RT fires, LT throws");
+        Vehicle::Controls dc;
+        PadInput_Driving(pad, dc, horn);
+        check(dc.throttle == 0xC00 && dc.steer == (int32_t)(0.3f * 0x1000) && dc.handbrake && !horn,
+              "RT accelerates in proportion, the stick steers, A is the handbrake");
+        pad.rt = 0; pad.lt = 1; dc = Vehicle::Controls{};
+        PadInput_Driving(pad, dc, horn);
+        check(dc.throttle == -0x1000, "LT brakes and reverses");
+        dc = Vehicle::Controls{}; dc.throttle = 0x1000; dc.steer = -0x1000;
+        PadInput_Driving(pad, dc, horn);
+        check(dc.throttle == 0x1000 && dc.steer == -0x1000, "the keyboard wins over the controller");
+        HostPad none;
+        float x = 0, y = 0; bool w = false, s = false;
+        PadInput_OnFoot(none, x, y, w, s);
+        check(x == 0 && !s, "no controller changes nothing");
+    }
 
     Game wreck;
     std::copy(origin,origin+3,wreck.player.pos);
@@ -1220,12 +1257,12 @@ struct RadioTestAccess {
         radio.appStation(1,game);
         check(radio.station() == 2 && radio.playing_ == 0 && Audio_MusicPlaying(),
               "the previous broadcast keeps playing while its replacement logo scrolls into place");
-        radio.update(game); radio.advanceCarousel(1,game);
+        radio.update(game); radio.advanceCarousel(game);
         check(radio.playing_ == 0 && radio.appTuning_, "simulation updates cannot switch a pending carousel station early");
-        for (int i = 0; i < 40; ++i) radio.advanceCarousel(1,game);
+        for (int i = 0; i < 40; ++i) radio.advanceCarousel(game);
         check(radio.playing_ == -1 && !radio.appTuning_, "the off station stops the broadcast after its carousel settles");
-        radio.appStation(-1,game); radio.advanceCarousel(1,game); radio.appStation(1,game);
-        for (int i = 0; i < 40; ++i) radio.advanceCarousel(1,game);
+        radio.appStation(-1,game); radio.advanceCarousel(game); radio.appStation(1,game);
+        for (int i = 0; i < 40; ++i) radio.advanceCarousel(game);
         check(radio.station() == 2 && radio.playing_ == -1 && !radio.appTuning_,
               "reversing a swipe before it settles cannot briefly play the skipped station");
         radio.appStation(-1,game);

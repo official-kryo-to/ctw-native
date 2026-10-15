@@ -48,16 +48,20 @@ private:
     // radio app state (cRadioApp +0x183C scroll position, +0x1848 icon offsets, +0x1860 volume icon alpha)
     bool app_ = false;
     bool appTuning_ = false;
-    float appScroll_ = 0.f;
+    int appScroll_ = 0;                   // +0x183C (pixels)
+    int appDir_ = 1;                      // +0x185C: the way the carousel travels to the station
+    float appFrames_ = 0.f;               // display time not yet spent on 30 Hz carousel steps
     double appLast_ = 0.0, volumeShownAt_ = -10.0;
     double listenClock_ = 0.0;
     bool pointerDown_ = false, pointerSwiped_ = false;
     float pointerX_ = 0.f, pointerY_ = 0.f;
     std::vector<int> appOrder_;           // available stations, left to right
-    std::vector<float> appOffset_;        // InitScrolling: x of each icon, width + 40 apart
-    float appWidth_ = 0.f;
+    std::vector<int> appOffset_;          // +0x1848 (Init): x of each icon, width + 40 apart
+    std::vector<int> appIconW_;           // +0x1850: the icons' widths
+    int appWidth_ = 0;                    // +0x1844
+    std::string appHeading_;              // cPdaApp::AddHeading(GlobalText 0x3F)
     void appStation(int step, Game& game);
-    void advanceCarousel(float frames, Game& game);
+    void advanceCarousel(Game& game);     // one ProcessStationIcons step
     void appPointer(float x, float y, bool down, bool pressed, Game& game);
     void appClick(float x, float y, Game& game);
     void countListening();

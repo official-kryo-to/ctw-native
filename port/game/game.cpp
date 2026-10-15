@@ -9,6 +9,8 @@
 #include "skidmarks.h"
 #include "plugins.h"
 #include "os/os.h"
+#include "audio/audio.h"
+#include "padinput.h"
 #include "os/pak.h"
 #include "gfx/assets.h"
 #include <SDL.h>
@@ -774,6 +776,7 @@ void Game::tick() {
         if (ks[SDL_SCANCODE_A] || ks[SDL_SCANCODE_LEFT]) mx -= 1;
         sprint = ks[SDL_SCANCODE_LSHIFT] || ks[SDL_SCANCODE_RSHIFT];
         walk = ks[SDL_SCANCODE_LCTRL] || ks[SDL_SCANCODE_RCTRL];
+        PadInput_OnFoot(Host_Pad(), mx, my, walk, sprint);   // a controller (padinput.h)
     }
     if (scriptedInput) {
         mx = scriptedMove[0]; my = scriptedMove[1];
@@ -801,6 +804,7 @@ void Game::tick() {
             if (l != r) dc.steer = l ? -0x1000 : 0x1000;
             dc.handbrake = ks[SDL_SCANCODE_SPACE];
             TheSound().horn = ks[SDL_SCANCODE_H] || ks[SDL_SCANCODE_LALT];
+            PadInput_Driving(Host_Pad(), dc, TheSound().horn);   // a controller (padinput.h)
         }
         if (scriptedInput) { dc.throttle = scriptedDrive * 0x1000; dc.steer = scriptedSteer * 0x1000; dc.handbrake = scriptedHandbrakeFrame >= 0 && (int)frame >= scriptedHandbrakeFrame; }
         if (task.op == CarTask::Braking) {   // cExitCar OP 2: brake against the motion (handbrake when going forward)
@@ -918,6 +922,7 @@ void Game::tick() {
             const Uint32 mouse = SDL_GetMouseState(nullptr, nullptr);
             fire = ks[SDL_SCANCODE_SPACE] || (mouse & SDL_BUTTON(SDL_BUTTON_LEFT));
             throwing = ks[SDL_SCANCODE_G] || (mouse & SDL_BUTTON(SDL_BUTTON_RIGHT));
+            PadInput_Weapons(Host_Pad(), fire, throwing);   // a controller: RT fires, LT throws (hold for power)
         }
         if (scriptedInput) { fire = scriptedFire; throwing = scriptedThrow; }
         Weapons_PlayerFrame(*this, fire && !busy, weaponCycle, throwing && !busy);
@@ -1074,6 +1079,7 @@ void Game::render(int W, int H) {
         Hud_Rect(0, 0, (float)W, (float)H, (uint32_t)alpha);   // RRGGBBAA: black with the fade alpha
     }
     radio.renderApp(W, H, *this);
+    renderPause(W, H);
     Hud_End();
     restoreInterpolation();
 }
@@ -1086,9 +1092,9 @@ void Game::run() {
         running = Host_PumpEvents();
         while (int k = Host_PopKey()) {
             if (key(k)) continue;
-            if (k == SDL_SCANCODE_ESCAPE) running = false;
-            else if (k == SDL_SCANCODE_F || k == SDL_SCANCODE_RETURN) enterPressed = true;
+            if (k == SDL_SCANCODE_F || k == SDL_SCANCODE_RETURN) enterPressed = true;
         }
+        if (quitRequested) running = false;
         double now = OS_TimeAccurate();
         acc += uiPaused ? 0.0 : (now - last) * std::max(0.f, std::min(gameSpeed, 20.f));
         last = now;
@@ -1101,9 +1107,11 @@ void Game::run() {
 }
 
 bool Game::key(int k) {
+    if (pauseOpen) return pauseKey(k);
     if (WeaponHud_WheelOpen() && WeaponHud_Key(*this, k)) return true;
     if (k == SDL_SCANCODE_F3) { showDebug = !showDebug; return true; }
-    if (Plugins_Key(k)) return true;
+    if (Plugins_Key(k)) return true;   // (an open mod menu closes on Esc here)
+    if (k == SDL_SCANCODE_ESCAPE && !radio.appOpen()) { setPause(true); return true; }
     if (!Plugins_GameInput()) return false;
     if (radio.key(k, *this)) return true;
     if (WeaponHud_Key(*this, k)) return true;
@@ -1111,6 +1119,93 @@ bool Game::key(int k) {
     if (scope.active && k == SDL_SCANCODE_Z) { scope.zoomPressed = true; return true; }   // the scope's zoom button
     if (playerCar < 0 && (k == SDL_SCANCODE_Q || k == SDL_SCANCODE_E)) { weaponCycle = k == SDL_SCANCODE_E ? 1 : -1; return true; }
     return false;
+}
+
+// ---- the pause menu (PC extra) -----------------------------------------------------------------------------------
+namespace {
+const char* const kPauseItems[4] = {"Resume", "Mod menu", "Controls", "Quit to desktop"};
+const char* const kControlLines[] = {
+    "On foot", "  W A S D / left stick: move     Shift / A: sprint     Ctrl: walk",
+    "  Space, left mouse / RT: fire     G, right mouse / LT: throw     Q E / LB RB: weapon",
+    "  F, Enter / Y: get in a vehicle     Tab / Back: weapon wheel",
+    "Driving", "  W S / RT LT: accelerate, brake     A D / left stick: steer     Space / A: handbrake",
+    "  H / X: horn     F / Y: get out     Tab / Back: radio",
+    "Game", "  Esc / Start: this menu     F4: mod menu     F3: debug overlay",
+};
+}   // namespace
+
+void Game::setPause(bool open) {
+    if (open == pauseOpen) return;
+    pauseOpen = open;
+    pauseChoice = 0;
+    pauseControls = false;
+    uiPaused = open;               // the simulation stops underneath, as for the radio app
+    Audio_SetSfxPaused(open);
+}
+
+bool Game::pauseKey(int k) {
+    switch (k) {
+    case SDL_SCANCODE_ESCAPE: case SDL_SCANCODE_BACKSPACE:
+        if (pauseControls) pauseControls = false;
+        else setPause(false);
+        break;
+    case SDL_SCANCODE_UP: case SDL_SCANCODE_W: if (!pauseControls) pauseChoice = (pauseChoice + 3) % 4; break;
+    case SDL_SCANCODE_DOWN: case SDL_SCANCODE_S: if (!pauseControls) pauseChoice = (pauseChoice + 1) % 4; break;
+    case SDL_SCANCODE_RETURN: case SDL_SCANCODE_SPACE: case SDL_SCANCODE_F:
+        if (pauseControls) { pauseControls = false; break; }
+        switch (pauseChoice) {
+        case 0: setPause(false); break;
+        case 1: setPause(false); Plugins_Key(SDL_SCANCODE_F4); break;
+        case 2: pauseControls = true; break;
+        case 3: quitRequested = true; break;
+        }
+        break;
+    default: break;
+    }
+    return true;   // nothing reaches the game while it is paused
+}
+
+void Game::renderPause(int W, int H) {
+    if (!pauseOpen) return;
+    Hud_Rect(0, 0, (float)W, (float)H, 0x000000B4u);
+    const float k = std::max(0.6f, std::min(W / 1280.f, H / 720.f));
+    const char* hint = pauseControls ? "Esc / B: back" : "Up / Down: choose   Enter: select   Esc: resume";
+    float pw = std::max(380.f * k, Hud_TextWidth(hint, 0.8f * k) + 48.f * k);   // sized to its text
+    if (pauseControls)
+        for (const char* line : kControlLines) pw = std::max(pw, Hud_TextWidth(line, 0.95f * k) + 48.f * k);
+    const float row = 46.f * k;
+    const float ph = pauseControls ? (float)(sizeof kControlLines / sizeof *kControlLines) * 26.f * k + 120.f * k
+                                   : 4 * row + 110.f * k;
+    const float px = (W - pw) * 0.5f, py = (H - ph) * 0.5f;
+    Hud_Rect(px, py, pw, ph, 0x14151BF0u);
+    Hud_Rect(px + 12.f * k, py, pw - 24.f * k, 2.f * k, 0xF2C230FFu);
+    Hud_Text(px + 24.f * k, py + 20.f * k, 1.5f * k, 0xF4F5F8FFu, pauseControls ? "Controls" : "Paused");
+    int mx, my;
+    Host_GetMouse(&mx, &my);
+    const bool clicked = Plugins_HostApi().mouse_clicked(0) != 0;
+    if (pauseControls) {
+        float y = py + 70.f * k;
+        for (const char* line : kControlLines) {
+            const bool heading = line[0] != ' ';
+            Hud_Text(px + 24.f * k, y, (heading ? 0.95f : 0.85f) * k, heading ? 0xF2C230FFu : 0xC8CAD2FFu, line);
+            y += 26.f * k;
+        }
+        Hud_Text(px + 24.f * k, py + ph - 34.f * k, 0.8f * k, 0x9A9DAAFFu, hint);
+        if (clicked) pauseControls = false;
+        return;
+    }
+    for (int i = 0; i < 4; ++i) {
+        const float y = py + 70.f * k + i * row;
+        const bool hot = mx >= px && mx < px + pw && my >= y && my < y + row - 6.f * k;
+        if (hot) pauseChoice = i;
+        if (i == pauseChoice) {
+            Hud_Rect(px + 16.f * k, y, pw - 32.f * k, row - 6.f * k, 0xF2C2301Cu);
+            Hud_Rect(px + 16.f * k, y + 8.f * k, 3.f * k, row - 22.f * k, 0xF2C230FFu);
+        }
+        Hud_Text(px + 32.f * k, y + 10.f * k, 1.05f * k, i == pauseChoice ? 0xF4F5F8FFu : 0x9A9DAAFFu, kPauseItems[i]);
+        if (hot && clicked) pauseKey(SDL_SCANCODE_RETURN);
+    }
+    Hud_Text(px + 24.f * k, py + ph - 34.f * k, 0.8f * k, 0x9A9DAAFFu, hint);
 }
 
 void Game::shutdown() { WeaponHud_Shutdown(); gameplayHud.shutdown(); radio.shutdown(); Plugins_Shutdown(); }

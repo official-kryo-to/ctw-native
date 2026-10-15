@@ -389,10 +389,12 @@ void Traffic::wander(Game& g, Vehicle& v, Driver& d) {   // cWanderRoads::Proces
     }
     int32_t before = d.speed;
     forwardSpeed(g, v, d);
-    // the driver's yoke: slowing down is the brake (Act: b64 |= 2), the spline's turn signals are the indicators
-    // (cVehicle: yoke +0xC3 / +0xC4 -> +0x948 bits 7 / 8)
+    // the driver's yoke: slowing down is the brake (Act: b64 |= 2); cAISpline::InaugerateYoke gives the indicators,
+    // which cVehicle::CommonActToSimpleAndPhysics copies to +0x948 bits 7 / 8
     v.railBraking = d.speed < before;
-    v.indicators = (uint8_t)((d.spline.indicateLeft() ? 1 : 0) | (d.spline.indicateRight() ? 2 : 0));
+    bool left, right;
+    d.spline.yokeIndicators(left, right);
+    v.setIndicatorsFromYoke(left, right);
     v.vel[0] = mulq(d.speed, dir[0]);
     v.vel[1] = mulq(d.speed, dir[1]);
     v.vel[2] = 0;

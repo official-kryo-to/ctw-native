@@ -4,6 +4,8 @@
 #include "os.h"
 #include <SDL.h>
 #include <glad/gl.h>
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -157,6 +159,61 @@ bool Host_Init(const char* title, int w, int h) {
 }
 #include <deque>
 static std::deque<int> g_keys;
+static SDL_GameController* g_pad = nullptr;
+static HostPad g_padState, g_padTest;
+static bool g_padTesting = false;
+const HostPad& Host_Pad() { return g_padTesting ? g_padTest : g_padState; }
+void Host_TestPad(const HostPad* pad) { g_padTesting = pad != nullptr; if (pad) g_padTest = *pad; }
+static void padOpen() {
+    if (g_pad) return;
+    for (int i = 0; i < SDL_NumJoysticks(); ++i)
+        if (SDL_IsGameController(i) && (g_pad = SDL_GameControllerOpen(i))) return;
+}
+static float padStick(Sint16 v) { return v < 0 ? v / 32768.f : v / 32767.f; }
+static void padRead() {
+    HostPad p;
+    if (g_pad && SDL_GameControllerGetAttached(g_pad)) {
+        p.connected = true;
+        auto stick = [](float& x, float& y, SDL_GameControllerAxis ax, SDL_GameControllerAxis ay) {
+            x = padStick(SDL_GameControllerGetAxis(g_pad, ax));
+            y = -padStick(SDL_GameControllerGetAxis(g_pad, ay));
+            const float m = std::sqrt(x * x + y * y), dead = 0.24f;
+            if (m <= dead) { x = y = 0; return; }
+            const float k = std::min(1.f, (m - dead) / (1.f - dead)) / m;
+            x *= k; y *= k;
+        };
+        stick(p.lx, p.ly, SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY);
+        stick(p.rx, p.ry, SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY);
+        auto trigger = [](SDL_GameControllerAxis a) {
+            const float t = SDL_GameControllerGetAxis(g_pad, a) / 32767.f;
+            return t < 0.1f ? 0.f : std::min(1.f, (t - 0.1f) / 0.9f);
+        };
+        p.lt = trigger(SDL_CONTROLLER_AXIS_TRIGGERLEFT);
+        p.rt = trigger(SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
+        auto held = [](SDL_GameControllerButton b) { return SDL_GameControllerGetButton(g_pad, b) != 0; };
+        p.a = held(SDL_CONTROLLER_BUTTON_A); p.b = held(SDL_CONTROLLER_BUTTON_B);
+        p.x = held(SDL_CONTROLLER_BUTTON_X); p.y = held(SDL_CONTROLLER_BUTTON_Y);
+        p.lb = held(SDL_CONTROLLER_BUTTON_LEFTSHOULDER); p.rb = held(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
+    }
+    g_padState = p;
+}
+static int padKey(int button) {   // the keyboard key a controller button stands for
+    switch (button) {
+    case SDL_CONTROLLER_BUTTON_Y: return SDL_SCANCODE_F;
+    case SDL_CONTROLLER_BUTTON_B: return SDL_SCANCODE_BACKSPACE;
+    case SDL_CONTROLLER_BUTTON_X: return SDL_SCANCODE_SPACE;   // (the mod menu: switch a mod on or off)
+    case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: return SDL_SCANCODE_Q;
+    case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return SDL_SCANCODE_E;
+    case SDL_CONTROLLER_BUTTON_BACK: return SDL_SCANCODE_TAB;
+    case SDL_CONTROLLER_BUTTON_START: return SDL_SCANCODE_ESCAPE;   // the pause menu (it opens the mod menu too)
+    case SDL_CONTROLLER_BUTTON_DPAD_LEFT: return SDL_SCANCODE_LEFT;
+    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: return SDL_SCANCODE_RIGHT;
+    case SDL_CONTROLLER_BUTTON_DPAD_UP: return SDL_SCANCODE_UP;
+    case SDL_CONTROLLER_BUTTON_DPAD_DOWN: return SDL_SCANCODE_DOWN;
+    case SDL_CONTROLLER_BUTTON_RIGHTSTICK: return SDL_SCANCODE_Z;
+    default: return 0;
+    }
+}
 static std::deque<int> g_wheel;
 static int g_clicks = 0;
 static std::string g_text;
@@ -215,10 +272,24 @@ bool Host_PumpEvents() {
         }
         if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
             SDL_GL_GetDrawableSize(g_win, &g_w, &g_h);
+        if (e.type == SDL_CONTROLLERDEVICEADDED) padOpen();
+        if (e.type == SDL_CONTROLLERDEVICEREMOVED && g_pad &&
+            e.cdevice.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_pad))) {
+            SDL_GameControllerClose(g_pad);
+            g_pad = nullptr;
+            padOpen();   // another one, if any
+        }
+        if (e.type == SDL_CONTROLLERBUTTONDOWN && g_pad &&
+            e.cbutton.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_pad)))
+            if (const int k = padKey(e.cbutton.button)) g_keys.push_back(k);
     }
+    padRead();
     return true;
 }
 void Host_Shutdown() {
+    if (g_pad) SDL_GameControllerClose(g_pad);
+    g_pad = nullptr;
+    g_padState = HostPad{};
     if (g_gl) SDL_GL_DeleteContext(g_gl);
     if (g_win) SDL_DestroyWindow(g_win);
     SDL_Quit();

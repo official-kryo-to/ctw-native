@@ -5,6 +5,7 @@
 #include "game.h"
 #include "hud.h"
 #include "plugins.h"
+#include "sound.h"
 #include "audio/audio.h"
 #include "os/datafile.h"
 #include "os/gamefs.h"
@@ -55,6 +56,7 @@ bool Radio::init(const std::string& dir) {
     stbi_image_free(pixels);
     GxtFile labels, names;
     labels.load(dir + "/e_pda.gxt"); names.load(dir + "/e_main.gxt");
+    appHeading_ = text(names, 0x3F);   // cRadioApp::Init: AddHeading(GlobalText()->GetString(0x3F)), "Music Player"
     for (const auto& def : tables_.stations) {
         Station station;
         station.icon = def.icon; station.stream = def.stream;
@@ -70,7 +72,14 @@ bool Radio::init(const std::string& dir) {
             if (station.name == "Chinese") station.name = "SinoWav FM"; // Name on the original station artwork.
             station.label = station.name;
         }
-        if (station.duration > 0) station.position = Rand32Critical(1000000) / 1000000.0 * std::max(1.0, station.duration - 15);
+        // cWavStream::RandomiseRadioStart: C rand() (not the game's random streams), a start up to the track length,
+        // or up to 15 s before the end for tracks over five minutes
+        if (station.duration > 0) {
+            const uint32_t ms = (uint32_t)(station.duration * 1000.0);
+            const uint32_t span = ms < 300001 ? ms : ms - 15000;
+            const uint32_t r = (uint32_t)std::rand() + (uint32_t)std::rand() * 0x10000u;
+            station.position = span ? (r % span) / 1000.0 : 0.0;
+        }
         stations_.push_back(std::move(station));
     }
     Station off; off.available = true; off.label = text(labels, 112); off.name = off.label;
@@ -257,14 +266,16 @@ void Radio::sprite(int id, float x, float y, float scale, float alpha) const {
 }
 
 // ---- the radio app (Gui::cRadioApp), drawn on its own 480 x 340 screen ---------------------------------------------
-// Layout from cRadioApp: station logos in a carousel centred at x 240, y 85, InitScrolling spacing (width + 40), alpha
-// 1 - |240 - x| / 240 (ProcessStationIcons); PrintAllBars' equaliser: eight bars at x 84 + 44 i, up to nine 40 x 12
+// Layout from cRadioApp: station logos in a carousel at y 85 placed from 240 minus half the selected logo's width,
+// Init's spacing (width + 40), scrolled a quarter of the remaining distance each 30 Hz frame in the direction chosen
+// when the station changed, the stream switching within three pixels, alpha 1 - |d| / 240 (ProcessStationIcons); PrintAllBars' equaliser: eight bars at x 84 + 44 i, up to nine 40 x 12
 // segments every 16 pixels up from y 220 in gTopCols, and a perspective floor reflection below in gRefCols; the level
 // is min(9, sqrt(band energy x 64) x 9) (GetOutput) from the music's band filters (Audio_MusicBands). ProcessStars:
 // the dotted outline (sprite 17) at (181, 246), scale 2.35, and up to five stars (sprite 7, scale 2) at y 250,
 // x 273 down to 169, by ascending nonzero listening-time rank, capped at five. ProcessVolumeIcon: the meter (sprite 20 and the level
-// sprite) at (208, 270), fading back to 40 percent after a change. The PDA frame and station heading are drawn
-// in a PC style; the station name position is a PC choice.
+// sprite) at (208, 270), fading back to 40 percent after a change. The heading is GlobalText 0x3F ("Music
+// Player"). Not ported yet: the PDA frame (SS_Icons / SS_Radio sprite windows at (0x110, 0x120) and (0xB0, 0x120)),
+// the help tips and the custom-playlist slot; the frame and the station name line are drawn in a PC style.
 namespace {
 constexpr float kAppW = 480.f, kAppH = 340.f;
 uint32_t rgb555(uint16_t c, uint8_t alpha = 0xFF) {   // DrawDebugFan takes the 5-bit channels x 5
@@ -286,20 +297,25 @@ void Radio::openApp(bool open, Game& game) {
     game.uiPaused = open;            // cRadioApp::Init: cGame::Pause
     Audio_SetSfxPaused(open);
     if (open) {
+        // cRadioApp::Init: each icon at the running width, 40 pixels apart; the carousel starts on the station
         appOrder_.clear();
         appOffset_.clear();
-        appWidth_ = 0.f;
+        appIconW_.clear();
+        appWidth_ = 0;
         for (int i = 0; i < (int)stations_.size(); ++i) {
             if (!stations_[i].available) continue;
             auto def = std::find_if(sprites_.sprites().begin(), sprites_.sprites().end(),
                                     [&](const SpriteDef& s) { return s.id == stations_[i].icon; });
-            const float w = def == sprites_.sprites().end() ? 127.f : (float)def->w;
+            const int w = def == sprites_.sprites().end() ? 127 : (int)def->w;
             appOrder_.push_back(i);
             appOffset_.push_back(appWidth_);
-            appWidth_ += w + 40.f;
+            appIconW_.push_back(w);
+            appWidth_ += w + 40;
         }
         auto at = std::find(appOrder_.begin(), appOrder_.end(), selected_);
-        appScroll_ = at == appOrder_.end() ? 0.f : appOffset_[at - appOrder_.begin()];
+        appScroll_ = at == appOrder_.end() ? 0 : appOffset_[at - appOrder_.begin()];
+        appDir_ = 1;
+        appFrames_ = 0.f;
         appLast_ = OS_TimeAccurate();
     } else {
         sync(game);
@@ -315,22 +331,30 @@ void Radio::appStation(int step, Game& game) {   // DoStationUp / DoStationDown
     cycle(step, game);
     if (selected_ == previous) appTuning_ = pending;
     volumeShownAt_ = -10.0;
+    // the carousel travels towards the new icon, the long way round when it is more than half the strip away
+    auto at = std::find(appOrder_.begin(), appOrder_.end(), selected_);
+    if (at == appOrder_.end()) return;
+    const int diff = appOffset_[at - appOrder_.begin()] - appScroll_;
+    appDir_ = diff > 0 ? 1 : -1;
+    if (std::abs(diff) > appWidth_ / 2) appDir_ = -appDir_;
 }
 
-void Radio::advanceCarousel(float frames, Game& game) {
+void Radio::advanceCarousel(Game& game) {   // cRadioApp::ProcessStationIcons, the scrolling
     auto at = std::find(appOrder_.begin(), appOrder_.end(), selected_);
-    if (at == appOrder_.end() || appWidth_ <= 0.f) return;
-    float diff = appOffset_[at - appOrder_.begin()] - appScroll_;
-    if (diff > appWidth_ * 0.5f) diff -= appWidth_;
-    if (diff < -appWidth_ * 0.5f) diff += appWidth_;
-    const float k = 1.f - std::pow(0.75f, std::max(0.f,frames));
-    appScroll_ = std::fmod(appScroll_ + diff * k + appWidth_, appWidth_);
-    if (std::fabs(diff) < 0.5f) appScroll_ = appOffset_[at - appOrder_.begin()];
-    // ProcessStationIcons changes the stream when the integer quarter-step reaches zero (within three pixels).
-    if (appTuning_ && std::fabs(diff) < 4.f) {
+    if (at == appOrder_.end() || appWidth_ <= 0) return;
+    const int target = appOffset_[at - appOrder_.begin()];
+    const int diff = target - appScroll_;
+    int d = std::abs(diff) * appDir_;   // the distance left in the travel direction
+    if (std::abs(d) > appWidth_ / 2) d = (d < 0 ? std::abs(diff - appWidth_) : std::abs(diff + appWidth_)) * appDir_;
+    // within three pixels the stream changes (PlayPauseStream)
+    if ((unsigned)(d + 3) < 7 && appTuning_) {
         appTuning_ = false;
         sync(game);
     }
+    int scroll = appScroll_ + d / 4;   // a quarter of the way each frame
+    if (scroll >= appWidth_) scroll -= appWidth_;
+    if (scroll < 0) scroll += appWidth_;
+    appScroll_ = scroll;
 }
 
 void Radio::appClick(float x, float y, Game& game) {
@@ -357,9 +381,10 @@ void Radio::appPointer(float x, float y, bool down, bool pressed, Game& game) {
         pointerX_ = x; pointerY_ = y; pointerSwiped_ = false;
     } else if (down && !pointerSwiped_ && pointerX_ >= 0 && pointerX_ <= kAppW &&
                pointerY_ >= 55 && pointerY_ <= 233 && std::fabs(x - pointerX_) >= 5) {
-        // cRadioApp::OnDrag: one station per gesture, after five logical pixels.
+        // cRadioApp::OnDrag: one station per gesture, after five logical pixels, with PlayHudSfx(0x35F, 0x10)
         appStation(x > pointerX_ ? -1 : 1, game);
         pointerSwiped_ = true;
+        TheSound().playResident(0x35F, 0x10);
     } else if (!down && pointerDown_ && !pointerSwiped_ && pointerX_ >= 0 && pointerX_ <= kAppW &&
                std::fabs(x - pointerX_) < 5 && std::fabs(y - pointerY_) < 5) {
         appClick(x, y, game);
@@ -407,7 +432,7 @@ void Radio::renderApp(int W, int H, Game& game) {
     Hud_Rect(0, -46, kAppW, 2, 0xF2C230FFu);
     const Station& s = stations_[selected_];
     const std::string& name = s.name.empty() ? s.label : s.name;
-    Hud_Text(16, -36, 1.2f, 0xF4F5F8FFu, "RADIO");
+    Hud_Text(16, -36, 1.2f, 0xF4F5F8FFu, appHeading_.empty() ? "Music Player" : appHeading_);   // the PDA heading
     const float nameScale = std::min(1.f, 300.f / std::max(1.f, Hud_TextWidth(name, 1.f)));
     Hud_Text(kAppW - 16 - Hud_TextWidth(name, nameScale), -34, nameScale, 0xF2C230FFu, name);
 
@@ -431,17 +456,21 @@ void Radio::renderApp(int W, int H, Game& game) {
         rowY += kRefRow[k] << 4;
     }
 
-    // ProcessStationIcons: ease the carousel towards the station, then draw it
-    advanceCarousel(frames,game);
+    // ProcessStationIcons, once per 30 Hz frame: scroll a quarter of the way, then place every icon relative to
+    // 240 minus half the selected icon's width, fading with the distance from there (1 - d / 240)
+    appFrames_ = std::min(appFrames_ + frames, 4.f);
+    for (; appFrames_ >= 1.f; appFrames_ -= 1.f) advanceCarousel(game);
+    auto sel = std::find(appOrder_.begin(), appOrder_.end(), selected_);
+    const int base = 240 - (sel == appOrder_.end() ? 0 : appIconW_[sel - appOrder_.begin()] >> 1);
     for (size_t i = 0; i < appOrder_.size(); ++i) {
         const Station& st = stations_[appOrder_[i]];
         auto def = std::find_if(sprites_.sprites().begin(), sprites_.sprites().end(), [&](const SpriteDef& d) { return d.id == st.icon; });
         if (def == sprites_.sprites().end()) continue;
-        float x = 240.f - def->w * 0.5f + appOffset_[i] - appScroll_;
-        if (x < -128.f) x += appWidth_;
-        if (x > appWidth_ - 128.f) x -= appWidth_;
-        const float alpha = 1.f - std::min(std::fabs(240.f - def->w * 0.5f - x), 240.f) / 240.f;
-        if (alpha > 0.f && x > -def->w && x < kAppW) sprite(st.icon, x, 85.f - def->h * 0.5f + 40.f, 1.f, alpha);
+        int x = base + appOffset_[i] - appScroll_;
+        if (x <= -0x81) x += appWidth_;
+        if (x > appWidth_ - 0x80) x -= appWidth_;
+        const float alpha = (float)std::min(std::abs(base - x), 240) * -0.004166667f + 1.f;
+        if (alpha > 0.f && x > -def->w && x < kAppW) sprite(st.icon, (float)x, 85.f - def->h * 0.5f + 40.f, 1.f, alpha);
     }
 
     // ProcessStars hides the outline only for the off station.

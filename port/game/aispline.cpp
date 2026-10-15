@@ -241,6 +241,23 @@ void AISpline::computeIntercept(const RoadNetwork& rn) {   // cAISpline::Compute
     }
 }
 
+bool AISpline::shouldIndicate(bool& left) const {   // cAISpline::ShouldIndicate
+    if ((!left_ && !right_) || len_ == 0) return false;
+    if (sameLink(1, 2)) {   // T1 and T2 on the same link: not before the last 10 units of it
+        const int32_t lead = (int32_t)((0xA00000000000LL / len_) >> 20);   // 10 units as a fraction of the length
+        if (param_ <= ((int32_t)t_[2].ratio << 12) / 10000 - lead) return false;
+    }
+    left = left_;
+    return true;
+}
+
+void AISpline::yokeIndicators(bool& left, bool& right) const {   // cAISpline::InaugerateYoke
+    left = right = false;
+    if (!t_[1].valid() || !t_[2].valid()) return;
+    bool l;
+    if (shouldIndicate(l)) { left = l; right = !l; }
+}
+
 // maths::ComputeHomeBrewedCurvePoint: quadratic Bezier A -> (via C) -> B at t, and its unit tangent
 static void curvePoint(const int32_t A[2], const int32_t C[2], const int32_t B[2], int32_t t, int32_t p[2], int32_t d[2]) {
     int32_t t2 = mulq(t, t) - t;              // t^2 - t

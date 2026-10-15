@@ -335,8 +335,16 @@ void Plugins_Init(const std::string& modsDir) {
     if (!g_modsDir.empty() && g_modsDir.back() != '/' && g_modsDir.back() != '\\') g_modsDir += '/';
     std::error_code ec;
     std::vector<fs::path> dlls;
+    // plugins (the mod menu): ModMenu.dll on Windows, ModMenu.so / .dylib elsewhere
+#if defined(_WIN32)
+    const char* kPluginExt = ".dll";
+#elif defined(__APPLE__)
+    const char* kPluginExt = ".dylib";
+#else
+    const char* kPluginExt = ".so";
+#endif
     for (auto& e : fs::directory_iterator(modsDir, ec))
-        if (e.is_regular_file() && e.path().extension() == ".dll") dlls.push_back(e.path());
+        if (e.is_regular_file() && e.path().extension() == kPluginExt) dlls.push_back(e.path());
     std::sort(dlls.begin(), dlls.end());
     for (auto& p : dlls) {
         Plugin pl;

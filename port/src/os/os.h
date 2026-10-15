@@ -68,3 +68,15 @@ std::string Host_PopText();           // UTF-8 typed since the last call; '\b' =
 void Host_SetRelativeMouse(bool on);  // hide and capture the cursor; movement comes from Host_PopMouseDelta
 void Host_PopMouseDelta(float* dx, float* dy);   // relative movement since the last call, drawable pixels
 void Host_TestMouse(int x, int y, int clicks, int wheel);   // testing (--shot): fake the mouse for the next frame
+// Game controllers (SDL GameController, the first one connected; plugged in or out at any time). Button presses
+// also arrive through Host_PopKey as the keyboard keys they stand for (Y = F, LB / RB = Q / E, Back = Tab, Start =
+// Esc (the pause menu), B = Backspace, X = Space, D-pad = arrows, R3 = Z), so menus and the radio work unchanged; the sticks, triggers and held
+// buttons are read here. Sticks have a radial dead zone and are rescaled to 0..1 beyond it.
+struct HostPad {
+    bool connected = false;
+    float lx = 0, ly = 0, rx = 0, ry = 0;   // -1..1, y up
+    float lt = 0, rt = 0;                   // 0..1
+    bool a = false, b = false, x = false, y = false, lb = false, rb = false;
+};
+const HostPad& Host_Pad();
+void Host_TestPad(const HostPad* pad);   // testing: replace the controller's state (nullptr: the real one again)

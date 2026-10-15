@@ -28,11 +28,26 @@
 | W S / Up Down / + - | Volume |
 | Tab / Esc / Backspace | Close |
 
+| Controller (Xbox layout; any SDL game controller) | |
+| --- | --- |
+| Left stick | Move (a light push walks) / steer |
+| A (hold) | Sprint / handbrake |
+| RT | Fire / accelerate |
+| LT (hold) | Throw (hold longer to throw further) / brake, reverse |
+| Y | Get in or out of a vehicle |
+| LB / RB | Previous / next weapon |
+| X (hold, in a vehicle) | Horn |
+| Back / View | Weapon wheel on foot, radio in a vehicle |
+| D-pad | Radio: station (left / right), volume (up / down) |
+| R3 | Sniper scope zoom |
+| Start / Menu | Pause menu (it also opens the mod menu) |
+| B | Close the radio, the pause menu or the mod menu |
+
 | Game | |
 | --- | --- |
 | F3 | Debug overlay |
 | F4 | Mod menu (Esc closes it) |
-| Esc | Quit |
+| Esc | Pause menu: resume, mod menu, controls, quit |
 
 | Enhancements mod | |
 | --- | --- |

@@ -147,6 +147,15 @@ public:
     void enableExplosionRadiusCheck(bool enable) { explosionRadiusCheck_ = enable; } // native script switch; off at Reset
     struct FreeCamera { bool on = false; WorldCamera cam; } freeCam;   // mods: replaces the game camera
     bool uiPaused = false;               // a full-screen app (the radio) has paused the game
+    // PC extra: the pause menu (Esc, or Start on a controller): Resume, Mod menu, Controls, Quit. The phone game paused
+    // from its own PDA; the PC port used to quit on Esc.
+    bool pauseOpen = false;
+    int pauseChoice = 0;
+    bool pauseControls = false;          // showing the controls page
+    bool quitRequested = false;
+    void setPause(bool open);
+    bool pauseKey(int scancode);
+    void renderPause(int W, int H);
     bool interpolate = true;             // PC: draw between the last two 30 Hz ticks (interpolation.cpp)
     float renderAlpha = 1.f;             // how far the display frame is between them, 0..1
     struct ControlYaw { bool on = false; int16_t yaw = 0; } controlYaw;  // mods: on-foot input relative to this yaw

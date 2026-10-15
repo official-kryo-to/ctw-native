@@ -361,7 +361,8 @@ void Vehicle::act(const Controls& yIn, bool playerDriving, Collision* col) {
     // Engine-off mods retain steering and braking, but cannot apply propulsion in either gear direction.
     if (!engineOn && ((gear_ >= 1 && y.throttle > 0) || (gear_ < 1 && y.throttle < 0))) y.throttle = 0;
     b64_ &= 0xFFF9;   // this frame's brake / reverse
-    if (physicsActive()) { railBraking = false; indicators = 0; }   // (a simulated car is not on rails any more)
+    if (physicsActive()) railBraking = false;   // (a simulated car is not on rails any more)
+    if (hazards) indicators = 3;               // CommonActToSimpleAndPhysics: bit 9 sets both every frame
     // cWheeledVehicle::Act (the driver's controls)
     b62_ = 0;
     steerInputAbs_ = std::abs(y.steer);
@@ -1487,7 +1488,8 @@ void Vehicle::setDead() {   // cVehicle::SetDead: the burnt wreck, black smoke a
     if (dead_) return;
     dead_ = true;
     engineOn = false;
-    indicators = 0;
+    indicators &= 2;    // SetDead clears +0x948 bits 7 and 9 (left and the hazards); the right one stays
+    hazards = false;
     railBraking = false;
     setToPhysics(true);
     justDied = true;

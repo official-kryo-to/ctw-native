@@ -18,6 +18,7 @@ set_target_properties(ModMenu PROPERTIES PREFIX "" OUTPUT_NAME ModMenu
 if(MINGW)
     target_link_options(ModMenu PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
+target_link_libraries(ModMenu PRIVATE ${CMAKE_DL_LIBS})   # dlopen (Linux, macOS)
 
 # ---- example mods -------------------------------------------------------------------------------------------
 # ctw_mod(<source folder> <installed mod folder>): packages mod.ini and textures, plus a DLL built from every .c/.cpp

@@ -11,6 +11,7 @@
 #include "ctw_ui.h"
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstddef>
@@ -30,7 +31,7 @@
 
 namespace fs = std::filesystem;
 
-enum { SC_ESCAPE = 41, SC_F1 = 58, SC_F4 = 61, SC_F12 = 69 };   // SDL scancodes
+enum { SC_RETURN = 40, SC_ESCAPE = 41, SC_BACKSPACE = 42, SC_SPACE = 44, SC_F1 = 58, SC_F4 = 61, SC_F12 = 69, SC_DOWN = 81, SC_UP = 82 };   // SDL scancodes
 
 struct CtwMod {   // the opaque handle mods receive
     std::string folder, dir, name, author, version, description, dllName;
@@ -75,6 +76,9 @@ char g_search[48];
 CtwUi g_ui;
 CtwUiScroll g_listScroll, g_detailScroll;
 int g_selected = 0;   // the mod shown on the right
+float g_listH = 0.f;  // the list's visible height (keyboard choice scrolls the chosen row into view)
+void chooseNext(int step);
+CtwMod* selectedMod();
 
 bool running(const CtwMod& m) { return m.enabled && m.codeLoaded; }
 void log(const std::string& s) { H->log(s.c_str()); }
@@ -274,11 +278,28 @@ CtwApi g_api = {
     X(get_ped_density) X(set_ped_density) X(set_render_style)
 
 // ------------------------------------------------------------------------------------------------ loading
+// mod.ini names a mod's library as built on Windows ("x.dll"). On Linux and macOS the same mod builds to "x.so" /
+// "x.dylib"; that file is used when the named one is not there.
+std::string libFile(const std::string& path) {
+#ifdef _WIN32
+    return path;
+#else
+    std::error_code ec;
+    if (fs::exists(fs::u8path(path), ec)) return path;
+    const size_t dot = path.rfind('.');
+    if (dot == std::string::npos || path.compare(dot, std::string::npos, ".dll") != 0) return path;
+#ifdef __APPLE__
+    return path.substr(0, dot) + ".dylib";
+#else
+    return path.substr(0, dot) + ".so";
+#endif
+#endif
+}
 void* loadLib(const std::string& path) {
 #ifdef _WIN32
     return (void*)LoadLibraryW(fs::u8path(path).wstring().c_str());
 #else
-    return dlopen(path.c_str(), RTLD_NOW);
+    return dlopen(libFile(path).c_str(), RTLD_NOW);
 #endif
 }
 void* libSym(void* lib, const char* name) {
@@ -296,6 +317,24 @@ void freeLib(void* lib) {
 #endif
 }
 
+// Texture changes from switching a mod on or off are applied a few at a time (applyTextureJobs, each display
+// frame), so a mod with dozens of textures does not stall a single frame. At start-up they are all applied at once.
+struct TextureJob { CtwMod* mod; int id; std::string path; };   // an empty path restores the game's texture
+std::vector<TextureJob> g_textureJobs;
+
+void applyTextureJobs(double budgetMs) {
+    const auto start = std::chrono::steady_clock::now();
+    size_t done = 0;
+    while (done < g_textureJobs.size()) {
+        const TextureJob job = g_textureJobs[done++];
+        if (job.path.empty()) H->restore_texture(job.id);
+        else api_override_texture(job.mod, job.id, job.path.c_str());
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        if (budgetMs >= 0 && ms >= budgetMs) break;
+    }
+    g_textureJobs.erase(g_textureJobs.begin(), g_textureJobs.begin() + (std::ptrdiff_t)done);
+}
+
 // textures/<resource id>.png: an opaque PNG replaces the texture; one with transparency is a layer drawn over it
 // (the game does the difference, see override_texture_png). With apply unset this only counts them.
 int scanTextures(CtwMod& m, bool apply) {
@@ -308,13 +347,17 @@ int scanTextures(CtwMod& m, bool apply) {
         const long id = strtol(stem.c_str(), &end, 10);
         if (!end || *end || id < 0) continue;
         ++count;
-        if (apply) api_override_texture(&m, (int)id, e.path().u8string().c_str());
+        if (apply) g_textureJobs.push_back({&m, (int)id, e.path().u8string()});
     }
     return count;
 }
 
 void removeTextures(CtwMod& m) {   // texture changes are removed when their mod is switched off
-    for (int id : m.textures) H->restore_texture(id);
+    // changes still waiting are dropped; the ones already made are undone in turn
+    g_textureJobs.erase(std::remove_if(g_textureJobs.begin(), g_textureJobs.end(),
+                                       [&](const TextureJob& j) { return j.mod == &m && !j.path.empty(); }),
+                        g_textureJobs.end());
+    for (int id : m.textures) g_textureJobs.push_back({&m, id, std::string()});
     m.textures.clear();
 }
 
@@ -324,7 +367,7 @@ void fail(CtwMod& m, const std::string& why) {
 }
 
 void loadMod(CtwMod& m) {
-    scanTextures(m, true);
+    const int textures = scanTextures(m, true);
     if (!m.dllName.empty() && !m.codeLoaded && m.error.empty()) {
         m.lib = loadLib(m.dir + m.dllName);
         if (!m.lib) return fail(m, "could not load " + m.dllName);
@@ -335,7 +378,7 @@ void loadMod(CtwMod& m) {
         if (r != 0) return fail(m, "ctw_mod_init returned " + std::to_string(r));
         m.codeLoaded = true;
     }
-    log("loaded " + m.name + " " + m.version + (m.textures.empty() ? "" : " (" + std::to_string(m.textures.size()) + " textures)"));
+    log("loaded " + m.name + " " + m.version + (textures ? " (" + std::to_string(textures) + " textures)" : ""));
 }
 
 void setEnabled(CtwMod& m, bool on) {
@@ -363,11 +406,19 @@ void setOpen(bool open) {
 
 int onKey(int k, void*) {
     if (k == SC_ESCAPE && g_searchFocused) { setSearchFocus(false); return 1; }
-    if (k == SC_F4 || (k == SC_ESCAPE && g_menuOpen)) {   // Esc closes the menu instead of quitting
+    // Esc (Start on a controller) or Backspace (B) closes the menu instead of pausing the game
+    if (k == SC_F4 || (g_menuOpen && (k == SC_ESCAPE || (k == SC_BACKSPACE && !g_searchFocused)))) {
         setOpen(!g_menuOpen);
         return 1;
     }
     if (g_searchFocused && (k < SC_F1 || k > SC_F12)) return 1;   // the key was typed into the search box
+    if (g_menuOpen && !g_mods.empty()) {   // Up / Down (the D-pad) choose a mod, Enter / Space (X) switch it on or off
+        if (k == SC_UP || k == SC_DOWN) { chooseNext(k == SC_DOWN ? 1 : -1); return 1; }
+        if (k == SC_RETURN || k == SC_SPACE) {
+            if (CtwMod* m = selectedMod()) setEnabled(*m, !m->enabled);
+            return 1;
+        }
+    }
     const auto hooks = g_keyHooks;
     for (const auto& h : hooks)
         if (running(*h.mod) && h.fn(k, h.user)) return 1;
@@ -420,11 +471,32 @@ CtwMod* selectedMod() {
     return g_selected >= 0 ? g_mods[g_selected].get() : nullptr;
 }
 
-// The left column: one row per mod (status dot, name, version and author). Clicking selects it.
-void drawList(CtwUi& ui, float x, float y, float w, float h) {
+std::vector<int> shownMods() {
     std::vector<int> shown;
     for (int i = 0; i < (int)g_mods.size(); ++i) if (matchesSearch(*g_mods[i])) shown.push_back(i);
+    return shown;
+}
+
+// Keyboard and controller: the next or previous mod in the (searched) list, scrolled into view.
+void chooseNext(int step) {
+    const std::vector<int> shown = shownMods();
+    if (shown.empty()) return;
+    int at = 0;
+    for (int i = 0; i < (int)shown.size(); ++i) if (shown[i] == g_selected) at = i;
+    at = std::clamp(at + step, 0, (int)shown.size() - 1);
+    if (shown[at] != g_selected) { g_selected = shown[at]; g_detailScroll.pos = g_detailScroll.target = 0.f; }
+    const float rh = listRowHeight(g_ui), gap = 6.f, top = at * (rh + gap);
+    if (top < g_listScroll.target) g_listScroll.target = top;
+    if (g_listH > 0.f && top + rh > g_listScroll.target + g_listH) g_listScroll.target = top + rh - g_listH;
+}
+
+const char* statusText(const CtwMod& m) { return !m.error.empty() ? "ERROR" : m.enabled ? "ON" : "OFF"; }
+
+// The left column: one row per mod (status dot, name, version and author, an on / off pill). Clicking selects it.
+void drawList(CtwUi& ui, float x, float y, float w, float h) {
+    const std::vector<int> shown = shownMods();
     const float rh = listRowHeight(ui), gap = 6.f;
+    g_listH = h;
     ctw_ui_scroll_begin(&ui, 1, &g_listScroll, x, y, w, h, shown.size() * (rh + gap));
     if (g_mods.empty())
         ctw_ui_text_wrap(&ui, x + 8.f, y + 8.f, 0.9f, CTW_UI_DIM,
@@ -441,7 +513,11 @@ void drawList(CtwUi& ui, float x, float y, float w, float h) {
             if (selected || hot) ctw_ui_round_rect(&g_api, x, ry, w - 14.f, rh, 10.f, selected ? 0xF2C2301Cu : CTW_UI_HOVER);
             if (selected) ctw_ui_round_rect(&g_api, x, ry + 10.f, 3.f, rh - 20.f, 1.5f, CTW_UI_ACCENT);
             if (hot && ui.clicked) { g_selected = i; g_detailScroll.pos = g_detailScroll.target = 0.f; }
-            const float dot = 8.f, tx = x + 16.f + dot + 10.f, tw = w - 14.f - (tx - x) - 12.f;
+            const char* pill = statusText(m);
+            const float pw = g_api.text_width(0.75f, pill) + 12.f;
+            ctw_ui_badge(&ui, x + w - 14.f - pw - 10.f, ry + 12.f + (ctw_ui_lh(&ui, 1.f) - ctw_ui_lh(&ui, 0.75f) - 4.f) * 0.5f,
+                         statusColour(m), pill);
+            const float dot = 8.f, tx = x + 16.f + dot + 10.f, tw = w - 14.f - (tx - x) - 12.f - pw - 8.f;
             ctw_ui_round_rect(&g_api, x + 16.f, ry + 12.f + (ctw_ui_lh(&ui, 1.f) - dot) * 0.5f, dot, dot, dot * 0.5f,
                               statusColour(m));
             ctw_ui_text_fit(&ui, tx, ry + 12.f, 1.f, m.enabled ? CTW_UI_TEXT : CTW_UI_DIM, m.name.c_str(), tw);
@@ -463,6 +539,19 @@ float detail(CtwUi& u, CtwUi& inert, CtwMod& m, float x, float y, float w, bool 
     if (!by.empty()) {
         if (draw) ctw_ui_text_fit(&u, x, ry, 0.9f, CTW_UI_DIM, by.c_str(), w);
         ry += ctw_ui_lh(&u, 0.9f);
+    }
+    {   // what the mod contains: code, textures, an error
+        ry += 8.f;
+        float bx = x;
+        char tex[32];
+        snprintf(tex, sizeof tex, "%d TEXTURE%s", m.textureFiles, m.textureFiles == 1 ? "" : "S");
+        if (draw) {
+            if (!m.dllName.empty()) bx += ctw_ui_badge(&u, bx, ry, 0x7FB2FFFFu, "CODE") + 6.f;
+            if (m.textureFiles > 0) bx += ctw_ui_badge(&u, bx, ry, 0xC79BFFFFu, tex) + 6.f;
+            if (!m.error.empty()) bx += ctw_ui_badge(&u, bx, ry, CTW_UI_ERROR, "ERROR") + 6.f;
+            ctw_ui_text_fit(&u, bx + 4.f, ry + 2.f, 0.75f, CTW_UI_DIM, ("mods/" + m.folder).c_str(), x + w - bx - 4.f);
+        }
+        ry += ctw_ui_lh(&u, 0.75f) + 4.f;
     }
     ry += 14.f;
     const float row = ctw_ui_row_h(&u);
@@ -521,6 +610,8 @@ void drawMenu() {
     for (auto& m : g_mods) on += m->enabled ? 1 : 0;
     char count[48];
     snprintf(count, sizeof count, "%d of %d on", on, (int)g_mods.size());
+    // the game stays visible and playable beside the menu, a little darker so the menu reads clearly
+    g_api.draw_rect(0.f, 0.f, (float)g_api.screen_width(), (float)g_api.screen_height(), 0x0000003Cu);
     if (ctw_ui_panel(&ui, px, py, pw, ph, "Mods", g_mods.empty() ? nullptr : count)) { setOpen(false); return; }
 
     const float top = py + ctw_ui_title_h(&ui) + 14.f, bottom = py + ph - ctw_ui_footer_h(&ui) - 12.f;
@@ -550,10 +641,13 @@ void drawMenu() {
         ui.wheel_used = u.wheel_used;
         ctw_ui_scroll_end(&ui);
     }
-    ctw_ui_footer(&ui, px, py, pw, ph, CTW_UI_DIM, "Select a mod to see its options.   F4: close");
+    ctw_ui_footer(&ui, px, py, pw, ph, CTW_UI_DIM,
+                  g_mods.empty() ? "F4 / Esc: close"
+                                 : "Up / Down: choose   Enter: switch on or off   F4 / Esc: close");
 }
 
 void onHud(void*) {
+    if (!g_textureJobs.empty()) applyTextureJobs(3.0);   // about 3 ms of texture work per frame
     const auto hooks = g_hudHooks;
     for (const auto& h : hooks)
         if (running(*h.mod)) h.fn(h.user);
@@ -628,6 +722,7 @@ extern "C" CTW_PLUGIN_EXPORT int ctw_plugin_init(const CtwHostApi* host) {
     scanMods();
     for (auto& m : g_mods)
         if (m->enabled) loadMod(*m);
+    applyTextureJobs(-1);   // the enabled mods' textures before the first frame
     if (!g_mods.empty()) log("mod menu: " + std::to_string(g_mods.size()) + " mods, API version " + std::to_string(g_api.version));
     H->on_key(onKey, nullptr);
     H->on_tick(onTick, nullptr);
@@ -644,6 +739,7 @@ extern "C" CTW_PLUGIN_EXPORT void ctw_plugin_shutdown(void) {
         if (m->codeLoaded && m->shutdown) m->shutdown();
         if (m->lib) freeLib(m->lib);
     }
+    g_textureJobs.clear();
     g_mods.clear();
     g_tickHooks.clear();
     g_hudHooks.clear();
