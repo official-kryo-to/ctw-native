@@ -215,8 +215,62 @@ bool Player::vehicleImpact(const Vehicle& car, const int32_t normal[3], bool isP
     return true;
 }
 
-bool Player::takeDamage(int damage) {
+void Player::setArmour(unsigned amount) {
+    armour = (int)std::min(amount, 127u);
+}
+
+void Player::giveArmour(unsigned amount) {
+    // cPlayer::GiveArmour saturates the sum at 127. Keep the wider sum so callers cannot wrap a pickup.
+    armour = (int)std::min(uint64_t(std::clamp(armour, 0, 127)) + amount, uint64_t(127));
+}
+
+void Player::setHasDoubleArmour(bool enabled) {
+    doubleArmour_ = enabled;
+    armourHalfTick_ = false; // SetHasDoubleArmour clears the one-point alternation even when re-enabled
+}
+
+void Player::setDamagePercentScale(unsigned percent) {
+    damagePercentScale_ = (uint8_t)percent;
+}
+
+unsigned Player::reduceArmour(unsigned damage) {
+    // cPlayer::ReduceArmour / FixDamageForArmour: double armour halves damage before absorption.
+    // One-point hits alternate between zero and one, starting with zero (native flags 13 and 14).
+    if (doubleArmour_) {
+        if (damage >= 2) damage >>= 1;
+        else {
+            const bool apply = armourHalfTick_;
+            armourHalfTick_ = !armourHalfTick_;
+            if (!apply) return 0;
+        }
+    }
+    const unsigned available = (unsigned)std::clamp(armour, 0, 127);
+    const unsigned absorbed = std::min(damage, available);
+    armour = (int)(available - absorbed);
+    return damage - absorbed;
+}
+
+unsigned Player::fixDamageForArmour(unsigned damage) {
+    // cPed::FixDamageForArmour uses an unsigned 32-bit product, division by 100, and a minimum of one
+    // for a nonzero incoming hit. Only the cPlayer override also consumes the armour bar.
+    const uint32_t product = damage * damagePercentScale_;
+    const unsigned scaled = product < 100 && damage ? 1 : product / 100;
+    return playerControlled ? reduceArmour(scaled) : scaled;
+}
+
+void Player::resetDamageState() {
+    health = 127;
+    armour = 0;
+    damagePercentScale_ = 100;
+    setHasDoubleArmour(false);
+    dead = false;
+    resetReaction();
+}
+
+bool Player::takeDamage(int damage, bool bypassArmour) {
     if (dead || attached || hidden) return false;
+    if (damage <= 0) return false;
+    if (!bypassArmour) damage = (int)fixDamageForArmour((unsigned)damage);
     health = std::max(0, health - damage);
     dead = health == 0;
     if (!dead || reacting()) return dead;

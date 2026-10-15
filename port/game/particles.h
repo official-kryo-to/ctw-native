@@ -218,6 +218,36 @@ private:
     bool init_ = false;
 };
 
+// cParticleEmitterBlood: the local general particle controller's 16 blood drops (range 0x70000, flat quads of
+// sprite 0), attached to the player like the rain. AddParticle(cSimpleMover) puts one dark red, spinning drop at the
+// victim for ten frames (cParticleEmitterBase::UpdateParticle, no gravity). At this range the velocities scale to at
+// most a few position units a frame, so the drops barely drift. The cut-in-half offset (cSimpleMover +0x348 bit 7)
+// is not reachable: CutPedInHalf is not ported.
+class BloodEmitter : public Emitter {
+public:
+    explicit BloodEmitter(const int32_t pos[3]) : Emitter(pos, 16, 0x70000, 0, false) {}
+    void addParticle(const int32_t victim[3]);
+private:
+    Particle tmpl_{};
+    bool init_ = false;
+};
+
+// cParticleEmitterPetrolFlame: five flat, additive flames of sprite 5 (range 4) under a molotov's central fire.
+// Each new flame takes a random angle, a size from the fire's width, and fades in by 3 until its alpha passes 7, then
+// out by 2; it shrinks by half a range a frame. The template keeps its last (scaled) position and climb.
+class PetrolFlameEmitter : public Emitter {
+public:
+    PetrolFlameEmitter(const int32_t pos[3], int16_t size)
+        : Emitter(pos, 5, 0x4000, 5, false), size_(size) { additive_ = true; }
+    void addParticle();   // AddParticle(cSimpleMover*)
+protected:
+    void updateParticle(Particle& p) override;
+private:
+    Particle tmpl_{};
+    bool init_ = false;
+    int16_t size_;
+};
+
 class Particles {
 public:
     template <class T, class... A> T* add(A&&... a) {
@@ -229,6 +259,7 @@ public:
     void update(uint32_t frame, uint32_t hours = 12u << 12, const int32_t* playerPos = nullptr);
     void render(const WorldCamera& cam) const;
     int emitterCount() const { return (int)emitters_.size(); }   // the debug overlay
+    bool contains(const Emitter* e) const;   // a weak pointer's check: the emitter has not been removed
 private:
     std::vector<std::unique_ptr<Emitter>> emitters_;
     friend struct ParticlesTestAccess;
@@ -237,5 +268,6 @@ private:
 Particles& TheParticles();
 
 // immsprite3d::RenderWorldScale*: one rect of the sprite sheet as a quad centred on pos, spanning +-sx along ax and
-// +-sy along ay, colour 0xAABBGGRR (alpha blended, no depth write)
-void DrawSheetSprite(int sprite, uint32_t abgr, const float pos[3], const float ax[3], const float ay[3], float sx, float sy);
+// +-sy along ay, colour 0xAABBGGRR (alpha blended, or GL_SRC_ALPHA/GL_ONE when additive; no depth write)
+void DrawSheetSprite(int sprite, uint32_t abgr, const float pos[3], const float ax[3], const float ay[3], float sx, float sy,
+                     bool additive = false);

@@ -62,6 +62,7 @@ bool Game::init(const std::string& data, const std::string& mods) {
         fprintf(stderr, "weather_tables.bin missing or invalid: the weather does not change (run scripts/setup_game.py)\n");
     weather.reset(*this, 0);
     weather.rain = TheParticles().add<RainEmitter>(player.pos);
+    blood = TheParticles().add<BloodEmitter>(player.pos);   // cGeneralParticleController::Init
     LoadVehicleInfos(vehicleInfos);   // parked cars come from the map's car generators (cargens.cpp)
     carGens.reset();
     // cPlayer::cPlayer: cPopulationManager's schedules (peds 64, vehicles 32), then cLocalAreaKnowledge's (16)
@@ -199,10 +200,21 @@ void Game::updateCityEmitters() {   // cWorldSector::DataLoaded -> cCityEmitters
 
 void Game::updateWorldObjects() {   // once per game frame, after the vehicles moved
     traces.update();
+    fires.process(*this);
+    if (blood) {   // the general particle controller follows the player, like the rain
+        int32_t at[3];
+        focus(at);
+        blood->setPos(at);
+    }
     updateCityEmitters();
     for (auto& kv : fountains)
         for (auto& f : kv.second) f->tick(frame);
     propDynamics.update(*this);
+}
+
+void Game::addBlood(const int32_t pos[3], int count) {
+    if (blood)
+        for (int i = 0; i < count; ++i) blood->addParticle(pos);
 }
 
 void Game::focus(int32_t o[3]) const {
@@ -608,8 +620,8 @@ void Game::processVehicleDeaths() {
         if (explosion.type == 2) TheSound().scriptSfx(explosion.pos, 611, 127, 400);   // cExplosionMolotov
         else TheSound().explosion(*this, explosion.pos);
         TheParticles().add<ExplosionFlash>(explosion.pos,explosion.type,explosion.scale);
-        // cExplosionMolotov's blast is the next Process (above); its fires (cFire) and the flash bang's
-        // DazeEntities are not ported
+        if (explosion.type == 2) fires.molotov(*this, explosion.pos, true);   // the player threw it
+        // cExplosionMolotov's blast is the next Process (above); the flash bang's DazeEntities is not ported
         if (explosion.type == 2 || explosion.type == 5) continue;
         affectExplosion(explosion);
         if (explosion.type == 4) {
@@ -717,6 +729,7 @@ void Game::tick() {
     snapshotPoses();
     radio.update(*this);
     ++frame;
+    muzzleFlashes.beginTick();
     if (!player.dead && deathFrames_ >= 72 && deathFrames_ < 84) ++deathFrames_;
     localArea.update(*this);   // cPlayer::Think
     player.speedScale = speedScale;
@@ -958,6 +971,9 @@ void Game::render(int W, int H) {
     }
     TheParticles().render(cam);
     traces.render();
+    muzzleFlashes.render();
+    fires.render(cam);
+    if (playerCar < 0) FlameThrower_RenderJet(*playerWeapons.current());   // cFlameThrower::Render
     Weapons_RenderThrowArc(*this);
     targeting.render(*this);
     glEnable(GL_DEPTH_TEST);

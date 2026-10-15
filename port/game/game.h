@@ -23,6 +23,8 @@
 #include "watercannon.h"
 #include "weather.h"
 #include "weapons.h"
+#include "particles.h"
+#include "fire.h"
 #include "projectiles.h"
 #include "targeting.h"
 #include "world/worldrenderer.h"
@@ -52,6 +54,8 @@ public:
     void renderProps(const WorldCamera& cam, bool draw);
     void updateCityEmitters();               // cCityEmitters: steam and fountains from the cells around the player
     void updateWorldObjects();               // city emitters, fountains and knocked-over props
+    // cPed::Damage's blood: count calls of cGeneralParticleController::AddBlood for a victim at pos
+    void addBlood(const int32_t pos[3], int count);
     std::map<int, std::vector<class Emitter*>> cityEmitters;   // cell key -> its emitters
     std::map<int, std::vector<std::unique_ptr<Fountain>>> fountains;   // cell key -> its fountains (type 1)
     PropDynamics propDynamics;               // street furniture knocked over by vehicles
@@ -73,6 +77,9 @@ public:
     Weather weather;                         // weather changes, rain and lightning (weather.cpp)
     WeaponManager playerWeapons;             // the player's cWeaponManager (weapons.cpp)
     BulletTraces traces;                     // cBulletTraces
+    MuzzleFlashes muzzleFlashes;             // cMuzzleFlashes
+    BloodEmitter* blood = nullptr;           // LocalGeneralParticles' cParticleEmitterBlood
+    Fires fires;                             // cFire
     PlayerTargeting targeting;               // the player's auto-aim (cPlayerSensorCone, targeting.cpp)
     Projectiles projectiles;                 // grenades, molotovs, flashbangs, mines and rockets (projectiles.cpp)
     int weaponCycle = 0;                     // input: -1 previous / +1 next weapon this frame

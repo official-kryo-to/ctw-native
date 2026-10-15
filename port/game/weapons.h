@@ -31,10 +31,12 @@
 // (the player's: +2 up, 1.5 units out) to the hit.
 //
 // Auto-aim is targeting.cpp, the RPG and the thrown weapons projectiles.cpp, the wheel and button weaponhud.cpp.
-// Not ported yet: the flame thrower, sniper rifle, taser and sword, muzzle flashes and ricochet sounds, blood, the
+// Sword swings apply their delayed ped/vehicle hit; prop hits, sword swing sounds and sharp-weapon damage reactions
+// are still missing. Not ported yet: the flame thrower, sniper rifle and taser, muzzle flashes and ricochet sounds, blood, the
 // damage reactions' animations, drive-by shooting, AI peds with weapons and weapon pickups.
 #pragma once
 #include "lookups.h"
+#include "flamethrower.h"
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -52,6 +54,8 @@ public:
     uint8_t clip = 0;         // +0x16
     uint8_t shots = 0;        // +0x17 (cDualPistol: alternating hands)
     int8_t spin = 0;          // +0x18 (cMinigun: the barrel spin, fires above 8)
+    uint8_t delayedHit = 0;   // cSword +0x14: seven sword-animation ticks before the hit
+    FlameThrowerState flame;  // cFlameThrower +0x18..+0x39
     bool melee() const { return type <= 4; }
     int ammoCount() const { return melee() ? -1 : ammo; }        // vfunc +0x48 Ammo
     int ammoInClip() const { return melee() ? 1 : clip; }         // vfunc +0x50 AmmoLeftInClip
@@ -111,6 +115,25 @@ public:
 private:
     struct Trace { int32_t pos[3], vec[3], step[3]; int8_t life = 0; bool active = false; };
     Trace traces_[16];
+};
+
+// cMuzzleFlashes: up to eight flashes a frame, each a flat quad of particle sprite 3 lying along the fire direction,
+// drawn additively by cEffectManager::Render. Flash types (Render): 0 rifles and the first shotgun pellet, 2 the
+// pistols and SMGs, 4 the minigun; 1 and 3 belong to vehicles and rockets.
+class MuzzleFlashes {
+public:
+    void add(const int32_t pos[3], int16_t angle, int type, int16_t scale = 0x1000);   // Add (type -1: none)
+    void render();                                                                      // Render / RenderFlash
+    // Native Render clears the list after drawing once per 30 Hz frame. The port can draw a frame several times,
+    // so the list lives until the next simulation tick and each flash rolls its size jitter once.
+    void beginTick() { used_ = 0; }
+    int count() const { return used_; }
+    struct Quad { float centre[3], right[3], forward[3], halfWidth, halfLength; };
+    bool quad(int i, Quad& out);   // the flash's geometry, rolling its jitter on first use
+private:
+    struct Flash { int32_t pos[3]; int16_t angle, scale; int8_t type; bool rolled; int32_t width, length; };
+    Flash flashes_[8]{};
+    int used_ = 0;
 };
 
 // The player's weapon handling for one frame (cPed::HandleWeapons / HandleWeaponsAlways with the fire button,

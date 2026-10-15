@@ -458,7 +458,10 @@ void Pedestrians::runOver(Game& g, Ped& p) {
         int32_t normal[3], depth;
         if (!vehicleContact(p.body, v, normal, depth)) continue;
         const bool wasDead = p.body.dead;
-        if (p.body.vehicleImpact(v, normal, false)) {
+        const int health = p.body.health;
+        const bool impact = p.body.vehicleImpact(v, normal, false);
+        if (p.body.health != health) g.addBlood(p.body.pos, 1);   // run-over damage (types 8/9): one drop
+        if (impact) {
             p.deadFrames = 0;
             p.rollFrames = -1;
             TheSound().collision(v, std::min(127, v.speed() >> 10));
@@ -566,11 +569,25 @@ void Pedestrians::react(Game& g, Ped& p, int action, const int32_t from[3], uint
     }
 }
 
-void Pedestrians::meleeHit(Game& g, Ped& p, int damage, int type, const int32_t from[3]) {
+// cPed::Damage's switch on sDamageInfo type: how many times it calls cGeneralParticleController::AddBlood.
+// 3 (taser), 4, 5 and 13 bleed nothing; 12 (chainsaw) starts a cParticleEmitterBloodSpray, which is not ported.
+static int bloodDrops(int type, int damage, int effect) {
+    switch (type) {
+        case 0: return effect == 0x1D ? 0 : 4;
+        case 1: return damage >= 5 ? 15 : 0;
+        case 2: return 15;
+        case 3: case 4: case 5: case 12: case 13: return 0;
+        default: return 1;
+    }
+}
+
+void Pedestrians::meleeHit(Game& g, Ped& p, int damage, int type, const int32_t from[3], int effect) {
     if (p.vehicle || p.deadFrames >= 0 || p.body.dead) return;   // CanBeHit: alive, not in a closed vehicle
     const int d = damage && 100 * damage < 100 ? 1 : 100 * damage / 100;   // FixDamageForArmour (cPed::Reset: 100)
     const bool killed = p.body.takeDamage(d);
-    if (type == 0) Rand16Critical(2);   // the hit animation (+0xEB: 2 / 16 or 102 / 116; the animation is not ported)
+    // the hit animation (+0xEB: 2 / 16 or 102 / 116; the animation is not ported) comes before type 0's blood
+    if (type == 0 && effect != 0x1D) Rand16Critical(2);
+    g.addBlood(p.body.pos, bloodDrops(type, d, effect));
     if (killed) {
         p.deadFrames = 0;
         p.rollFrames = -1;
@@ -581,15 +598,31 @@ void Pedestrians::meleeHit(Game& g, Ped& p, int damage, int type, const int32_t 
     react(g, p, 0, from, 0);   // GetAction: types 0 and 12 are action 0
 }
 
-void Pedestrians::bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], int effect, const int32_t from[3]) {
+void Pedestrians::bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], int effect, const int32_t from[3],
+                            int type) {
     (void)dir;
     (void)effect;   // ApplyDamageResponse for the weapon's effect (+0x30) is not ported yet
     if (p.vehicle || p.deadFrames >= 0 || p.body.dead) return;   // CanBeHit: alive, not in a closed vehicle
     const int d = damage && 100 * damage < 100 ? 1 : 100 * damage / 100;   // FixDamageForArmour (cPed::Reset: 100)
-    if (p.body.takeDamage(d)) {
+    const bool killed = p.body.takeDamage(d);
+    g.addBlood(p.body.pos, bloodDrops(type, d, effect));
+    if (killed) {
         p.deadFrames = 0;
         p.rollFrames = -1;
         TheSound().pedDeath(p.body.pos, p.male, false);   // cPed::SetDead -> PlayDeathSound
+        Plugins_EmitEvent(CTW_EVENT_PED_KNOCKED_DOWN, 0, -1, (int)p.uid);
+        return;
+    }
+    react(g, p, 0, from, 0);
+}
+
+void Pedestrians::fireHit(Game& g, Ped& p, int damage, const int32_t from[3]) {
+    if (p.vehicle || p.deadFrames >= 0 || p.body.dead) return;
+    const int d = damage && 100 * damage < 100 ? 1 : 100 * damage / 100;   // FixDamageForArmour (cPed::Reset: 100)
+    if (p.body.takeDamage(d)) {
+        p.deadFrames = 0;
+        p.rollFrames = -1;
+        TheSound().pedDeath(p.body.pos, p.male, false);
         Plugins_EmitEvent(CTW_EVENT_PED_KNOCKED_DOWN, 0, -1, (int)p.uid);
         return;
     }
@@ -725,7 +758,10 @@ void Pedestrians::update(Game& g) {
     }
     if (g.playerCar < 0 && !g.player.hidden && !g.player.attached) for (const Vehicle& car : g.cars) {
         int32_t normal[3], depth;
-        if (vehicleContact(g.player, car, normal, depth)) g.player.vehicleImpact(car, normal, true);
+        if (!vehicleContact(g.player, car, normal, depth)) continue;
+        const int health = g.player.health;
+        g.player.vehicleImpact(car, normal, true);
+        if (g.player.health != health) g.addBlood(g.player.pos, 1);
     }
     // cPed::ShouldBeDestroyed: about 85 units from the player and off screen
     int32_t f[3];

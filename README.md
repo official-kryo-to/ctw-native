@@ -6,6 +6,17 @@ GTA: Chinatown Wars as a native Windows game, rebuilt in C++ with SDL2 and OpenG
 your own Android **4.4.243** copy; none are included here. A fan project, not affiliated with Rockstar Games or
 Take-Two. [STATUS.md](STATUS.md) says what works.
 
+## Status
+
+[![original code ported](https://official-kryo-to.github.io/ctw-native/badge-overall.svg)](https://official-kryo-to.github.io/ctw-native/progress.html) [![routines](https://official-kryo-to.github.io/ctw-native/badge-routines.svg)](https://official-kryo-to.github.io/ctw-native/progress.html)
+
+[![progress map](https://official-kryo-to.github.io/ctw-native/progress.svg)](https://official-kryo-to.github.io/ctw-native/progress.html)
+
+[Progress history](https://official-kryo-to.github.io/ctw-native/history.html)
+
+<sub>Share of the original Android game's code, by size, whose routines the port names as ported. Green is the ported
+part of each class. Updated on every push to main; see [how it is measured](CONTRIBUTING.md#progress).</sub>
+
 ## Play it
 
 1. Download **CTW-Native-Porter.exe** from [Releases](../../releases/latest).

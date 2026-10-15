@@ -4,6 +4,7 @@
 #include "weapons.h"
 #include "fixedmath.h"
 #include "game.h"
+#include "particles.h"
 #include "random.h"
 #include "sound.h"
 #include "text/gxt.h"
@@ -18,6 +19,10 @@ GxtFile gNames;
 const WeaponInfo kNone{};
 
 int fastsin(int a) { return (int)(sinf((float)a * 9.587378e-05f) * 4096.f); }
+int16_t atan2q(int32_t x, int32_t y) {   // ATan2: atan2f(x, y) x 10430.38, clamped to int16
+    const int v = (int)(atan2f((float)x, (float)y) * 10430.378f);
+    return (int16_t)std::clamp(v, -32768, 32767);
+}
 }   // namespace
 
 bool Weapons_Init(const std::string& dataDir) {
@@ -37,7 +42,7 @@ std::string Weapons_Name(int type) {
     return s;
 }
 bool Weapons_Fires(int type) {   // the weapons whose CreateBullet is ported
-    return (type >= 5 && type <= 15) || type == 17 || (type >= 20 && type <= 23);
+    return (type >= 5 && type <= 17) || (type >= 20 && type <= 23);
 }
 
 // ---- cWeapon ----------------------------------------------------------------------------------------------------
@@ -330,6 +335,63 @@ void BulletTraces::render() const {   // cBulletTraces::Render: untextured lines
     glColor4f(1.f, 1.f, 1.f, 1.f);
 }
 
+// ---- cMuzzleFlashes ---------------------------------------------------------------------------------------------
+
+void MuzzleFlashes::add(const int32_t pos[3], int16_t angle, int type, int16_t scale) {
+    if (type < 0 || used_ >= 8) return;   // Add: type -1 is "no flash"; the ninth and later are dropped
+    Flash& f = flashes_[used_++];
+    std::copy(pos, pos + 3, f.pos);
+    f.angle = angle;
+    f.type = (int8_t)type;
+    f.scale = scale;
+    f.rolled = false;
+}
+
+bool MuzzleFlashes::quad(int i, Quad& out) {
+    // Render: per type the half-width base, the length and a +-0.1 jitter on both (Q12)
+    static const int32_t kSize[5][2] = {{0x1400, 0x3000}, {0x400, 0x2800}, {0xCCD, 0x2000}, {0x1000, 0x2333},
+                                        {0x1000, 0x5000}};
+    if (i < 0 || i >= used_) return false;
+    Flash& f = flashes_[i];
+    if (f.type > 4) return false;
+    if (!f.rolled) {   // RenderFlash: a + Rand32NonCritical(2r) - r, then times the flash's scale; same for b
+        const int32_t r = 0x19A;
+        int32_t a = kSize[f.type][0] + ((int32_t)Rand32NonCritical((uint32_t)(r << 1)) - r);
+        f.width = (int32_t)((uint64_t)((int64_t)f.scale * a) >> 12);
+        int32_t b = kSize[f.type][1] + ((int32_t)Rand32NonCritical((uint32_t)(r << 1)) - r);
+        f.length = (int32_t)((uint64_t)((int64_t)f.scale * b) >> 12);
+        f.rolled = true;
+    }
+    // the matrix rows: right (cos, -sin, 0) and forward (sin, cos, 0), each through Normalise
+    const int c = fastsin(f.angle + 0x4000), s = fastsin(f.angle);
+    int32_t right[3] = {c, -s, 0}, fwd[3] = {s, c, 0};
+    Normalise3(right);
+    Normalise3(fwd);
+    // the quad is centred one length ahead of the muzzle, spanning +-2a across and +-b along the fire direction
+    for (int k = 0; k < 3; ++k) {
+        const int32_t centre = f.pos[k] + (int32_t)((uint64_t)((int64_t)fwd[k] * f.length) >> 12);
+        out.centre[k] = centre / 4096.f;
+        out.right[k] = right[k] / 4096.f;
+        out.forward[k] = fwd[k] / 4096.f;
+    }
+    out.halfWidth = (f.width << 1) / 4096.f;
+    out.halfLength = f.length / 4096.f;
+    return true;
+}
+
+void MuzzleFlashes::render() {
+    if (!used_) return;
+    // cEffectManager::Render: BlendFunc(GL_SRC_ALPHA, GL_ONE) just before cMuzzleFlashes::Render, no depth writes
+    glEnable(GL_DEPTH_TEST);
+    for (int i = 0; i < used_; ++i) {
+        Quad q;
+        if (!quad(i, q)) continue;
+        // RenderWorldScaleCamAligned puts the sprite rect's left edge on +right; DrawSheetSprite puts it on -ax
+        const float left[3] = {-q.right[0], -q.right[1], -q.right[2]};
+        DrawSheetSprite(3, 0xFFFFFFFFu, q.centre, left, q.forward, q.halfWidth, q.halfLength, true);
+    }
+}
+
 // ---- firing -----------------------------------------------------------------------------------------------------
 
 namespace {
@@ -355,7 +417,7 @@ int64_t cylinderDistance(const int32_t pos[3], int32_t radius, const int32_t sta
 
 // HelperMakeTraceAndFlash for an on-foot shooter (the player); returns true if something was hit
 void traceAndFlash(Game& g, Weapon& w, const int32_t origin[3], int32_t dir[3], int32_t range, int traceKind,
-                   int damage, bool accuracy) {
+                   int damage, bool accuracy, int flash) {
     if (range < 40) return;
     const WeaponInfo& info = Weapons_Info(w.type);
     if (accuracy) {   // CalcAccuracyDir
@@ -439,7 +501,7 @@ void traceAndFlash(Game& g, Weapon& w, const int32_t origin[3], int32_t dir[3], 
         for (int k = 0; k < 3; ++k) traceVec[k] = (int32_t)((uint64_t)((int64_t)dir[k] * len) >> 12);
         if (best.kind == 1) {
             const int32_t from[3] = {g.player.pos[0], g.player.pos[1], g.player.pos[2]};
-            g.peds.bulletHit(g, g.peds.peds[best.index], damage, dir, info.effect, from);
+            g.peds.bulletHit(g, g.peds.peds[best.index], damage, dir, info.effect, from, w.type == 15 ? 2 : 1);
         } else {
             Vehicle& c = g.cars[best.index];
             // cVehicle::Damage, sDamageInfo type 1: a quarter of the damage (doors, sparks and the takedown logic
@@ -447,7 +509,14 @@ void traceAndFlash(Game& g, Weapon& w, const int32_t origin[3], int32_t dir[3], 
             c.damage(damage >> 2);
         }
     }
-    g.traces.add(muzzle, traceVec, traceKind);   // (the ricochet sound at a wall, AddRicochet, is not ported)
+    g.traces.add(muzzle, traceVec, traceKind);
+    // then cMuzzleFlashes::Add at the trace's start, facing -ATan2(-dir.x, dir.y), at unit scale
+    g.muzzleFlashes.add(muzzle, (int16_t)-atan2q(-dir[0], dir[1]), flash);
+    // a trace that stopped at a wall without hitting anyone: cAudioManager::AddRicochet at its end. Only the
+    // pistols, SMGs and rifles (weapon-type mask 0x4E3E0) ricochet, 15% of the time, with one of three samples.
+    if (walled && !best.kind && w.type < 19 && (0x4E3E0u >> w.type & 1) && Rand32NonCritical(100) < 15) {
+        TheSound().scriptSfx(wall.point, 723 + (int)Rand32NonCritical(3), 105, 1500);   // muzzle + vec
+    }
 }
 
 // the gun's CreateBullet: FireSfx, then one trace (three for the shotguns)
@@ -469,20 +538,16 @@ void createBullet(Game& g, Weapon& w) {
         const int32_t a = (int32_t)((uint64_t)(357LL * y) >> 12), b = (int32_t)((uint64_t)(4080LL * x) >> 12);
         const int32_t c = (int32_t)((uint64_t)(357LL * x) >> 12), d = (int32_t)((uint64_t)(4080LL * y) >> 12);
         int32_t d0[3] = {x, y, f[2]}, d1[3] = {b - a, d + c, f[2]}, d2[3] = {a + b, d - c, f[2]};
-        traceAndFlash(g, w, origin, d0, range, 1, info.damage, true);
-        traceAndFlash(g, w, origin, d1, range, 1, info.damage, true);
-        traceAndFlash(g, w, origin, d2, range, 1, info.damage, true);
+        traceAndFlash(g, w, origin, d0, range, 1, info.damage, true, 0);   // only the centre pellet flashes
+        traceAndFlash(g, w, origin, d1, range, 1, info.damage, true, -1);
+        traceAndFlash(g, w, origin, d2, range, 1, info.damage, true, -1);
         return;
     }
     int32_t d[3] = {f[0], f[1], f[2]};
     const int kind = w.type == 15 ? 2 : (w.type == 13 || w.type == 14) ? 1 : 0;   // cMinigun: trace 2, flash 4
-    traceAndFlash(g, w, origin, d, range, kind, info.damage, true);
+    const int flash = w.type == 15 ? 4 : (w.type == 13 || w.type == 14) ? 0 : 2;   // cColt / cAK47: flash 0
+    traceAndFlash(g, w, origin, d, range, kind, info.damage, true, flash);
     if (w.type == 6) ++w.shots;
-}
-
-int16_t atan2q(int32_t x, int32_t y) {   // ATan2: atan2f(x, y) x 10430.38, clamped to int16
-    const int v = (int)(atan2f((float)x, (float)y) * 10430.378f);
-    return (int16_t)std::clamp(v, -32768, 32767);
 }
 
 // cMeleeBasedWeapon::HitStuffHelper for the player: every ped within the weapon's range (and in sight) inside
@@ -505,7 +570,7 @@ void hitStuff(Game& g, Weapon& w, int16_t angle, int pedDamage, int vehicleDamag
         const int16_t to = atan2q(a[0] - (t[0] + 2 * f[0]), (t[1] + 2 * f[1]) - a[1]);
         const int16_t diff = (int16_t)(facing - to);
         if (diff >= angle || diff <= -angle) continue;
-        g.peds.meleeHit(g, p, pedDamage, type, a);
+        g.peds.meleeHit(g, p, pedDamage, type, a, Weapons_Info(w.type).effect);
         hitPed = true;
     }
     for (Vehicle& c : g.cars) {
@@ -521,18 +586,21 @@ void hitStuff(Game& g, Weapon& w, int16_t angle, int pedDamage, int vehicleDamag
     if (w.type == 0) {   // cFistWeapon::HitSfx / HitVehicleSfx (the others' are empty or not decoded)
         if (hitPed) TheSound().playerEvent(35, 50, 200);
         if (hitCar) TheSound().playerEvent(85, 127, 200);
+    } else if (w.type == 3 && hitCar) {   // cSword::HitVehicleSfx (HitSfx for peds is empty)
+        TheSound().playerEvent(84, 127, 200);
     }
 }
 
 void fireWeapon(Game& g, Weapon& w) {   // cBulletBasedWeapon::Fire / cMeleeBasedWeapon::Fire
+    if (w.type == 16) { FlameThrower_Fire(g, w); return; }   // cFlameThrower::Fire
     if (w.state != 0) return;
     if (w.melee()) {   // the weapon's HitStuff, then the swing's timer
         const int dmg = Weapons_Info(w.type).damage;
         if (w.type == 0) hitStuff(g, w, 0x2000, dmg, 1, 0);           // cFistWeapon
         else if (w.type == 1) hitStuff(g, w, 0x2000, dmg, 3, 0);      // cNiteStick (props 3)
         else if (w.type == 2) hitStuff(g, w, 0x2000, dmg, 3, 0);      // cBaseballBat (props 12)
+        else if (w.type == 3) w.delayedHit = 7;                     // cSword::HitStuff
         else if (w.type == 4) hitStuff(g, w, 0x2000, 200, dmg, 12);   // cChainsaw (props 35)
-        // cSword::HitStuff only arms its combo (+0x14 = 7); the sword's hit is not ported yet
         w.flags = 0;
         w.setState(1, 0);
         return;
@@ -574,6 +642,7 @@ void fireWeapon(Game& g, Weapon& w) {   // cBulletBasedWeapon::Fire / cMeleeBase
 }
 
 void updateWeapon(Game& g, Weapon& w) {   // cWeapon::Update
+    if (w.type == 16) FlameThrower_Update(g, w);   // cFlameThrower::Update, then cWeapon::Update
     if (w.type == 15 && w.spin - 1 >= 0) {   // cMinigun::Update: the spin winds down, its sound follows it
         --w.spin;
         TheSound().playerEvent(79, std::min(16 * w.spin, 127), 200);
@@ -772,9 +841,20 @@ void Weapons_PlayerFrame(Game& g, bool fireHeld, int cycle, bool throwHeld) {
     gYoke.pressed = gYoke.released = false;
     // what the walk cycle reads this frame (AnimateWalkRunCycleWeapons), then cWeaponManager::ClearStateHistory
     const Weapon& c = *m.current();
+    // cPed::AnimateWalkRunCycleWeapons calls cSword::ProcessDelayedHit once per sword-swing tick, including
+    // the firing tick. Keep that simulation work here, before ClearStateHistory; Player::animate only selects
+    // the sprites. Damage uses the current position/facing at contact, so moving away can evade the swing.
+    if (c.type == 3 && g.playerCar < 0 && !g.player.dead && !g.player.attached && !g.player.reacting() &&
+        ((c.state && (c.state == 1 || !(c.flags & 1))) || (c.flags & 2))) {
+        Weapon& sword = *m.current();
+        if (sword.delayedHit && --sword.delayedHit == 0)
+            hitStuff(g, sword, 0x2000, Weapons_Info(3).damage, 3, 11);
+    }
     g.player.weaponType = c.type;
     g.player.weaponState = c.state;
     g.player.weaponFlags = c.flags;
+    // cPed::Render -> cFlameThrower::Render -> CreateGasJet; built once per tick (its Rand32Critical)
+    if (m.current()->type == 16) FlameThrower_Jet(g, *m.current());
     m.current()->flags = 0;
     if (Weapon* s = m.inSlot(m.secondary)) s->flags = 0;
 }

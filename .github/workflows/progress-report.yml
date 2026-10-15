@@ -1,0 +1,44 @@
+name: Progress report
+
+# A pull request's effect on the progress numbers, shown in the run summary and posted by progress-comment.yml.
+on:
+  pull_request:
+    paths:
+      - 'port/**'
+      - 'ctw-modkit/**'
+      - 'progress/**'
+      - 'scripts/progress.py'
+      - '.github/workflows/progress-report.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - env:
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          out=$RUNNER_TEMP/out report=$RUNNER_TEMP/report
+          git worktree add --detach "$RUNNER_TEMP/base" HEAD^1
+          python scripts/progress.py --root "$RUNNER_TEMP/base" "$out/base"
+          python scripts/progress.py "$out/head"
+          mkdir "$report"
+          echo "$PR" > "$report/pr"
+          body=$(python scripts/progress.py --compare "$out/base/progress.json" "$out/head/progress.json")
+          if [ -n "$body" ]; then
+            printf '### Progress report (%s → %s)\n\n%s\n' "$(git rev-parse --short HEAD^1)" "${HEAD_SHA::7}" "$body" > "$report/report.md"
+            cat "$report/report.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: progress-report
+          path: ${{ runner.temp }}/report

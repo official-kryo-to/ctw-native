@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 #include "radar.h"
+#include <cmath>
 #include <cstdio>
 #include <limits>
 
@@ -43,5 +44,33 @@ int main() {
     pos[0] = std::numeric_limits<int32_t>::max(); pos[1] = std::numeric_limits<int32_t>::min();
     RadarMap::worldToMap(pos, x, y);
     check(x > 0 && y > 0, "coordinate conversion widens before adding the origin and multiplying");
+    const int32_t focus[3] = {123 * 4096, -456 * 4096, 0};
+    int32_t marker[3] = {focus[0], focus[1] + 200 * 4096, 0};
+    RadarProjection northUp;
+    northUp.worldOffset(marker, focus, x, y);
+    check(x == 0 && std::fabs(y + 79.98047f) < .001f,
+          "marker projection retains native Q12 fractions instead of truncating map pixels");
+    northUp.worldOffset(marker, focus, x, y, 75.f);
+    check(x == 0 && std::fabs(y + 75.f) < .001f, "north marker clamps to the normal radar edge");
+    const RadarProjection eastCamera(0x4000);
+    eastCamera.worldOffset(marker, focus, x, y, 75.f);
+    check(std::fabs(x + 75.f) < .001f && std::fabs(y) < .001f,
+          "quarter-turn camera rotation moves north to the left edge");
+    eastCamera.mapOffset(0.f, -75.f, x, y);
+    check(std::fabs(x + 75.f) < .001f && std::fabs(y) < .001f,
+          "tile vertices and world markers share the clockwise camera convention");
+    eastCamera.mapOffset(75.f, 0.f, x, y);
+    check(std::fabs(x) < .001f && std::fabs(y + 75.f) < .001f,
+          "east moves upwards when the camera faces east");
+    marker[0] += 200 * 4096;
+    const RadarProjection diagonalCamera(0x2000);
+    diagonalCamera.worldOffset(marker, focus, x, y, 75.f);
+    check(std::fabs(x) < .01f && std::fabs(y + 75.f) < .01f,
+          "diagonal markers clamp by circular distance after rotation");
+    marker[0] = focus[0]; marker[1] = focus[1] + 10 * 4096;
+    northUp.worldOffset(marker, focus, x, y, 75.f);
+    check(x == 0 && y < -3.99f && y > -4.f, "nearby markers remain inside the circle without stretching");
+    northUp.worldOffset(focus, focus, x, y, 75.f);
+    check(x == 0 && y == 0, "the focus marker stays centred without dividing by zero");
     return failures ? 1 : 0;
 }

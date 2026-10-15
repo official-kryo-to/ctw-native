@@ -115,10 +115,16 @@ public:
     void explosion(Game& g, const struct ExplosionBlast& blast);
     // cPed::Damage for a bullet (sDamageInfo type 1): FixDamageForArmour (armour 100), the health, death, then
     // ReactToDamage (cSimpleMover::GetAction: action 0). from: the shooter's position.
-    void bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], int effect, const int32_t from[3]);
+    // Blood: type 1 (bullets) bleeds 15 drops when the armour-fixed damage is at least 5, type 2 (minigun) always.
+    void bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], int effect, const int32_t from[3], int type = 1);
     // cPed::Damage for a melee hit (sDamageInfo type 0, or 12 for the chainsaw): the health and death, the hit
     // animation roll (Rand16Critical(2): +0xEB) and ReactToDamage (action 0).
-    void meleeHit(Game& g, Ped& p, int damage, int type, const int32_t from[3]);
+    // Blood: type 0 bleeds four drops unless the weapon's effect is 0x1D, other types one (the chainsaw's
+    // type-12 cParticleEmitterBloodSpray is not ported).
+    void meleeHit(Game& g, Ped& p, int damage, int type, const int32_t from[3], int effect = 0);
+    // cPed::Damage for burning (sDamageInfo type 5, effect 0x1D): the health and death, no blood, then
+    // ReactToDamage (GetAction: type 5 is action 0). from: whoever started the fire.
+    void fireHit(Game& g, Ped& p, int damage, const int32_t from[3]);
     // cPopulationManager::GenerateRandomPed (from Game::updatePopulation): roll a type from the zone's profile and
     // create the ped at the next cLocalAreaKnowledge pavement crossing of the 60-unit circle
     void generate(Game& g, const Traffic::ZoneInfo& z);

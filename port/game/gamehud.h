@@ -15,11 +15,14 @@ public:
     bool init(const std::string& dataDir);
     void shutdown();
     void render(const Game& game, int width, int height) const;
+    void setRotation(bool enabled) { rotation_ = enabled; }
+    bool rotation() const { return rotation_; }
 private:
     void sprite(int index, float x, float y, float scale, float angle = 0.f) const;
     RadarMap map_;
     SpriteSet sprites_;
     unsigned texture_ = 0;
     int textureWidth_ = 0, textureHeight_ = 0;
+    bool rotation_ = false; // native saved preference defaults to north-up
     friend struct GameplayHudTestAccess;
 };

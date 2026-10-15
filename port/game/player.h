@@ -58,14 +58,22 @@ public:
     void advance(Collision* col, bool avoidWater = true);
     void dynamicContact(const int32_t normal[3], const int32_t otherVelocity[3], int32_t depth = 0);
     bool vehicleImpact(const class Vehicle& vehicle, const int32_t normal[3], bool isPlayer);
-    // cPed::Damage's health part (after FixDamageForArmour) and SetHealth: at 0, SetDead's effect-4 fall. True if
-    // it killed.
-    bool takeDamage(int damage);
+    // cPed::Damage / cPlayer::FixDamageForArmour, then SetHealth. Run-over damage (native kinds 8/9)
+    // bypasses the scale and armour; vehicleImpact has its own matching path. True if it killed.
+    bool takeDamage(int damage, bool bypassArmour = false);
+    void setArmour(unsigned amount);
+    void giveArmour(unsigned amount);
+    unsigned reduceArmour(unsigned damage); // unabsorbed damage, including double-armour adjustment
+    unsigned fixDamageForArmour(unsigned damage);
+    void setHasDoubleArmour(bool enabled);
+    void setDamagePercentScale(unsigned percent); // native cPed stores the low byte
+    unsigned damagePercentScale() const { return damagePercentScale_; }
+    void resetDamageState(); // health / armour part of cPlayer::Reset, including reward state
     bool explosionHit(int damage, const int32_t direction[3]); // effect 2: health first, then a high knockdown
     bool reacting() const { return reaction_ >= 0; }
     void actReaction(const PedSprites* sprites, bool vehicleAbove = false);
     void resetReaction();
-    int health = 127; // cPed::Reset; armour/combat damage are separate, still unported paths
+    int health = 127, armour = 0; // cPed::Reset / cPlayer::Reset; each bar has a maximum of 127
     // the current weapon as cPed::AnimateWalkRunCycleWeapons sees it (cWeapon Type / +0xC state / +0x10 flags)
     int weaponType = 0, weaponState = 0;
     uint32_t weaponFlags = 0;
@@ -123,5 +131,7 @@ private:
     uint32_t reactionAge_ = 0;
     uint32_t recoveryAge_ = 0;
     bool reactionForward_ = false;
+    uint8_t damagePercentScale_ = 100;
+    bool doubleArmour_ = false, armourHalfTick_ = false;
     friend struct PlayerTestAccess;
 };

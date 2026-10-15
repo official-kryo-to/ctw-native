@@ -11,7 +11,7 @@ compatibility with the original.
   blocked views and uses the original roof-edge escape and safe above-target recovery.
 - **Gameplay HUD:** the original north-up radar tiles, frame, north marker, rotating player/vehicle arrow and
   health semicircle. The map follows the controlled character or vehicle and uses the original map coordinates,
-  clipping and colours. The PC uses the phone radar size. See [HUD coverage and evidence](HUD.md).
+  clipping and colours. The PC uses the phone radar size.
   The weapon wheel pauses world sounds as well as simulation, accepts clicks completed between display frames,
   and releases its pause and textures when closed, reloaded or shut down. Multiline font drawing and measurement
   now agree; a failed font replacement preserves the loaded font.
@@ -74,7 +74,7 @@ compatibility with the original.
 ## Not there yet
 
 - Missions, save games, full combat, wanted levels and the rest of the original gameplay HUD.
-- Radar GPS routes, mission/location blips, the rotating-map setting, armour ownership and its meter, HUD fades,
+- Radar GPS routes, mission/location blips, a control for the rotating-map setting (the rotation itself is ported), armour pickups, HUD fades,
   cash and the full pause/PDA layout. The radar work is a subset of the HUD, not complete UI parity.
 - Pedestrians do not talk, fight, or use building doors or attractors.
   Traffic is cars only.
@@ -93,12 +93,11 @@ compatibility with the original.
   floor test; this does not fix the remaining waterfront mesh/collision clipping reports.
   Specialised prop smash branches, water-stream contact/extinguishing, the shared vehicle-fragment pool,
   complete carjacking reactions and traffic returning to its route after an impact remain incomplete.
-  See the [destruction and traffic audit](DESTRUCTION.md) for the measured coverage and remaining differences.
 - Scripted, aiming and specialised cameras, shake through camera-mode/death transitions, and the hidden-player
   visibility aid.
 - Boats, the jet ski, helicopters and the tank.
 - The SDK covers what is ported (v10 adds giving the player weapons, v11 switching them); wanted levels, missions, saves and custom audio remain unavailable.
-- Weapons: the weapon table, cWeaponManager (slots, switching, ammo and clips, reloads), the weapon wheel and HUD button, and firing for the pistols, SMGs, shotguns, rifles and the minigun (accuracy spread, wall hits, peds and vehicles hit, damage and deaths, bullet traces, fire sounds); fists, nightstick, bat and chainsaw hits; the original auto-aim (cPlayerSensorCone: target priorities and distance bands, the 45-degree fire cone, the turning fire direction and the target marker); the RPG, grenades, molotovs, flash bangs and proximity mines (cBaseProjectile physics, bounces, fuses, the throw power and its arc, explosion types 0 to 3). Not yet: the flame thrower, sniper rifle, taser and sword, molotov fires, the flash bang's daze, water splashes, the gamepad lock-on and target cycling, muzzle flashes, blood, hit reactions, AI peds with guns and pickups.
+- Weapons: the weapon table, cWeaponManager (slots, switching, ammo and clips, reloads), the weapon wheel and HUD button, and firing for the pistols, SMGs, shotguns, rifles and the minigun (accuracy spread, wall hits, peds and vehicles hit, damage and deaths, bullet traces, fire sounds); fists, nightstick, bat and chainsaw hits; the original auto-aim (cPlayerSensorCone: target priorities and distance bands, the 45-degree fire cone, the turning fire direction and the target marker); the RPG, grenades, molotovs, flash bangs and proximity mines (cBaseProjectile physics, bounces, fuses, the throw power and its arc, explosion types 0 to 3); the sword's delayed swing hit; cMuzzleFlashes (per-weapon flash type, size and jitter, drawn additively); wall ricochet sounds (AddRicochet); armour absorption and the radar's armour arc; blood drops (cParticleEmitterBlood) for bullet, minigun, melee and run-over damage; the flamethrower (its pilot light, flame particles, smoke and setting people and vehicles on fire); burning (cFire: burning people take damage until they die, vehicle fires, molotov ground fires and petrol flames that ignite whoever walks into them). Not yet: the sniper rifle and taser, the sword's prop hits and swing sounds, the chainsaw's blood spray, fire sounds, the flash bang's daze, water splashes, the gamepad lock-on and target cycling, hit reactions, AI peds with guns and pickups. Muzzle flashes stay up for one simulation tick (the original clears them after one 30 Hz draw).
   Character model overrides work for mobile DFF/ANPK/PVR assets; general model/material/shader interfaces and
   rigid object spawning are still missing.
 - The third-person camera and imported LCS people are PC additions. The donor roster uses Toni and LCS civilian

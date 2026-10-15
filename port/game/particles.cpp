@@ -627,6 +627,11 @@ void Particles::remove(const Emitter* e) {
         if (p.get() == e) p->dying = true;
 }
 
+bool Particles::contains(const Emitter* e) const {
+    for (const auto& p : emitters_) if (p.get() == e) return true;
+    return false;
+}
+
 void Particles::update(uint32_t frame, uint32_t hours, const int32_t* playerPos) {
     // Complex explosions can add smoke during Process. Heap objects stay stable if the vector grows.
     const size_t count = emitters_.size();
@@ -719,7 +724,73 @@ void Particles::render(const WorldCamera& cam) const {
     glDisable(GL_TEXTURE_2D);
 }
 
-void DrawSheetSprite(int sprite, uint32_t c, const float p[3], const float ax[3], const float ay[3], float sx, float sy) {
+// ============================================================================================== petrol flame
+
+void PetrolFlameEmitter::addParticle() {   // cParticleEmitterPetrolFlame::AddParticle
+    if (!init_) {
+        tmpl_.alpha = 0;
+        tmpl_.colour = 0x7D4A;
+        init_ = true;
+    }
+    tmpl_.spin = 0;
+    tmpl_.p[2] = (int16_t)(tmpl_.p[2] + 0x800);
+    tmpl_.v[2] = (int16_t)(tmpl_.v[2] + 0x19A);
+    tmpl_.angle = (uint16_t)Rand16NonCritical(0x10000);
+    tmpl_.size = (int16_t)((size_ * inv_) >> 10);
+    tmpl_.grow = (int16_t)(-((inv_ * 0x800) >> 12));
+    tmpl_.life = (uint16_t)(Rand16NonCritical(10) + 0x19);   // SetStandardDataLifeTime
+    // the template is scaled in place, so its position and climb shrink towards a fixed point
+    for (int k = 0; k < 3; ++k) {
+        tmpl_.p[k] = (int16_t)((tmpl_.p[k] * inv_) >> 12);
+        tmpl_.v[k] = (int16_t)((tmpl_.v[k] * inv_) >> 12);
+    }
+    tmpl_.alphaStep = 3;
+    addFromData(tmpl_);
+}
+
+void PetrolFlameEmitter::updateParticle(Particle& q) {
+    Emitter::updateParticle(q);
+    if (q.size < 1) {
+        q.life = 0;
+        q.active = 0;
+        --alive_;
+    }
+    if ((int8_t)q.alpha > 7) q.alphaStep = -2;
+}
+
+// ============================================================================================== blood
+
+void BloodEmitter::addParticle(const int32_t victim[3]) {   // cParticleEmitterBlood::AddParticle(cSimpleMover*)
+    if (!init_) {   // SetStandardDataLifeTime(0x14) and the rest of the template, once
+        tmpl_ = Particle{};
+        tmpl_.life = 0x14;
+        tmpl_.grow = 0;
+        tmpl_.spin = 0x800;
+        tmpl_.colour = 0x040D;   // RGB555: dark red
+        tmpl_.alpha = 0x1D;
+        tmpl_.size = (int16_t)((uint32_t)(inv_ * 0x19A) >> 12);
+        tmpl_.v[2] = (int16_t)((uint32_t)(inv_ * 0x666) >> 12);
+        init_ = true;
+    }
+    int32_t rel[3];
+    for (int k = 0; k < 3; ++k) rel[k] = (int32_t)((uint64_t)((int64_t)inv_ * (victim[k] - pos[k])) >> 12);
+    for (int k = 0; k < 3; ++k)   // DoesV3dOverflowV3d16 with the unscaled size 0x333
+        if (std::abs((rel[k] + 0x333) >> 12) > 6) return;
+    for (int k = 0; k < 3; ++k) tmpl_.p[k] = (int16_t)rel[k];
+    tmpl_.v[0] = (int16_t)(randNC(0x334) - 0x19A);
+    tmpl_.v[1] = (int16_t)(randNC(0x334) - 0x19A);
+    tmpl_.v[2] = (int16_t)(randNC(0xA4) + 0x52);
+    const int16_t angle = (int16_t)(Rand16NonCritical(0x1000) - 0x800);
+    tmpl_.angle = (uint16_t)angle;
+    tmpl_.spin = angle;
+    for (int k = 0; k < 3; ++k) tmpl_.v[k] = (int16_t)((uint32_t)(tmpl_.v[k] * inv_) >> 12);
+    tmpl_.size = (int16_t)((uint32_t)(0x333 * inv_) >> 12);
+    tmpl_.grow = (int16_t)((uint32_t)(tmpl_.grow * inv_) >> 12);
+    addFromData(tmpl_);
+}
+
+void DrawSheetSprite(int sprite, uint32_t c, const float p[3], const float ax[3], const float ay[3], float sx, float sy,
+                     bool additive) {
     int texture; uint16_t r[4];
     if (!Assets_EffectSprite(sprite, texture, r)) return;
     GLuint tex = Assets_Texture(texture);
@@ -728,7 +799,7 @@ void DrawSheetSprite(int sprite, uint32_t c, const float p[3], const float ax[3]
     float u0 = r[0] / (float)tw, v0 = r[1] / (float)th, u1 = (r[0] + r[2]) / (float)tw, v1 = (r[1] + r[3]) / (float)th;
     if (tex) { glEnable(GL_TEXTURE_2D); glBindTexture(GL_TEXTURE_2D, tex); } else glDisable(GL_TEXTURE_2D);
     glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFunc(GL_SRC_ALPHA, additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
     glDepthMask(GL_FALSE);
     glDisable(GL_LIGHTING);
     glDisable(GL_CULL_FACE);

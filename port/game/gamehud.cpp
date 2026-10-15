@@ -24,15 +24,15 @@ void disc(float x, float y, float r) {
     }
     glEnd();
 }
-void healthArc(float x, float y, float inner, float outer, int health) {
-    // RenderRadar uses a 64-sided fan; health fills the left half from twelve o'clock towards six.
-    const int steps = (std::clamp(health, 0, 127) * 0x20420) >> 19;
+void meterArc(float x, float y, float inner, float outer, int value, float side) {
+    // RenderRadar mirrors its health fan for armour; both fill from twelve towards six.
+    const int steps = (std::clamp(value, 0, 127) * 0x20420) >> 19;
     glBegin(GL_TRIANGLE_STRIP);
     for (int i = 0; i <= steps; ++i) {
         const float a = i * (2.f * pi / 64.f);
         const float s = std::sin(a), c = std::cos(a);
-        glVertex2f(x - s * inner, y - c * inner);
-        glVertex2f(x - s * outer, y - c * outer);
+        glVertex2f(x + side * s * inner, y - c * inner);
+        glVertex2f(x + side * s * outer, y - c * outer);
     }
     glEnd();
 }
@@ -102,7 +102,8 @@ void GameplayHud::render(const Game& game, int width, int height) const {
     int32_t pos[3]; game.focus(pos);
     float mx, my;
     RadarMap::worldToMap(pos, mx, my);
-    // The save-game rotation setting defaults to north-up. The player marker still follows his heading.
+    const uint16_t yaw = rotation_ ? game.cameraYaw() : 0;
+    const RadarProjection projection(yaw);
     glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT | GL_CURRENT_BIT | GL_TEXTURE_BIT);
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_ALPHA_TEST);
@@ -110,7 +111,9 @@ void GameplayHud::render(const Game& game, int width, int height) const {
     glColor4f(0, 0, 0, .4f);
     disc(cx, cy, rim);
     glColor4f(.32f, .48f, .32f, 1.f);
-    healthArc(cx, cy, radius, rim, game.player.health);
+    meterArc(cx, cy, radius, rim, game.player.health, -1.f);
+    glColor4f(.2f, .44f, .61f, 1.f);
+    meterArc(cx, cy, radius, rim, game.player.armour, 1.f);
 
     // Isolate the map in a circular stencil; never reuse or overwrite the world's depth buffer.
     glEnable(GL_STENCIL_TEST);
@@ -147,7 +150,9 @@ void GameplayHud::render(const Game& game, int width, int height) const {
             glBegin(GL_QUADS);
             for (int v = 0; v < 4; ++v) {
                 glTexCoord2f(v == 1 || v == 2 ? 1.f : 0.f, v >= 2 ? 1.f : 0.f);
-                glVertex2f(cx + px[v] * k, cy + py[v] * k);
+                float x, y;
+                projection.mapOffset(px[v], py[v], x, y);
+                glVertex2f(cx + x * k, cy + y * k);
             }
             glEnd();
         }
@@ -155,7 +160,10 @@ void GameplayHud::render(const Game& game, int width, int height) const {
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_STENCIL_TEST);
     const int16_t heading = game.playerCar >= 0 ? game.cars[game.playerCar].heading() : game.player.heading();
-    sprite(108, cx, cy, k, heading * (2.f * pi / 65536.f));
-    sprite(107, cx, cy - diameter * .5f * k, k);
+    sprite(108, cx, cy, k, (int16_t)(heading - yaw) * (2.f * pi / 65536.f));
+    int32_t north[3] = {pos[0], pos[1] + 200 * 4096, pos[2]};
+    float nx, ny;
+    projection.worldOffset(north, pos, nx, ny, diameter * .5f);
+    sprite(107, cx + nx * k, cy + ny * k, k);
     glPopAttrib();
 }

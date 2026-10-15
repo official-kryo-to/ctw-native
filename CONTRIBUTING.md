@@ -41,6 +41,25 @@ port/build/GTACTW.exe --data port/data --shot port/build/check.bmp --frames 60
 port/build/ctw_showcase.exe --data port/data --world -1000 -1590 80 --pitch -55 --shot port/build/showcase.bmp
 ```
 
+## Progress
+
+The [progress map](https://official-kryo-to.github.io/ctw-native/progress.html) counts the original routines the
+port has ported, weighted by code size. A routine counts once the source names it as `Class::Method`, so name every
+routine you port that way in its comment, for example `// cMuzzleFlashes::Add`. Name a routine only when its
+behaviour is ported, not when you merely call or mention it.
+
+`progress/reference.json` lists the original routines: class names, code sizes and a short hash of each
+`Class::Method` name, with no code and no readable method names. It only changes when the classification in
+`scripts/progress.py` changes; rebuild it from your own APK with `python scripts/progress.py --index`.
+
+```text
+python scripts/progress.py port/build/site            # badges, progress.svg, progress.html
+python scripts/progress_history.py port/build/site    # history.svg and history.html
+```
+
+On every push to main, the Progress workflow publishes both to GitHub Pages. Each pull request gets a comment
+with its change in the numbers.
+
 ## The Porter
 
 `porter/core` is the Rust port of `scripts/setup_game.py`, `apk_manifest.py`, `extract_tables.py` and

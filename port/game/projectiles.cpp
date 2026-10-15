@@ -128,6 +128,12 @@ const Model* model(int id) {
 }
 }   // namespace
 
+bool Projectiles_SphereStatics(Collision& col, const int32_t a[3], const int32_t b[3], int32_t r, int32_t contact[3],
+                               int32_t n[3]) {
+    bool water = false;
+    return sphereStatics(col, a, b, r, false, contact, n, water);
+}
+
 void Projectiles::clear() { list_.clear(); lastMine_ = 0; }
 void Projectiles::launchVelocity(const int32_t dir[3], int32_t power, int32_t out[3]) { initialVelocity(dir, power, out); }
 

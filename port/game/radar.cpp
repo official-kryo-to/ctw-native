@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 #include "radar.h"
+#include <cmath>
 #include <cstring>
 
 bool RadarMap::load(const std::vector<uint8_t>& data) {
@@ -31,4 +32,30 @@ void RadarMap::worldToMap(const int32_t pos[3], float& x, float& y) {
     // cRadar::RenderRadar / WorldPosToRadarOffset: the map's 0x666 Q12 scale and world origin.
     x = (float)((((int64_t)pos[0] + 3540LL * 4096) * 0x666) >> 24);
     y = (float)(((2520LL * 4096 - (int64_t)pos[1]) * 0x666) >> 24);
+}
+
+RadarProjection::RadarProjection(uint16_t cameraYaw) {
+    // cHudApp::Process calls cRadar::Rotate with the negative active camera yaw.
+    const int angle = (int16_t)(uint16_t)(0u - cameraYaw);
+    sine_ = (int32_t)(std::sin(angle * 9.587378e-05f) * 4096.f);
+    cosine_ = (int32_t)(std::sin((angle + 0x4000) * 9.587378e-05f) * 4096.f);
+}
+
+void RadarProjection::mapOffset(float dx, float dy, float& x, float& y) const {
+    x = (dx * cosine_ - dy * sine_) / 4096.f;
+    y = (dx * sine_ + dy * cosine_) / 4096.f;
+}
+
+void RadarProjection::worldOffset(const int32_t pos[3], const int32_t focus[3],
+                                  float& x, float& y, float radius) const {
+    // GetRadarSpaceFromWorldSpace retains Q12 fractions for markers, unlike the tile origin.
+    const int64_t dx = (((int64_t)pos[0] - focus[0]) * 0x666) >> 12;
+    const int64_t dy = -((((int64_t)pos[1] - focus[1]) * 0x666) >> 12);
+    x = (float)((dx * cosine_ - dy * sine_) >> 12) / 4096.f;
+    y = (float)((dx * sine_ + dy * cosine_) >> 12) / 4096.f;
+    const float length = std::hypot(x, y);
+    if (radius > 0.f && length > radius) {
+        x *= radius / length;
+        y *= radius / length;
+    }
 }

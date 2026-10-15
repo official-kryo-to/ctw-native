@@ -69,3 +69,7 @@ private:
     void destroy(Game& g, Projectile& p);
     void onCollision(Game& g, Projectile& p, const int32_t normal[3], int entity, bool water);
 };
+
+// CCollision::GetSphereCollision against the statics (0xF00): the earliest contact of a sphere moving a -> b.
+bool Projectiles_SphereStatics(class Collision& col, const int32_t a[3], const int32_t b[3], int32_t r,
+                               int32_t contact[3], int32_t n[3]);
