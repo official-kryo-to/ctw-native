@@ -445,6 +445,29 @@ void Sound::scriptSfx(const int32_t pos[3], int sample, int volume, int radius) 
     }
 }
 
+int Sound::loopingScriptSfx(const int32_t pos[3], int sample, int volume, int radius) {
+    if (!ok()) return -1;
+    for (int i = 0; i < 8; ++i) {
+        Entity& e = script_[i];
+        if (e.s[0].event != 0x9C) continue;
+        std::copy(pos, pos + 3, e.pos);
+        return addEvent(e, 0x2E, volume, radius, sample) < 0 ? -1 : i;
+    }
+    return -1;
+}
+
+void Sound::scriptLoop(int handle, const int32_t pos[3], int volume) {
+    if (handle < 0 || handle >= 8) return;
+    Entity& e = script_[handle];
+    std::copy(pos, pos + 3, e.pos);
+    for (Slot& s : e.s)
+        if (s.event == 0x2E) { s.active = true; s.volume = volume; }
+}
+
+void Sound::stopScriptSfx(int handle) {
+    if (handle >= 0 && handle < 8) stopSlots(script_[handle]);
+}
+
 void Sound::playerEvent(int event, int volume, int radius) {
     if (ok()) addEvent(ped_, event, volume, radius, -1);
 }

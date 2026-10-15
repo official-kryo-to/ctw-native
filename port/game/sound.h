@@ -37,6 +37,11 @@ public:
     void waterStream(uint32_t id, const int32_t pos[3], int volume); // cannon event 0x6C, refreshed each tick
     void playerEvent(int event, int volume, int radius);           // AddSoundEvent on the player ped (weapons)
     void scriptSfx(const int32_t pos[3], int sample, int volume, int radius);   // cAudioManager::PlayScriptSfx
+    // cAudioManager::PlayLoopingScriptSfx: event 0x2E on a free script slot; the slot (or -1). scriptLoop keeps it
+    // playing, moves it and sets its volume each frame; stopScriptSfx frees it (StopLoopingScriptSfx).
+    int loopingScriptSfx(const int32_t pos[3], int sample, int volume, int radius);
+    void scriptLoop(int handle, const int32_t pos[3], int volume);
+    void stopScriptSfx(int handle);
     // AddSoundEvent on a short-lived object (projectiles): objectTick keeps it alive and moves it each frame
     void objectEvent(uint32_t id, const int32_t pos[3], int event, int volume, int radius);
     void objectTick(uint32_t id, const int32_t pos[3]);

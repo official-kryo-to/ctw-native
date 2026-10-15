@@ -668,9 +668,17 @@ void Game::shakeNearExplosion(const int32_t at[3]) {
 void Game::processTimeCycle() {   // cTimeCycle::Process: the clock, the weather each hour, rain and lightning
     TimeCycle& tc = world.timeCycle();
     if (clockRunning) {
-        const uint32_t hour = tc.time() >> 12;
+        const uint32_t before = tc.time();
         tc.advanceFrames(1);
-        if (tc.time() >> 12 != hour) weather.hourChanged(*this);
+        const uint32_t now = tc.time();
+        if (now >> 12 != before >> 12) {   // the end of an hour
+            weather.hourChanged(*this);
+            stats.processEndOfHour(0);   // cStatsManager::ProcessEndOfHour (the wanted level is not ported: 0)
+            if (now < before) stats.incDaysPassedInGame();   // past midnight
+        }
+        // the minute changed: cStatsManager::UpdateTime by the minutes passed
+        const uint32_t m0 = (before & 0xFFF) * 60 >> 12, m1 = (now & 0xFFF) * 60 >> 12;
+        if (m1 != m0) stats.updateTime((int)(m1 > m0 ? m1 - m0 : m1 - m0 + 60));
         tc.evaluate();
     }
     weather.tick(*this);
@@ -693,6 +701,7 @@ void Game::finishShortFrame() {
 
 void Game::updateDeath() {
     ++deathFrames_;
+    if (deathFrames_ == 1) stats.incNumberOfTimesWasted();   // cDeathArrestWatcher::PlayerWasted
     auto approach = [](int32_t& value, int32_t target, int step) { value += std::clamp(target - value, -step, step); };
     if (!deathCameraSettled_) {
         approach(deathEye_[0], player.pos[0], 0x1000);
@@ -721,7 +730,9 @@ void Game::updateDeath() {
         player.resetReaction();
         camera.reset(player.pos, player.heading());
         world.loadAllNow(player.pos[0] / 4096.f, player.pos[1] / 4096.f);
+        const uint32_t before = world.timeCycle().time();
         world.timeCycle().advanceFrames(6 * 60 * 30);
+        if (world.timeCycle().time() < before) stats.incDaysPassedInGame();   // cTimeCycle::AdvanceTime past midnight
     }
 }
 
@@ -826,6 +837,7 @@ void Game::tick() {
         updatePopulation();
         sprintHeld_ = false;
         world.tick();
+        Stats_PlayerProcess(*this);
         processTimeCycle();
         if (!freeCam.on) world.stream(me.pos[0] / 4096.f, me.pos[1] / 4096.f, 2);
         carGens.update(*this);
@@ -908,6 +920,7 @@ void Game::tick() {
     updateSectors();
     updatePopulation();
     world.tick();
+    Stats_PlayerProcess(*this);
     processTimeCycle();
     float p[3];
     player.posf(p);

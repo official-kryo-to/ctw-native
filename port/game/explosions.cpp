@@ -146,5 +146,6 @@ bool Game::queueExplosion(const Explosion& explosion) {
         }
     }
     explosions_.push_back(explosion);
+    if (explosion.type != 8 && explosion.type != 9) stats.incExplosions();   // Explosion::AddExplosion
     return true;
 }

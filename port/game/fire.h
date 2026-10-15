@@ -8,13 +8,16 @@
 // frame; below 3 it goes out. A burning ped (cPed::SetOnFire: 480, or 0x1E0 when set on fire by someone) takes one
 // point of type-5 damage (effect 0x1D) every second frame, the player every fourth, until the fire dies or the ped
 // is in water. cVehicle::SetOnFire attaches a style-2 fire (style 4 for vehicle types 4 and 5) for 300 frames,
-// 0.45 x the half length towards the engine and 0.25 up.
+// 0.45 x the half length towards the engine (front or back) and 0.25 up.
 //
-// Loose fires (molotovs) slide with their velocity, damped to 90% above 0.1 units a second; falling ones get gravity.
+// Loose fires (molotovs) slide with their velocity, damped to 90% above 0.1 units a second, until a wall stops them;
+// falling ones get gravity.
 // Their first Process removes them over water. Whatever touches one (2 units plus its own radius) catches fire.
 //
-// Not ported yet: the fire sound (cAudioManager::AddFireSfx), wall collisions of sliding fires, water hits, the
-// burnt colours and scripted fire styles 3, 5 and 6.
+// A new fire takes one of three looping fire sounds (resident sample 0x1ED, squared radius 500), or the one of the
+// farthest fire if that is farther than the new one; sounds fade in and out by 10 volume steps a frame.
+//
+// Not ported yet: water hits, the burnt colours, style 5's smoke and the scripted fire styles.
 #pragma once
 #include <cstdint>
 #include <vector>
@@ -48,6 +51,7 @@ public:
         bool groundChecked = false;      // +0x150 bit 6 cleared by the first Process
         Flame flames[3] = {};
         bool out = false;
+        uint32_t id = 0;                 // (the port's stand-in for the cFire pointer the fire sounds hold)
     };
 
     // cFire::cFire(pos, owner, life, style, emitter, petrol, ...); false when 30 fires already burn
@@ -62,6 +66,14 @@ public:
     void clear();
     const std::vector<Fire>& list() const { return fires_; }
 private:
+    // cAudioManager's three fire sounds (+0x2F58, stride 0x18): the fire, the script sound, the state (0 fading
+    // in, 1 playing, 2 fading out), a 20-frame hold and the volume
+    struct FireSfx { uint32_t fire = 0; int handle = -1, state = 0; uint8_t timer = 0, volume = 0; int32_t pos[3]{}; };
+    FireSfx sfx_[3];
+    uint32_t nextId_ = 0;
+    void addSfx(Game& g, const Fire& f);   // cAudioManager::AddFireSfx
+    void removeSfx(const Fire& f);         // cAudioManager::RemoveFireSfx
+    void processSfx();                     // cAudioManager::ProcessFireSfx
     void processFire(Game& g, Fire& f);
     void ignite(Game& g, const Fire& f);   // cFire::OnCollision: whatever touches a loose fire catches it
     std::vector<Fire> fires_;

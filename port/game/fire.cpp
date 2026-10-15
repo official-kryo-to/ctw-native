@@ -4,6 +4,7 @@
 #include "fire.h"
 #include "game.h"
 #include "particles.h"
+#include "projectiles.h"
 #include "random.h"
 #include "sound.h"
 #include "gfx/assets.h"
@@ -35,7 +36,6 @@ bool attachedPos(const Game& g, const Fires::Fire& f, int32_t out[3]) {
 
 Fires::Fire* Fires::start(Game& g, const int32_t pos[3], Attach attach, uint32_t uid, int16_t life, int style,
                           bool emitter, bool byPlayer, const int32_t offset[3], bool petrol) {
-    (void)g;
     if ((int)fires_.size() + 1 > kMaxFires) return nullptr;
     Fire f;
     std::copy(pos, pos + 3, f.pos);
@@ -62,8 +62,68 @@ Fires::Fire* Fires::start(Game& g, const int32_t pos[3], Attach attach, uint32_t
     f.petrol = petrol;
     if (petrol) f.petrolEmitter = TheParticles().add<PetrolFlameEmitter>(pos, f.sx);
     for (Flame& fl : f.flames) { fl = Flame{}; fl.rate = 0x1000; }
+    f.id = ++nextId_;
     fires_.push_back(f);
+    addSfx(g, fires_.back());
     return &fires_.back();
+}
+
+void Fires::addSfx(Game& g, const Fire& f) {   // cAudioManager::AddFireSfx
+    for (FireSfx& s : sfx_) {
+        if (s.fire) continue;
+        // a free sound: PlayLoopingScriptSfx(0x1ED, volume 10, the fire, squared radius 500), fading in
+        s.handle = TheSound().loopingScriptSfx(f.pos, 0x1ED, 10, 500);
+        if (s.handle == -1) return;
+        s.fire = f.id; s.state = 0; s.timer = 0x14; s.volume = 10;
+        std::copy(f.pos, f.pos + 3, s.pos);
+        return;
+    }
+    // all three in use: the farthest fire farther from the listener than this one, and not taken over within the
+    // last 20 frames, hands its sound over at full volume
+    int32_t ear[3];
+    g.focus(ear);
+    auto dist = [&](const int32_t p[3]) {
+        const int64_t dx = p[0] - ear[0], dy = p[1] - ear[1], dz = p[2] - ear[2];
+        return (uint32_t)((uint64_t)(dx * dx + dy * dy + dz * dz) >> 24);
+    };
+    const uint32_t mine = dist(f.pos);
+    int best = -1;
+    uint32_t farthest = 99999;
+    for (int i = 0; i < 3; ++i) {
+        const uint32_t d = dist(sfx_[i].pos);
+        if (mine < d && d < farthest && sfx_[i].timer == 0) { best = i; farthest = d; }
+    }
+    if (best < 0) return;
+    FireSfx& s = sfx_[best];
+    s.fire = f.id; s.state = 1; s.timer = 0x14; s.volume = 100;
+    std::copy(f.pos, f.pos + 3, s.pos);
+}
+
+void Fires::removeSfx(const Fire& f) {   // cAudioManager::RemoveFireSfx (~cFire): the sound fades out
+    for (FireSfx& s : sfx_)
+        if (s.fire == f.id && s.state != 2) { s.state = 2; return; }
+}
+
+void Fires::processSfx() {   // cAudioManager::ProcessFireSfx
+    for (FireSfx& s : sfx_) {
+        if (!s.fire) continue;
+        if (s.timer) --s.timer;
+        if (s.state == 2) {
+            if (s.volume <= 10) {
+                TheSound().stopScriptSfx(s.handle);
+                s.fire = 0; s.timer = 0; s.handle = -1;
+                continue;
+            }
+            s.volume = (uint8_t)(s.volume - 10);
+        } else if (s.state == 0 && s.volume < 100) {
+            const uint8_t v = s.volume;
+            s.volume = (uint8_t)(v + 10);
+            if (v > 0x59) s.state = 1;
+        }
+        for (const Fire& f : fires_)   // (a fire that went out keeps its last position)
+            if (f.id == s.fire) { std::copy(f.pos, f.pos + 3, s.pos); break; }
+        if (s.handle != -1) TheSound().scriptLoop(s.handle, s.pos, s.volume);
+    }
 }
 
 void Fires::molotov(Game& g, const int32_t pos[3], bool byPlayer) {
@@ -105,8 +165,23 @@ void Fires::ignite(Game& g, const Fire& f) {
 
 void Fires::processFire(Game& g, Fire& f) {   // cFire::Process
     if (f.attach != None && !attachedPos(g, f, f.pos)) f.out = true;   // AttachLinkRemoved
-    if (f.attach == None)   // cObject::Process: the loose fire moves with its velocity
-        for (int k = 0; k < 3; ++k) f.pos[k] += (int32_t)((17LL * f.vel[k]) >> 9);
+    if (f.attach == None) {   // cObject::Process: the loose fire moves with its velocity
+        int32_t step[3];
+        for (int k = 0; k < 3; ++k) step[k] = (int32_t)((17LL * f.vel[k]) >> 9);
+        // its 2-unit collision sphere collides against the statics (SetCollideAgainstFlags 0xF06): a wall stops
+        // the slide. (The integrator's contact response is approximated: the sphere is swept 2.25 units up so the
+        // ground does not count, and a wall hit zeroes the horizontal velocity.)
+        if (step[0] || step[1]) {
+            const int32_t a[3] = {f.pos[0], f.pos[1], f.pos[2] + 0x2400};
+            const int32_t b[3] = {a[0] + step[0], a[1] + step[1], a[2]};
+            int32_t contact[3], n[3];
+            if (Projectiles_SphereStatics(g.collision, a, b, 0x2000, contact, n) && std::abs(n[2]) < 0x800) {
+                step[0] = step[1] = 0;
+                f.vel[0] = f.vel[1] = 0;
+            }
+        }
+        for (int k = 0; k < 3; ++k) f.pos[k] += step[k];
+    }
     if (!f.groundChecked) {   // the first Process: a loose fire over water goes out
         f.groundChecked = true;
         if (f.attach == None &&
@@ -200,8 +275,12 @@ void Fires::process(Game& g) {
                 if (p.body.dead || p.deadFrames >= 0) { f.out = true; break; }
                 if (g.frame & 1) break;
                 const int32_t from[3] = {f.pos[0], f.pos[1], f.pos[2]};
+                const int subtype = p.subtype;
                 g.peds.fireHit(g, p, 1, f.byPlayer ? g.player.pos : from);
-                if (p.body.dead || p.deadFrames >= 0) f.out = true;
+                if (p.body.dead || p.deadFrames >= 0) {
+                    f.out = true;
+                    if (f.byPlayer) Stats_PedKilledByPlayer(g, subtype);   // cPed::HandlePreDead: the fire's owner
+                }
                 break;
             }
         }
@@ -210,8 +289,10 @@ void Fires::process(Game& g) {
         if (!f.out) continue;
         if (f.emitter && TheParticles().contains(f.emitter)) f.emitter->dying = true;
         if (f.petrolEmitter && TheParticles().contains(f.petrolEmitter)) f.petrolEmitter->dying = true;
+        removeSfx(f);
     }
     fires_.erase(std::remove_if(fires_.begin(), fires_.end(), [](const Fire& f) { return f.out; }), fires_.end());
+    processSfx();
 }
 
 void Fires::render(const WorldCamera& cam) const {   // cFire::ManagedRender, in the additive pass
@@ -244,6 +325,10 @@ void Fires::clear() {
         if (f.petrolEmitter && TheParticles().contains(f.petrolEmitter)) f.petrolEmitter->dying = true;
     }
     fires_.clear();
+    for (FireSfx& s : sfx_) {   // cAudioManager::StopAllFireSfx
+        if (s.fire) TheSound().stopScriptSfx(s.handle);
+        s = FireSfx{};
+    }
 }
 
 bool Fires_PedOnFire(const Game& g, uint32_t uid) { return g.fires.burning(Fires::Ped, uid); }
@@ -262,8 +347,9 @@ void Fires_SetVehicleOnFire(Game& g, Vehicle& car) {   // cVehicle::SetOnFire ->
     if (g.fires.burning(Fires::Car, car.uid)) return;
     const int type = car.infoId >= 0 && car.infoId < (int)g.vehicleInfos.size() ? g.vehicleInfos[car.infoId].type() : 0;
     const int style = (type & 0xFFFE) == 4 ? 4 : 2;
-    // towards the engine (cVehicle +0x94C bit 4 selects the rear; front-engined is assumed) and 0.25 up
-    const int32_t offset[3] = {0, (int32_t)(((int64_t)car.hy * 0x733) >> 12), 0x400};
+    // 0.45 x the half length towards the engine (cVehicle +0x94C bit 4: at the back) and 0.25 up
+    const int32_t y = (int32_t)(((int64_t)car.hy * 0x733) >> 12);
+    const int32_t offset[3] = {0, car.rearEngine() ? -y : y, 0x400};
     int32_t at[3];
     car.localToWorld(offset, at);
     g.fires.start(g, at, Fires::Car, car.uid, 300, style, true, true, offset);

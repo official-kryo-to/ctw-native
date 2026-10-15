@@ -25,6 +25,7 @@
 #include "weapons.h"
 #include "particles.h"
 #include "fire.h"
+#include "stats.h"
 #include "projectiles.h"
 #include "targeting.h"
 #include "world/worldrenderer.h"
@@ -80,6 +81,7 @@ public:
     MuzzleFlashes muzzleFlashes;             // cMuzzleFlashes
     BloodEmitter* blood = nullptr;           // LocalGeneralParticles' cParticleEmitterBlood
     Fires fires;                             // cFire
+    Stats stats;                             // gStatsManager (cStatsManager)
     PlayerTargeting targeting;               // the player's auto-aim (cPlayerSensorCone, targeting.cpp)
     Projectiles projectiles;                 // grenades, molotovs, flashbangs, mines and rockets (projectiles.cpp)
     int weaponCycle = 0;                     // input: -1 previous / +1 next weapon this frame

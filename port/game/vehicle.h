@@ -105,6 +105,9 @@ public:
     // on rails (cWanderRoads): upright at (x, y, z) facing dir (Q12 unit), moving at speed along it
     void placeOnRail(int32_t x, int32_t y, int32_t z, const int32_t dir[2], int32_t speed);
     int32_t boundRadius() const;          // cSimpleMover +0x68 (SetCollisionPrimitiveBox: |half size|)
+    // cVehicle +0x94C bit 4 (cWheeledVehicle: the info +0x110 node lies behind the centre): the bonnet and engine
+    // are at the back
+    bool rearEngine() const { return bootReverse_; }
     bool keep = false;        // not removed when far away (the player's car)   // cSeats: who sits where (-2 = the player)
 
     // entity matrix (cEntity +0x3C): rows right, forward, up (Q12), position +0x50

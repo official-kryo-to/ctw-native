@@ -467,7 +467,11 @@ void Pedestrians::runOver(Game& g, Ped& p) {
             TheSound().collision(v, std::min(127, v.speed() >> 10));
             Plugins_EmitEvent(CTW_EVENT_PED_KNOCKED_DOWN, v.uid, v.infoId, (int)p.uid);
         }
-        if (!wasDead && p.body.dead) TheSound().pedDeath(p.body.pos, p.male, false);
+        if (!wasDead && p.body.dead) {
+            TheSound().pedDeath(p.body.pos, p.male, false);
+            // cPed::HandlePreDead: a kill by the player's vehicle counts as the player's
+            if (g.playerCar >= 0 && &v == &g.cars[g.playerCar]) Stats_PedKilledByPlayer(g, p.subtype);
+        }
     }
 }
 
@@ -592,10 +596,16 @@ void Pedestrians::meleeHit(Game& g, Ped& p, int damage, int type, const int32_t 
         p.deadFrames = 0;
         p.rollFrames = -1;
         TheSound().pedDeath(p.body.pos, p.male, false);
+        Stats_PedKilledByPlayer(g, p.subtype);   // cPed::HandlePreDead
+        if (type == 0) Rand32Critical(100);
+        Stats_PlayerDamage(g, 0, type, effect);
         Plugins_EmitEvent(CTW_EVENT_PED_KNOCKED_DOWN, 0, -1, (int)p.uid);
         return;
     }
     react(g, p, 0, from, 0);   // GetAction: types 0 and 12 are action 0
+    // after HelperForRegisteringCrimesDoneToThisPed cPed::Damage rolls (and discards) Rand32Critical(100) for type 0
+    if (type == 0) Rand32Critical(100);
+    Stats_PlayerDamage(g, p.body.health, type, effect);
 }
 
 void Pedestrians::bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], int effect, const int32_t from[3],
@@ -603,6 +613,7 @@ void Pedestrians::bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], i
     (void)dir;
     (void)effect;   // ApplyDamageResponse for the weapon's effect (+0x30) is not ported yet
     if (p.vehicle || p.deadFrames >= 0 || p.body.dead) return;   // CanBeHit: alive, not in a closed vehicle
+    g.stats.incBulletsThatHit();   // the player's bullets (types 1 and 2)
     const int d = damage && 100 * damage < 100 ? 1 : 100 * damage / 100;   // FixDamageForArmour (cPed::Reset: 100)
     const bool killed = p.body.takeDamage(d);
     g.addBlood(p.body.pos, bloodDrops(type, d, effect));
@@ -610,10 +621,13 @@ void Pedestrians::bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], i
         p.deadFrames = 0;
         p.rollFrames = -1;
         TheSound().pedDeath(p.body.pos, p.male, false);   // cPed::SetDead -> PlayDeathSound
+        Stats_PedKilledByPlayer(g, p.subtype);           // cPed::HandlePreDead
+        Stats_PlayerDamage(g, 0, type, effect);
         Plugins_EmitEvent(CTW_EVENT_PED_KNOCKED_DOWN, 0, -1, (int)p.uid);
         return;
     }
     react(g, p, 0, from, 0);
+    Stats_PlayerDamage(g, p.body.health, type, effect);
 }
 
 void Pedestrians::fireHit(Game& g, Ped& p, int damage, const int32_t from[3]) {
