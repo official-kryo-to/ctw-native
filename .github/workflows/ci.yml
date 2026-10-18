@@ -92,12 +92,35 @@ jobs:
           msystem: UCRT64
           update: true
           install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja git
+      # Hosted Windows can expose only Microsoft's OpenGL 1.1 fallback. Use llvmpipe for rendering tests.
+      # Keep Mesa outside the game build so the Porter cannot include it in the game payload.
+      - name: Install Mesa for rendering tests
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'mesa3d.7z'
+          Invoke-WebRequest 'https://github.com/pal1000/mesa-dist-win/releases/download/26.2.4/mesa3d-26.2.4-release-msvc.7z' -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne '351fc8c8b695878ffb3eaa044b3ead08672a48b1a045e3c3e3975811df0f6695') {
+            throw 'Mesa archive checksum mismatch'
+          }
+          7z x $archive "-o$env:RUNNER_TEMP/mesa" 'x64/*' -y
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build game, showcase and mod kit (no game data needed)
         shell: msys2 {0}
         run: |
           cmake -S . -B port/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build port/build
-          ctest --test-dir port/build --output-on-failure
+      - name: Test with software OpenGL
+        shell: msys2 {0}
+        env:
+          SDL_OPENGL_LIBRARY: ${{ runner.temp }}/mesa/x64/opengl32.dll
+          GALLIUM_DRIVER: llvmpipe
+        run: |
+          export PATH="$(cygpath -u "$RUNNER_TEMP")/mesa/x64:$PATH"
+          ctest --test-dir port/build --output-on-failure --no-tests=error --output-junit "$PWD/port/build/ctest.xml"
+          if grep -q '<skipped' port/build/ctest.xml; then
+            echo '::error::Tests were skipped despite the software OpenGL driver being installed'
+            exit 1
+          fi
       # Workflow logs need a GitHub login; annotations do not. Report each failing test's FAIL lines as one.
       - name: Report failing tests
         if: failure()
@@ -105,8 +128,8 @@ jobs:
         run: |
           log=port/build/Testing/Temporary/LastTest.log
           [ -f "$log" ] || exit 0
-          for t in $(cut -d: -f2 port/build/Testing/Temporary/LastTestsFailed.log 2>/dev/null); do
-            out=$(awk -v t="$t" '$0 ~ ("Test: " t "$") {on=1; next} on && /<end of output>/ {exit} on {print}' "$log" \
+          for t in $(cut -d: -f2 port/build/Testing/Temporary/LastTestsFailed.log 2>/dev/null | tr -d '\r'); do
+            out=$(awk -v t="$t" '{sub(/\r$/, "")} $0 ~ ("Test: " t "$") {on=1; next} on && /<end of output>/ {exit} on {print}' "$log" \
                   | grep -Ev '^(Command|Directory|Output):|^---|start time' | tail -15 | tr '\n' '|')
             echo "::error title=ctest $t::${out:-no output}"
           done
