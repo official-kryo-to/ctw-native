@@ -152,6 +152,12 @@ bool Host_Init(const char* title, int w, int h) {
     if (!g_win) { fprintf(stderr, "window: %s\n", SDL_GetError()); return false; }
     g_gl = SDL_GL_CreateContext(g_win);
     if (!g_gl || !gladLoadGL((GLADloadfunc)SDL_GL_GetProcAddress)) { fprintf(stderr, "GL init failed\n"); return false; }
+    // SDL can return a legacy context when Windows has no modern OpenGL driver.
+    if (!GLAD_GL_VERSION_3_3) {
+        fprintf(stderr, "OpenGL 3.3 compatibility is required; got %s | %s\n",
+                glGetString(GL_VERSION), glGetString(GL_RENDERER));
+        return false;
+    }
     SDL_GL_SetSwapInterval(1);
     SDL_GL_GetDrawableSize(g_win, &g_w, &g_h);
     printf("GL: %s | %s\n", glGetString(GL_VERSION), glGetString(GL_RENDERER));

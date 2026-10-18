@@ -97,7 +97,7 @@ int main() {
     SDL_Window* window = SDL_CreateWindow("Font regression", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
                                           160, 96, SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
     SDL_GLContext context = window ? SDL_GL_CreateContext(window) : nullptr;
-    if (!context || !gladLoadGL((GLADloadfunc)SDL_GL_GetProcAddress)) {
+    if (!context || !gladLoadGL((GLADloadfunc)SDL_GL_GetProcAddress) || !GLAD_GL_VERSION_2_1) {
         std::fprintf(stderr, "SKIP: no OpenGL test context: %s\n", SDL_GetError());
         if (context) SDL_GL_DeleteContext(context);
         if (window) SDL_DestroyWindow(window);
