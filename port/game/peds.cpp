@@ -465,9 +465,15 @@ void Pedestrians::updateOccupant(Game& g, Ped& p) {
             p.body.hidden=p.body.attached=false;
             p.body.placeOnGround(&g.collision);
             car.engineOn=false;
-            // Until the full carjacking reaction task is ported, a displaced driver exits then flees.
-            p.flee.on=p.flee.straight=true; p.flee.fromCar=car.uid;
-            std::copy(car.pos,car.pos+3,p.flee.from);
+            if(p.exitFlee.set) {   // cFleeOnFoot from a reaction: away from the threat
+                p.exitFlee.set=false;
+                const int32_t from[3]={p.exitFlee.from[0],p.exitFlee.from[1],p.exitFlee.from[2]};
+                react(g,p,-1,from,p.exitFlee.fromCar);
+            } else {
+                // Until the full carjacking reaction task is ported, a displaced driver exits then flees.
+                p.flee.on=p.flee.straight=true; p.flee.fromCar=car.uid;
+                std::copy(car.pos,car.pos+3,p.flee.from);
+            }
         }
         return;
     }
@@ -602,7 +608,7 @@ bool Pedestrians::roll(Game& g, Ped& p) {
     return true;
 }
 
-int Pedestrians::reactionFor(const Ped& p, int action) const {
+int Pedestrians::reactionFor(const Ped& p, int action, bool fromPlayer) const {
     const Record* r = record(p.type, p.subtype);
     if (!r) return None;
     int reaction = None;
@@ -610,14 +616,31 @@ int Pedestrians::reactionFor(const Ped& p, int action) const {
         if (x.action != action && x.action != 9) continue;
         if (Rand32Critical(100) <= x.chance) { reaction = x.reaction; break; }
     }
-    // cPed +0x220 = 0 (the women's body set): attacking, getting away and rolling become fleeing
+    // cPed::AdjustPedInVehicleReaction
+    if (reaction == VehicleReaction) {
+        if (!p.vehicle) reaction = r->maleOnly ? Attack : Flee;
+        else if (p.seat != 0) reaction = None;   // cVehicle::IsDriver
+    } else if (reaction == Flee && p.vehicle && (action == 0 || action == 5)) {
+        if (Rand16Critical(100) > 10) reaction = None;
+    }
+    // cPed::AdjustCopAgainstPlayerReaction
+    if (p.type == 10 && fromPlayer && (action == 0 || action == 4)) reaction = None;
+    // cPed::ValidateFemaleReaction (+0x220 = 0, the women's body set)
     if (p.body.bodySet == 0 && (reaction == Attack || reaction == FleeOrGetIn || reaction == Roll)) reaction = Flee;
     return reaction;
 }
 
+void Pedestrians::fleeFromVehicle(Game& g, Ped& p, Vehicle& car, const int32_t from[3], uint32_t fromCar) {
+    if (p.vehicle != car.uid || p.exiting) return;
+    p.exitFlee.set = true;
+    std::copy(from, from + 3, p.exitFlee.from);
+    p.exitFlee.fromCar = fromCar;
+    exitOccupant(g, car, p.seat);
+}
+
 void Pedestrians::react(Game& g, Ped& p, int action, const int32_t from[3], uint32_t fromCar) {
     if (p.deadFrames >= 0 || p.flee.on || p.rollFrames >= 0) return;
-    const int r = reactionFor(p, action);
+    const int r = action < 0 ? Flee : reactionFor(p, action);   // (action -1: the reaction is already chosen)
     if (r == Roll) {   // cRollOutOfVehicle away from the threat
         const double dx = (double)p.body.pos[0] - from[0], dy = (double)p.body.pos[1] - from[1];
         const double len = std::sqrt(dx * dx + dy * dy);

@@ -223,6 +223,11 @@ int main() {
     npc.setToPhysics(false);npc.pos[0]=0;npc.pos[1]=20*4096;npc.setToPhysics(true);
     TrafficTestAccess::attach(game.traffic,game,npc);game.traffic.update(game);
     check(game.traffic.count()==1 && !npc.physicsActive(),"a successful road rejoin resumes rail movement");
+    check(game.traffic.driveAway(game,npc) && npc.physicsActive() && game.traffic.drivingAway(npc.uid),
+          "a driver reacting with reaction 3 goes under physics (cVehicle::HandleReaction)");
+    for (int i=0;i<3;++i) game.traffic.update(game);
+    check(npc.physicsActive() && game.traffic.controls(npc.uid).throttle>0,
+          "a driver driving away follows the road under physics instead of returning to rails");
     npc.seatUser[0]=-1;game.traffic.update(game);
     check(game.traffic.count()==0,"traffic releases a driver task when its seat becomes empty");
     game.cars.clear();

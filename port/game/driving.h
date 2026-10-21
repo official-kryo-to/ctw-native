@@ -12,6 +12,8 @@ public:
     bool load(const std::string& path);
     bool ok() const { return loaded_; }
     bool accelDecel(int vehicle, int gear, int32_t& acceleration, int32_t& deceleration) const;
+    // cWheeledVehicle::GetMaxAccelerationFromGear: the table's acceleration for the gear (Q12, no fallback)
+    int32_t maxAcceleration(int vehicle, int gear) const;
     bool reverseTimes(int attempt, uint16_t& first, uint16_t& second, uint16_t& pattern) const;
     int32_t reverseSteer(uint16_t pattern, bool secondPhase) const;
 private:

@@ -17,6 +17,10 @@
 // v^2 / d towards whatever VehicleSimpleProximityProcess found ahead (cars in a box 6..9 units + the car's radius
 // in front, peds in its path) or a red light (1024-frame cycle). When something hits it, it becomes a normal
 // physics car. Its driver retains a rejoin task and drives back toward the road before resuming the spline.
+// A driver who reacts to damage by driving away (cVehicle::HandleReaction, reaction 3) takes the speed value 0x78
+// and wanders the roads under physics from then on (cWanderRoadsUnderPhysics): it rejoins the road, then drives
+// at each next spline target in a straight line (cGotoTargetInVehicleStraightLine), moving on when it is within
+// half its speed (2.5..10 units) of it.
 #pragma once
 #include "aispline.h"
 #include "driving.h"
@@ -47,6 +51,10 @@ public:
     int count() const { return (int)drivers_.size(); }
     float densityScale = 1.f; // PC mod API: scales the target moving-car population; original default is 1
     void forget(uint32_t uid) { drivers_.erase(uid); }
+    // cVehicle::HandleReaction for reaction 3: SetToPhysics, speed value 0x78, cWanderRoadsUnderPhysics
+    bool driveAway(Game& g, Vehicle& v);
+    bool drivingAway(uint32_t uid) const { const auto it = drivers_.find(uid); return it != drivers_.end() && it->second.underPhysics; }
+    const DrivingProps& drivingProps() const { return drivingProps_; }
     // the vehicle part of cPopulationManager::Update (Game::updatePopulation): room = below the cap
     void generateRandom(Game& g, const ZoneInfo& z, bool room);
     const ZoneInfo& zoneOrDefault(int32_t x, int32_t y, bool night) const;   // cPopulationZones::Info
@@ -65,6 +73,9 @@ private:
         uint32_t lastFrame = 0;    // +0xF0
         bool rejoining = false, aimValid = false, rejoinFailed = false;
         int32_t aim[3]{};
+        uint8_t speedValue = 6;              // the vehicle's +0x955 (cVehicle constructor default)
+        bool underPhysics = false;           // cWanderRoadsUnderPhysics
+        bool following = false;              // ... past its rejoin: driving at the spline's targets
         Vehicle::Controls controls;
         DrivingRecovery recovery;
         int32_t beforePhysics[3]{}, stuckOrigin[2]{};
@@ -99,5 +110,6 @@ private:
     bool computeAim(Game& g, const Vehicle& v, Driver& d);
     bool completedAim(const Game& g, const Vehicle& v, Driver& d);
     void rejoin(Game& g, Vehicle& v, Driver& d);
+    void wanderUnderPhysics(Game& g, Vehicle& v, Driver& d);   // cWanderRoadsUnderPhysics::Process
     friend struct TrafficTestAccess;
 };

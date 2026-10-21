@@ -76,6 +76,9 @@ public:
     // by the game (Game::processKnockOffs): the rider leaves the seat at the vehicle's position and is thrown along dir
     struct KnockOff { bool pending = false; int32_t dir[3] = {0, 0, 0}; } knockOff;
     bool canFallOff = false;   // +0x957 (Vehicle::CanFallOffBike / CanFallOffVehicle)
+    // cVehicle::Damage for a collision with another vehicle (sDamageInfo type 8, the other one the source): its
+    // occupants react when the damage is at least gAggBigHit (12). Carried out by Game::processVehicleReactions.
+    struct HitBy { bool pending = false; uint32_t uid = 0; int damage = 0; } hitBy;
     bool playerDriving() const { return playerDriving_; }   // the player holds it (cEntity +0x77 bit 0)
     void damage(int amount);                      // cVehicle::Damage (collision damage)
     // SetHealth(health, false) below full health: at 31 or more the burn timer restarts (190 or more would also

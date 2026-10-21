@@ -620,6 +620,15 @@ void Game::killInVehicle(Vehicle& car) {
     radio.update(*this);
 }
 
+void Game::processVehicleReactions() {
+    for (Vehicle& car : cars) {
+        if (!car.hitBy.pending) continue;
+        car.hitBy.pending = false;
+        for (const Vehicle& other : cars)
+            if (other.uid == car.hitBy.uid) { vehicleReaction(car, 8, car.hitBy.damage, other.uid, other.pos); break; }
+    }
+}
+
 void Game::processKnockOffs() {
     for (int i = 0; i < (int)cars.size(); ++i) {
         Vehicle& car = cars[i];
@@ -1035,6 +1044,7 @@ void Game::tick() {
         traffic.afterPhysics(*this);
         projectiles.process(*this);
         processKnockOffs();
+        processVehicleReactions();
         processVehicleDeaths();
         if (playerCar < 0) {
             finishShortFrame();
@@ -1154,6 +1164,7 @@ void Game::tick() {
     traffic.afterPhysics(*this);
     projectiles.process(*this);
     processKnockOffs();
+    processVehicleReactions();
     processVehicleDeaths();
     updateWorldObjects();
     TheParticles().update(frame,world.timeCycle().time(),playerCar >= 0 ? cars[playerCar].pos : player.pos);

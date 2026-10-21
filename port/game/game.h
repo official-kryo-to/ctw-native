@@ -210,10 +210,17 @@ private:
     bool queueExplosion(const Explosion& explosion);
     void processVehicleDeaths();
     void processKnockOffs();             // cVehicle::KnockOffDriver for the vehicles that asked for it
+    void processVehicleReactions();      // the occupants' reactions to collision damage (Vehicle::hitBy)
     void affectExplosion(const Explosion& explosion);
     void affectBlast(const struct ExplosionBlast& blast);   // cBaseExplosion::AffectEntities
     void processBigExplosion(Explosion& explosion);         // cExplosionBigVehicle::Process
     void processHotDogExplosion(Explosion& explosion);      // cExplosionHotDog::Process
+public:
+    // The end of cVehicle::Damage: GetReaction(cSimpleMover::GetAction(info), source) for the vehicle's driver, for
+    // damage of sDamageInfo type `type` (a collision, 8, only from gAggBigHit = 12 on). The source is the player
+    // (sourceCar 0) or a vehicle (its uid); at: where the threat is.
+    void vehicleReaction(Vehicle& car, int type, int damage, uint32_t sourceCar, const int32_t at[3]);
+private:
     void processSplashExplosion(Explosion& explosion);      // cExplosionWaterSplashPed::Process
     unsigned explosionParticleCount(const int32_t pos[3]) const;
     void finishShortFrame();             // the effects, sound and plugin updates of a frame that ends early

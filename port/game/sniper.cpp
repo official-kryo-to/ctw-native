@@ -127,6 +127,7 @@ void Sniper_CreateBullet(Game& g, Weapon& w) {
         Vehicle& c = g.cars[i];
         if ((int)i == g.playerCar || c.dead() || !under(c.pos, c.boundRadius())) continue;
         c.damage(info.damage >> 2);   // cVehicle::Damage, type 1: a quarter
+        g.vehicleReaction(c, 1, info.damage, 0, g.player.pos);
         return;
     }
 }

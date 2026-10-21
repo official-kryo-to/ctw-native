@@ -61,6 +61,11 @@ int32_t DrivingProps::reverseSteer(uint16_t pattern,bool secondPhase) const { //
     return loaded_ && pattern<10 ? reverseSteering_[pattern][secondPhase ? 1 : 0] : 0;
 }
 
+int32_t DrivingProps::maxAcceleration(int vehicle, int gear) const {
+    if (!loaded_ || vehicle < 0 || vehicle >= 103 || gear < 1 || gear > 5) return 0;
+    return values_[vehicle][gear-1][0] * 4096;
+}
+
 bool DrivingProps::accelDecel(int vehicle, int gear, int32_t& acceleration, int32_t& deceleration) const {
     if (!loaded_ || vehicle < 0 || vehicle >= 103 || gear < 1 || gear > 5) return false;
     int a = values_[vehicle][gear-1][0], d = values_[vehicle][gear-1][1];

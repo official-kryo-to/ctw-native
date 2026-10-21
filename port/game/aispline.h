@@ -31,6 +31,8 @@ public:
     void set(const RoadNetwork& rn, int a, int b, int16_t ratio, int lane, int lanes, bool cop, int seed);
     void getPosAndDir(const RoadNetwork& rn, int32_t pos[2], int32_t dir[2]);   // dir: unit (Q12)
     bool inc(const RoadNetwork& rn, int32_t dist, bool cop);                     // advance; true if it shuffled
+    // cAISpline::ShuffleDownAtBaseRatio: on to the next target, the parameter at the new T1's ratio
+    void shuffleDownAtBaseRatio(const RoadNetwork& rn, bool cop);
     // cAISpline::IsToSlowForHoldingPattern: a red light / dead end ahead -> distance to the stop point
     bool tooSlowForHoldingPattern(const RoadNetwork& rn, uint32_t frame, int32_t& dist, bool& deadEnd);
     int currentLinkA() const { return t_[1].a; }

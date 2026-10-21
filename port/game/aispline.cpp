@@ -313,6 +313,11 @@ void AISpline::shuffleDown(const RoadNetwork& rn, bool cop) {   // cAISpline::Sh
     computeDistance(rn);
 }
 
+void AISpline::shuffleDownAtBaseRatio(const RoadNetwork& rn, bool cop) {   // cAISpline::ShuffleDownAtBaseRatio
+    shuffleDown(rn, cop);
+    param_ = (int16_t)(((int32_t)t_[1].ratio << 12) / 10000);
+}
+
 void AISpline::getPosAndDir(const RoadNetwork& rn, int32_t pos[2], int32_t dir[2]) {   // cAISpline::GetPosAndDir
     if (dirty_) {
         int32_t a[3], b[3];

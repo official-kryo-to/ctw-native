@@ -71,6 +71,10 @@ compatibility with the original.
   InaugerateYoke (the last 10 units before a junction and through the turn) and stay on a car knocked into physics.
   Ordinary drivers retain their task after an impact and steer back to the road, with gear-dependent controls,
   queued-vehicle prediction and timed reverse recovery. Seated drivers no longer block their own cars.
+  Drivers react to damage as cVehicle::Damage / GetReaction / cPed::HandleReaction decide: a hard hit (collision
+  damage of 12 or more), a bullet or the flamethrower rolls the driver's pedinfo reactions. Civilians mostly floor it
+  and race off along the roads under physics (cWanderRoadsUnderPhysics at speed value 0x78) and sometimes jump out
+  and run; drivers of slow vehicles always run. Attacking drivers (cKill) still flee instead.
   Spawns use the loaded road-link cache and the original retry/fallback state. Dynamic/mission networks and
   the full task graph still need parity work.
 - **Pedestrians:** civilians and cops walk the pavement network of each world sector, using the original zone

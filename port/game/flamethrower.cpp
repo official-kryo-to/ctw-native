@@ -73,6 +73,7 @@ void setEntitiesOnFire(Game& g, const FlameEmitter& e, const int16_t dir[3], int
         if (!inCone(c.pos)) continue;
         Fires_SetVehicleOnFire(g, c);   // cVehicle::SetOnFire
         c.damage(info.damage);         // cVehicle::Damage, sDamageInfo type 5
+        g.vehicleReaction(c, 5, info.damage, 0, g.player.pos);
         return;
     }
 }

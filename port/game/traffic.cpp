@@ -462,7 +462,8 @@ void Traffic::update(Game& g) {
             d.controls={};
             d.movementRequested=false;
             std::copy(v.pos,v.pos+3,d.beforePhysics);
-            if (v.physicsActive() || d.rejoining) rejoin(g,v,d);
+            if (d.underPhysics) wanderUnderPhysics(g,v,d);
+            else if (v.physicsActive() || d.rejoining) rejoin(g,v,d);
             else wander(g,v,d);
         }
     }
@@ -598,11 +599,61 @@ void Traffic::rejoin(Game& g,Vehicle& v,Driver& d) {
         d.movementRequested=true;
         int32_t aim[3];std::copy(d.aim,d.aim+3,aim);
         avoidance_.queue(g,v,aim);
-        d.controls=AIDriving::towards(v,drivingProps_,aim,6<<12); // cVehicle constructor's +0x955 default
+        d.controls=AIDriving::towards(v,drivingProps_,aim,(int32_t)d.speedValue<<12); // the vehicle's +0x955
         const DrivingData data(v,aim);
         d.recovery.update(v,drivingProps_,data,d.stuck,d.controls);
     }
     d.lastFrame=g.frame;
+}
+
+bool Traffic::driveAway(Game& g, Vehicle& v) {   // cVehicle::HandleReaction, reaction 3
+    (void)g;
+    auto it = drivers_.find(v.uid);
+    if (it == drivers_.end()) return false;
+    Driver& d = it->second;
+    v.setToPhysics(true);
+    d.speedValue = 0x78;
+    if (d.underPhysics) return true;
+    d.underPhysics = true;
+    d.following = false;
+    d.rejoining = d.aimValid = d.rejoinFailed = false;   // its first subtask: cRejoinNetworkInVehicle
+    return true;
+}
+
+void Traffic::wanderUnderPhysics(Game& g, Vehicle& v, Driver& d) {   // cWanderRoadsUnderPhysics::Process
+    if (!drivingProps_.ok()) { d.lastFrame = g.frame; return; }
+    int32_t aim[3];
+    if (!d.following) {   // the rejoin subtask
+        if (!d.aimValid && !d.rejoinFailed) {
+            d.aimValid = computeAim(g, v, d);
+            d.rejoinFailed = !d.aimValid;
+        }
+        if (!d.aimValid) { d.lastFrame = g.frame; return; }
+        int32_t distance;
+        if (completedAim(g, v, d) && copyRoadPosition(g, v, d, distance)) d.following = true;   // CopyInfoTo
+        else std::copy(d.aim, d.aim + 3, aim);
+    }
+    if (d.following) {
+        // the target is the spline's T2; SetRadius(0x1000 x clamp(speed / 2, 2.5, 10)); WillComplete moves it on
+        const int32_t half = v.speed() >> 1;
+        const int32_t radius = std::clamp(half, 0x2800, 0xA000);
+        for (int guard = 0; guard < 4; ++guard) {
+            AISpline::worldPos(g.roads, d.spline.target(2), v.uid & 255, aim);
+            const int64_t dx = (int64_t)aim[0] - v.pos[0], dy = (int64_t)aim[1] - v.pos[1];
+            if (dx * dx + dy * dy > (int64_t)radius * radius) break;
+            d.spline.shuffleDownAtBaseRatio(g.roads, d.cop);
+        }
+        aim[2] = 0;
+        bool left, right;
+        d.spline.yokeIndicators(left, right);   // cAISpline::InaugerateYoke
+        v.setIndicatorsFromYoke(left, right);
+    }
+    d.movementRequested = true;
+    avoidance_.queue(g, v, aim);
+    d.controls = AIDriving::towards(v, drivingProps_, aim, (int32_t)d.speedValue << 12);
+    const DrivingData data(v, aim);
+    d.recovery.update(v, drivingProps_, data, d.stuck, d.controls);
+    d.lastFrame = g.frame;
 }
 
 // cPopulationManager::Update when the vehicle schedule fired: roll a ped type from the zone's profile, then

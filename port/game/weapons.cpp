@@ -510,6 +510,7 @@ void traceAndFlash(Game& g, Weapon& w, const int32_t origin[3], int32_t dir[3], 
             // cVehicle::Damage, sDamageInfo type 1: a quarter of the damage (doors, sparks and the takedown logic
             // are not ported)
             c.damage(damage >> 2);
+            g.vehicleReaction(c, 1, damage, 0, g.player.pos);
         }
     }
     g.traces.add(muzzle, traceVec, traceKind);

@@ -116,6 +116,11 @@ public:
             uint32_t fromCar = 0;          // follows this vehicle while it exists (0: a fixed point)
             int32_t to[2] = {0, 0};        // straight-line target
         } flee;
+        struct ExitFlee {            // the threat to flee from once out of the vehicle (fleeFromVehicle)
+            bool set = false;
+            int32_t from[3] = {0, 0, 0};
+            uint32_t fromCar = 0;
+        } exitFlee;
         uint32_t socialFriend = 0;
         bool socialFriendVehicle = false;
         uint16_t talkingCooldown = 0;
@@ -148,7 +153,14 @@ public:
     const Record* record(int type, int subtype) const;
     void dress(Ped& p, int zoneSex) const;   // cPed::cPed + SetPedType + SetMale (looks only)
     enum ReactionKind { None = 0, Flee = 1, Attack = 2, VehicleReaction = 3, FleeOrGetIn = 4, Roll = 5, Idle = 6 };
-    int reactionFor(const Ped& p, int action) const;   // cPed::GetReactionHelper
+    // cPed::GetReactionHelper: the first record for the action (or any action, 9) whose Rand32Critical(100) roll is
+    // within its chance; then AdjustPedInVehicleReaction (a vehicle reaction makes a driver drive away, a passenger
+    // do nothing and someone on foot attack (records with +0x19 set) or flee; a ped in a vehicle ignores fleeing from
+    // actions 0 and 5 unless Rand16Critical(100) <= 10); AdjustCopAgainstPlayerReaction (cops do not react to the
+    // player's actions 0 and 4: the wanted level deals with it); ValidateFemaleReaction (women flee instead of
+    // attacking, getting away or rolling). The flag that turns attacks off (the reactor's +0x64 bit 1) is taken as
+    // clear.
+    int reactionFor(const Ped& p, int action, bool fromPlayer = true) const;
     // cPed::HandleReaction on foot: the threat is a point, or follows a vehicle (fromCar != 0)
     void react(Game& g, Ped& p, int action, const int32_t from[3], uint32_t fromCar);
     void explosion(Game& g, const struct ExplosionBlast& blast);
@@ -170,6 +182,9 @@ public:
     void collect(Game& g);   // cWorld::GarbageCollection: peds in unloaded sectors are deleted
     bool createDriver(Game& g, Vehicle& car, int type, const Traffic::ZoneInfo& zone);
     bool exitOccupant(Game& g, Vehicle& car, int seat); // true when the seat is free
+    // cPed::HandleReaction in a vehicle for fleeing (cFleeOnFoot from the threat): out of the vehicle, then flee
+    // from `from` (following fromCar while it exists)
+    void fleeFromVehicle(Game& g, Ped& p, Vehicle& car, const int32_t from[3], uint32_t fromCar);
     void releaseOccupants(Game& g, Vehicle& car, bool killed);
     // cVehicle::KnockOffDriver for a pedestrian at the wheel: cSeats::HelperWarpOutOf, then cPed::Damage type 21
     void knockOffDriver(Game& g, Vehicle& car, const int32_t dir[3]);

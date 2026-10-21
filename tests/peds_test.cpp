@@ -352,6 +352,32 @@ int main() {
     lady.body.bodySet = 0;
     check(peds.reactionFor(lady, 7) == Pedestrians::Flee, "women flee instead of rolling or attacking");
 
+    // AdjustPedInVehicleReaction and AdjustCopAgainstPlayerReaction
+    PedsTestAccess::records(peds, {{1, 0, 0, 0, 0, 0, {{100, 3, 5}, {100, 1, 0}}},
+                                   {2, 0, 1, 0, 0, 0, {{100, 3, 5}}},
+                                   {10, 0, 0, 0, 0, 0, {{100, 2, 0}}}},
+                            {0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2});
+    Pedestrians::Ped driver = man;
+    driver.vehicle = 5; driver.seat = 0;
+    check(peds.reactionFor(driver, 5) == Pedestrians::VehicleReaction, "a driver keeps the vehicle reaction");
+    Pedestrians::Ped passenger = driver;
+    passenger.seat = 1;
+    check(peds.reactionFor(passenger, 5) == Pedestrians::None, "a passenger does not drive away");
+    check(peds.reactionFor(man, 5) == Pedestrians::Flee, "on foot a vehicle reaction is fleeing");
+    Pedestrians::Ped thug = man;
+    thug.type = 2;
+    check(peds.reactionFor(thug, 5) == Pedestrians::Attack, "on foot a vehicle reaction is attacking for +0x19 records");
+    int fled = 0;
+    RandInit(3);
+    for (int i = 0; i < 400; ++i) fled += peds.reactionFor(driver, 0) == Pedestrians::Flee;
+    check(fled > 10 && fled < 90, "in a vehicle, fleeing from action 0 survives only Rand16Critical(100) <= 10");
+    Pedestrians::Ped officer = man;
+    officer.type = 10;
+    check(peds.reactionFor(officer, 0, true) == Pedestrians::None && peds.reactionFor(officer, 0, false) == Pedestrians::Attack,
+          "cops leave the player's action 0 to the wanted level");
+    PedsTestAccess::records(peds, {{1, 0, 0, 0, 0, 0, {{0, 3, 4}, {100, 1, 4}, {100, 1, 3}, {100, 5, 9}}}},
+                            {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+
     // Fleeing (cFleeOnFoot) along the pavement: A (10, 10) is a straight line of three nodes.
     Collision::PedPaths line;
     line.nodes = {node(-2990, -1975, 0, 1, false), node(-2975, -1975, 1, 2, false), node(-2960, -1975, 3, 1, false)};
