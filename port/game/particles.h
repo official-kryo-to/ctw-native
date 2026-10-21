@@ -81,6 +81,15 @@ private:
     bool init_ = false;
 };
 
+// cParticleEmitterSkidSmoke: the general particle controller's tyre smoke (range 112, 16 puffs, sprite 1, lying
+// flat). AddParticle(pos, velocity, dark): a puff half a unit wide in light grey (0x6739; burnouts 0x5294) that
+// grows 0.03 a frame for 15 life steps at full alpha, moving at velocity (units a frame).
+class SkidSmokeEmitter : public Emitter {
+public:
+    explicit SkidSmokeEmitter(const int32_t pos[3]) : Emitter(pos, 16, 0x70000, 1, false) {}
+    void addParticle(const int32_t at[3], const int16_t velocity[3], bool dark);
+};
+
 // cParticleEmitterSteam: range 7, 15 particles, sprite 21, camera-facing; while on, a puff every 8 frames that
 // rises, grows and fades (city emitters of type 0: steam from vents and manholes)
 class SteamEmitter : public Emitter {

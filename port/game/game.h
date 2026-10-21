@@ -88,6 +88,8 @@ public:
     BloodEmitter* blood = nullptr;           // LocalGeneralParticles' cParticleEmitterBlood
     SparksEmitter* sparks = nullptr;         // its cParticleEmitterSparks
     SteamEmitter* steamClouds = nullptr;     // its cParticleEmitterSteam (AddSteamCloud)
+    SkidSmokeEmitter* skidSmoke = nullptr;   // its cParticleEmitterSkidSmoke (AddSkidSmoke)
+    void addSkidSmoke(const int32_t pos[3], const int16_t velocity[3], bool dark);   // AddSkidSmoke
     Fires fires;                             // cFire
     SniperScope scope;                       // cPlayerAsSniper / cSniperCam
     Stats stats;                             // gStatsManager (cStatsManager)
@@ -184,9 +186,11 @@ public:
     bool scriptedThrow = false;          // testing: hold the throw (secondary weapon) button
     std::string dataDir, modsDir;
     bool sprintHeld_ = false;
+    bool burnoutHeld_ = false;           // the PC's burnout button (accelerate + brake) was down last frame
     int scriptedDrive = 0;               // testing: 1 = hold throttle, -1 = hold brake/reverse
     int scriptedSteer = 0;               // testing: -1 left, 1 right
     int scriptedHandbrakeFrame = -1;     // testing: hold the handbrake from this frame on
+    int scriptedBurnoutFrom = -1, scriptedBurnoutTo = -1;   // testing: hold the burnout button over these frames
     std::vector<int> scriptedEnterFrames;   // testing: press enter/exit on these frames
 private:
     std::map<int, std::unique_ptr<Model>> models_;

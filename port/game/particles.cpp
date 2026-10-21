@@ -618,6 +618,24 @@ void Emitter::render(const WorldCamera& cam) const {   // cParticleEmitterBase::
     glEnd();
 }
 
+// ============================================================================================== skid smoke
+// cParticleEmitterSkidSmoke::AddParticle(tv3d, tv3d<cFixed<4,12>>, bool)
+void SkidSmokeEmitter::addParticle(const int32_t at[3], const int16_t velocity[3], bool dark) {
+    Particle p{};
+    p.alpha = 31;   // the base emitter's standard data
+    p.life = 15;    // SetStandardDataLifeTime(15)
+    p.colour = dark ? 0x5294 : 0x6739;
+    p.size = (int16_t)((uint32_t)inv_ >> 1);
+    p.grow = (int16_t)((uint32_t)(inv_ * 0x7B) >> 12);
+    for (int k = 0; k < 3; ++k) {   // DoesV3dOverflowV3d16: a puff too far from the controller is dropped
+        const int64_t relative = ((int64_t)at[k] - pos[k]) * inv_ >> 12;
+        if (relative < INT16_MIN || relative > INT16_MAX) return;
+        p.p[k] = (int16_t)relative;
+        p.v[k] = (int16_t)((uint32_t)(inv_ * velocity[k]) >> 12);
+    }
+    addFromData(p);
+}
+
 // ============================================================================================== smoke
 void SmokeEmitter::addParticle(const int32_t vel[3], int colour) {   // cParticleEmitterSmoke::AddParticle(tv3d, colour)
     if (!init_) {

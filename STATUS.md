@@ -17,6 +17,13 @@ compatibility with the original.
   and releases its pause and textures when closed, reloaded or shut down. Multiline font drawing and measurement
   now agree; a failed font replacement preserves the loaded font.
 - **Vehicles:** cars and bikes with the game's handling, getting in and out, damage, lights, skidmarks and sounds.
+  Skid marks follow cWheeledVehicle / cBike::AddSkidmarks: both back wheels of a car (one track for a bike),
+  front marks only while those wheels spin, traffic marking on alternate frames, tyre smoke
+  (cParticleEmitterSkidSmoke) and sparks from a burst tyre's rim above 10 units a second. Burnouts work as in the
+  original (accelerate + brake when stopped, on the vehicles whose data allows them): the car holds first gear and
+  spins its back wheels in dark smoke, steering swings it round on the spot, and letting go of the brake launches it
+  with a forward kick, up to ten times the engine power and flaming tyres while the build-up lasts. A damaged
+  engine has half its power from health 79 and a fifth once the car burns.
   Damaged doors and hatches swing with acceleration, turning and gravity; detached panels have independent
   motion and the burnt palette. Explosive destruction can tear off the five supported panels.
 - **Explosion effects:** the reference flash's two counter-rotating layers and the generic/ordinary-vehicle

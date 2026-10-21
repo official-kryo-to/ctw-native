@@ -18,6 +18,7 @@
 | S / Down | Brake, reverse |
 | A D / Left Right | Steer |
 | Space | Handbrake |
+| W + S (stopped) | Burnout: steer to spin on the spot, let go of S to launch |
 | H / Alt | Horn |
 | F / Enter | Get out |
 | Tab | Radio |
@@ -34,6 +35,7 @@
 | A (hold) | Sprint / handbrake |
 | RT | Fire / accelerate |
 | LT (hold) | Throw (hold longer to throw further) / brake, reverse |
+| RT + LT (stopped) | Burnout |
 | Y | Get in or out of a vehicle |
 | LB / RB | Previous / next weapon |
 | X (hold, in a vehicle) | Horn |

@@ -70,6 +70,7 @@ bool Game::init(const std::string& data, const std::string& mods) {
     blood = TheParticles().add<BloodEmitter>(player.pos);   // cGeneralParticleController::Init
     sparks = TheParticles().add<SparksEmitter>(player.pos);
     steamClouds = TheParticles().add<SteamEmitter>(player.pos, false);
+    skidSmoke = TheParticles().add<SkidSmokeEmitter>(player.pos);
     LoadVehicleInfos(vehicleInfos);   // parked cars come from the map's car generators (cargens.cpp)
     carGens.reset();
     // cPlayer::cPlayer: cPopulationManager's schedules (peds 64, vehicles 32), then cLocalAreaKnowledge's (16)
@@ -214,6 +215,7 @@ void Game::updateWorldObjects() {   // once per game frame, after the vehicles m
         blood->setPos(at);
         if (sparks) sparks->setPos(at);
         if (steamClouds) steamClouds->setPos(at);
+        if (skidSmoke) skidSmoke->setPos(at);
     }
     updateCityEmitters();
     for (auto& kv : fountains)
@@ -229,6 +231,10 @@ void Game::addBlood(const int32_t pos[3], int count) {
 void Game::addSpark(const int32_t pos[3], const int16_t dir[3], uint8_t life, bool useAngle, int16_t angle, bool jitter,
                     uint16_t colour, uint16_t colourRand, int16_t scale) {
     if (sparks) sparks->addParticle(pos, dir, life, useAngle, angle, jitter, colour, colourRand, scale);
+}
+
+void Game::addSkidSmoke(const int32_t pos[3], const int16_t velocity[3], bool dark) {
+    if (skidSmoke) skidSmoke->addParticle(pos, velocity, dark);
 }
 
 void Game::addSteamCloud(const int32_t pos[3], uint16_t colour, int16_t scale) {
@@ -908,14 +914,28 @@ void Game::tick() {
             bool gas = ks[SDL_SCANCODE_W] || ks[SDL_SCANCODE_UP];
             bool brake = ks[SDL_SCANCODE_S] || ks[SDL_SCANCODE_DOWN];
             if (gas != brake) dc.throttle = gas ? 0x1000 : -0x1000;
+            const HostPad& pad = Host_Pad();
+            if (pad.connected && pad.rt > 0.5f && pad.lt > 0.5f) gas = brake = true;
+            // the burnout button (cIPhonePad: gBurnoutButton) is accelerate and brake held together: pressed below
+            // 2 units a second, it stays down while both are held; the brake stays applied meanwhile
+            const bool slow = cars[playerCar].speed() < 0x2000;
+            dc.burnout = gas && brake && (burnoutHeld_ || slow);
+            burnoutHeld_ = dc.burnout;
+            if (dc.burnout) dc.throttle = -0x1000;
             bool l = ks[SDL_SCANCODE_A] || ks[SDL_SCANCODE_LEFT];
             bool r = ks[SDL_SCANCODE_D] || ks[SDL_SCANCODE_RIGHT];
             if (l != r) dc.steer = l ? -0x1000 : 0x1000;
             dc.handbrake = ks[SDL_SCANCODE_SPACE];
             TheSound().horn = ks[SDL_SCANCODE_H] || ks[SDL_SCANCODE_LALT];
             PadInput_Driving(Host_Pad(), dc, TheSound().horn);   // a controller (padinput.h)
+            if (dc.burnout) dc.throttle = -0x1000;
         }
-        if (scriptedInput) { dc.throttle = scriptedDrive * 0x1000; dc.steer = scriptedSteer * 0x1000; dc.handbrake = scriptedHandbrakeFrame >= 0 && (int)frame >= scriptedHandbrakeFrame; }
+        if (scriptedInput) {
+            dc.throttle = scriptedDrive * 0x1000; dc.steer = scriptedSteer * 0x1000;
+            dc.handbrake = scriptedHandbrakeFrame >= 0 && (int)frame >= scriptedHandbrakeFrame;
+            dc.burnout = scriptedBurnoutFrom >= 0 && (int)frame >= scriptedBurnoutFrom && (int)frame < scriptedBurnoutTo;
+            if (dc.burnout) dc.throttle = -0x1000;
+        }
         if (task.op == CarTask::Braking) {   // cExitCar OP 2: brake against the motion (handbrake when going forward)
             Vehicle& c = cars[playerCar];
             bool back = (int64_t)c.vel[0] * c.fwd[0] + (int64_t)c.vel[1] * c.fwd[1] + (int64_t)c.vel[2] * c.fwd[2] < 0;
@@ -936,7 +956,7 @@ void Game::tick() {
         peds.update(*this);
         Vehicle::collideCars(cars, playerCar, frame);
         propDynamics.checkImpacts(*this);
-        for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); c.processDebris(carModel(c.infoId)); c.processDamage(frame); }
+        for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); Vehicles_AddSkidmarks(*this, c); c.processDebris(carModel(c.infoId)); c.processDamage(frame); }
         traffic.afterPhysics(*this);
         projectiles.process(*this);
         processVehicleDeaths();
@@ -1054,7 +1074,7 @@ void Game::tick() {
     if (!player.hidden && !player.attached && (!busy || player.reacting())) player.advance(&collision);
     Vehicle::collideCars(cars, -1, frame);
     propDynamics.checkImpacts(*this);
-    for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); c.processDebris(carModel(c.infoId)); c.processDamage(frame); }
+    for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); Vehicles_AddSkidmarks(*this, c); c.processDebris(carModel(c.infoId)); c.processDamage(frame); }
     traffic.afterPhysics(*this);
     projectiles.process(*this);
     processVehicleDeaths();

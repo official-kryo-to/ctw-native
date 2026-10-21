@@ -9,7 +9,6 @@
 #include "world/collision.h"
 #include "particles.h"
 #include "sound.h"
-#include "skidmarks.h"
 #include "world/worldrenderer.h"
 #include "cargens.h"
 #include <glad/gl.h>
@@ -71,6 +70,7 @@ void Vehicle::init(const VehicleInfo& info, int id, const int32_t p[3], int16_t 
     hy = (info.s16(0x2A) * 0x2332 >> 12) >> 1;
     hz = (info.s16(0x2C) * 2) >> 1;
     mass_ = info.s32(0x50);
+    canBurnout_ = ((info.raw[0x8E] | info.raw[0x8F] << 8) >> 9 & 1) != 0;
     int16_t cgx = info.s16(0x2E), cgy = info.s16(0x30), cgz = info.s16(0x32);
     if (cgx == 0 && cgy == 0 && cgz == 0) { cgLocal_[0] = 0; cgLocal_[1] = 0x1000; cgLocal_[2] = (int32_t)(((int64_t)info.s16(0x2C) * 0x332) >> 12); }
     else { cgLocal_[0] = cgx; cgLocal_[1] = cgy; cgLocal_[2] = cgz; }
@@ -374,6 +374,30 @@ void Vehicle::act(const Controls& yIn, bool playerDriving, Collision* col) {
         if (std::abs(y.steer) < 0x801) b62_ |= 0x40;
         else { b62_ |= 0x10; traction_ = 0x1000; }
     } else handbrakeTimerHb_ = 0;
+    if (y.burnout) {
+        // the button starts one on a vehicle that allows it, slower than 2.5 units a second with its back wheels on
+        // the ground and not burst (nor a stunned driver, +0x948 bit 14, which nothing sets here)
+        if (canBurnout_ && velocityBelow(0x2800) && tyre_[1].onGround && !tyre_[1].burst) {
+            burnout_ = 1;
+            setToPhysics(true);
+        }
+    } else if (burnout_ == 1) {
+        burnout_ = 2;   // let go: the launch window opens
+    } else if (burnout_ == 2) {
+        if (y.throttle > 0) {   // launched: a 12-unit kick forward and flaming tyres (StartBurnout's sound is not ported)
+            for (int k = 0; k < 3; ++k) vel[k] += fwd[k] * 12;
+            burnout_ = 3;
+            burnoutWindow_ = 0;
+            tyre_[1].grip = tyre_[1].gripMax;
+        } else {
+            burnoutWindow_ -= 0x88;
+            if (burnoutWindow_ < 0) { burnout_ = 0; burnoutPower_ = 0; }
+            tyre_[1].grip = tyre_[1].gripMax;
+        }
+    } else if (burnout_ == 3 && y.throttle <= 0) {
+        burnout_ = 0;
+        burnoutPower_ = 0;
+    }
     int32_t th = y.throttle;
     if (gear_ < 1) {
         if (th < 1) {
@@ -395,7 +419,7 @@ void Vehicle::act(const Controls& yIn, bool playerDriving, Collision* col) {
     if (gear_ == -1 && (b62_ & 0xD) == 1) handbrakeTimer_ = (int16_t)std::min(handbrakeTimer_ + 10, 300);
     else handbrakeTimer_ = (int16_t)std::max(handbrakeTimer_ - 6, 0);
     if (!physics_ && b62_ == 0) {   // parked and nobody touches it: nothing to do
-        for (Tyre& t : tyre_) { t.skid = t.spinning = t.slide = false; }
+        for (Tyre& t : tyre_) { t.skid = t.spinning = t.slide = t.rimSparks = false; }
     } else updatePhysics(col);
     if (bike_) bikeAct(y);
 }
@@ -511,9 +535,16 @@ void Vehicle::updatePhysics(Collision* col) {   // cWheeledVehicle::UpdatePhysic
     updateSteering();
     updateEngine();
     updateTyres(col);
+    if (burnout_ == 3) {   // the flames burn the build-up down and pitch the nose up
+        burnoutPower_ -= 0x43;
+        tiltV_ -= 0xA3;
+        if (burnoutPower_ < 0) burnout_ = 0;
+    } else if (burnout_ == 1) burnout();
+    if (gear_ == -1) { burnoutPower_ = 0; burnout_ = 0; }
     calcForces();
     if (physics_ && !(b62_ & 3) && simple_) {
-        bool resting = tyre_[0].onGround && tyre_[1].onGround && !(b62_ & 3);
+        // CanCarComeOutOfPhysicsMode: never in the middle of a burnout
+        bool resting = tyre_[0].onGround && tyre_[1].onGround && !(b62_ & 3) && burnout_ != 1;
         if (!velocityBelow(0x1666) || std::abs(tyre_[1].spin) > 0x3000 || std::abs(tyre_[0].spin) > 0x3000 || !resting) {
             if (velocityBelow(0x3000)) {
                 for (int k = 0; k < 3; ++k) { vel[k] = mulq(vel[k], 0xF33); angVel[k] = mulq(angVel[k], 0xF33); }
@@ -523,6 +554,35 @@ void Vehicle::updatePhysics(Collision* col) {   // cWheeledVehicle::UpdatePhysic
         } else setToPhysics(false);
     }
     handleSettling(col);
+}
+
+void Vehicle::burnout() {   // cWheeledVehicle::Burnout, cBike::Burnout
+    setToPhysics(true);
+    tyre_[1].spinning = true;
+    burnoutPower_ = std::min(burnoutPower_ + 0x1B, 0x1000);
+    burnoutWindow_ = 0x800;
+    // cBike::Burnout steers with the stick (+0xB62 bits 2 / 3) instead of the wheel angle, 2.5 units behind and
+    // along (+-0.13, 0.9)
+    const bool left = bike_ ? (b62_ & 4) != 0 : steerAngle_ <= -0xCD;
+    const bool rightTurn = bike_ ? !left && (b62_ & 8) : steerAngle_ >= 0xCD;
+    if (left || rightTurn) {
+        // steering swings the back round: a push 3.5 units behind the car, along (+-0.43, 0.9) of its frame, of
+        // the torque over the length (at most 1200), x0.3 for light vehicles; the back wheels lose their grip
+        const int32_t across = bike_ ? 0x214 : 0x6E1, behind = bike_ ? -0x2800 : -0x3800;
+        const int32_t side = left ? across : -across;
+        int32_t at[3], dir[3], force[3];
+        for (int k = 0; k < 3; ++k) {
+            at[k] = pos[k] + (int32_t)(((int64_t)fwd[k] * behind) >> 12);
+            dir[k] = (int32_t)(((int64_t)side * right[k] + (int64_t)0xE66 * fwd[k]) >> 12);
+        }
+        int32_t f = hy ? (int32_t)(((int64_t)maxTorque_ << 11) / hy) : 0x4B0000;
+        if (f >= 0x4B0000) f = 0x4B0000;
+        if (mass_ < 0xC00) f = (int32_t)(((int64_t)f * 0x4CC) >> 12);
+        tyre_[1].grip = 0;
+        for (int k = 0; k < 3; ++k) force[k] = (int32_t)(((int64_t)dir[k] * f) >> 12);
+        applyWorldForce(at, force, 2);
+    }
+    if (!velocityBelow(0x19000)) burnout_ = 0;   // too fast: it has become a drive
 }
 
 void Vehicle::updateSteering() {   // cWheeledVehicle::UpdateSteering
@@ -577,7 +637,10 @@ void Vehicle::updateEngine() {   // CEngine::Update
         int32_t g = (int32_t)((t44 * ratio) >> 32);
         int64_t f = (int64_t)(int32_t)(((int64_t)throttleAbs_ * g * 0x100000) >> 32) * 0x1000;   // x 0xB38 (1.0)
         driveForce_ = (int32_t)(f >> 12);
-        if (b64_ & 0x100) driveForce_ <<= 2;
+        // a damaged vehicle has half its power from health 79 down, a fifth once it burns (29 and below)
+        if (health_ <= 0x4F) driveForce_ = health_ > 0x1D ? driveForce_ >> 1 : (int32_t)(((int64_t)driveForce_ * 0x333) >> 12);
+        if (burnout_ == 3) driveForce_ = mass_ > 0xBFF ? (int32_t)(((int64_t)driveForce_ * 0xA000) >> 12) : driveForce_ << 2;
+        else if (b64_ & 0x100) driveForce_ <<= 2;
     } else if (!(b62_ & 2)) {   // coasting: engine braking
         int64_t c = ((int64_t)maxTorque_ * torqueCurve(r)) >> 12;
         int64_t v = (-0x5100000000LL - (c << 32)) >> 12;
@@ -588,6 +651,7 @@ void Vehicle::updateEngine() {   // CEngine::Update
 
 void Vehicle::handleGearChange() {   // CEngine::HandleGearChange
     if (shiftDelay_) return;
+    if (burnout_ == 1) { gear_ = 1; return; }   // a burnout holds first gear: the brake cannot select reverse
     bool slowBraking = (b62_ & 2) && speedUnits(speed()) < 0x1C000;
     int32_t half = maxRpm_ >> 1;
     if (gear_ < 1) {
@@ -646,8 +710,10 @@ void Vehicle::tyreGroundContact(Tyre& t, Collision* col) {   // CTyre::CalcGroun
 }
 
 void Vehicle::tyreForces(Tyre& t) {   // CTyre::CalcForces
-    t.skid = t.spinning = t.slide = false;
+    t.skid = t.spinning = t.slide = t.rimSparks = false;
     if (!t.onGround) return;
+    if (t.burst && (int64_t)vel[0] * vel[0] + (int64_t)vel[1] * vel[1] + (int64_t)vel[2] * vel[2] > 0x64000000LL)
+        t.rimSparks = true;
     int32_t F[3] = {fwd[0], fwd[1], fwd[2]}, R[3] = {right[0], right[1], right[2]};
     if (t.front && steerAngle_ != 0) {
         int a = (int)(((int64_t)steerAngle_ * 0x28BE630) >> 8) >> 16;
@@ -1307,31 +1373,7 @@ void Vehicle::localToWorld(const int32_t l[3], int32_t o[3]) const {
 }
 
 // ============================================================================================== body sway
-void Vehicle::processAlways() { updateSuspension(); updateDoors(); addSkidmarks(); }
-
-void Vehicle::addSkidmarks() const {   // cWheeledVehicle::AddSkidmarks
-    int32_t lat = (int32_t)(((int64_t)(hx << 1) * 0x66600000LL) >> 32);   // 0.4 x the width either side
-    int32_t L[3] = {mulq(lat, right[0]), mulq(lat, right[1]), mulq(lat, right[2])};
-    if (tyre_[1].spinning) {   // the back wheels
-        int32_t a = tyre_[1].axleY * 16;
-        int32_t c[3] = {pos[0] + (a * fwd[0] >> 16), pos[1] + (a * fwd[1] >> 16), pos[2] + (a * fwd[2] >> 16)};
-        int32_t r[3] = {c[0] + L[0], c[1] + L[1], c[2] + L[2]}, l[3] = {c[0] - L[0], c[1] - L[1], c[2] - L[2]};
-        if (tyre_[1].onGround) {
-            int32_t d[3] = {r[0] - l[0], r[1] - l[1], r[2] - l[2]};
-            normalise(d);
-            TheSkidmarks().addPoint(uid * 4, r, d, 1);
-            TheSkidmarks().addPoint(uid * 4 + 1, l, d, 1);
-        }
-    }
-    if (tyre_[0].spinning) {   // the front wheels
-        int32_t a = tyre_[0].axleY * 16;
-        int32_t c[3] = {pos[0] + (a * fwd[0] >> 16), pos[1] + (a * fwd[1] >> 16), pos[2] + (a * fwd[2] >> 16)};
-        int32_t r[3] = {c[0] + L[0], c[1] + L[1], c[2] + L[2]}, l[3] = {c[0] - L[0], c[1] - L[1], c[2] - L[2]};
-        int32_t d[3] = {right[0], right[1], right[2]};
-        TheSkidmarks().addPoint(uid * 4 + 2, r, d, 1);
-        TheSkidmarks().addPoint(uid * 4 + 3, l, d, 1);
-    }
-}
+void Vehicle::processAlways() { updateSuspension(); updateDoors(); }   // (Vehicles_AddSkidmarks follows)
 
 void Vehicle::updateSuspension() {   // cWheeledVehicle::UpdateSuspension (every frame)
     int32_t inRoll = swayRollV_, inPitch = swayPitchV_;

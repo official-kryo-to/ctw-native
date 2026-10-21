@@ -44,7 +44,9 @@ bool LoadVehicleInfos(std::vector<VehicleInfo>& out);   // needs Assets_Open
 
 class Vehicle {
 public:
-    struct Controls { int32_t throttle = 0, steer = 0; bool handbrake = false; };   // sVirtYoke +0x38, +0x3C, +0x60
+    struct Controls {   // sVirtYoke +0x38, +0x3C, +0x60, +0x8B (the burnout button)
+        int32_t throttle = 0, steer = 0; bool handbrake = false, burnout = false;
+    };
 
     void init(const VehicleInfo& info, int infoId, const int32_t pos[3], int16_t heading, int palette);
     void act(const Controls& c, bool playerDriving, Collision* col);   // cVehicle::Process / cWheeledVehicle::Act
@@ -69,6 +71,8 @@ public:
     int health() const { return health_; }
     int32_t mass() const { return mass_; }        // cPhysical::GetMass (+0x1A8)        // +0x99D: 255 = new; smoke below 190, burning below 31
     bool dead() const { return dead_; }
+    int burnoutState() const { return burnout_; }   // cWheeledVehicle +0xB63
+    bool playerDriving() const { return playerDriving_; }   // the player holds it (cEntity +0x77 bit 0)
     void damage(int amount);                      // cVehicle::Damage (collision damage)
     // SetHealth(health, false) below full health: at 31 or more the burn timer restarts (190 or more would also
     // release the smoke, 255 close the flaps and 0 kill the vehicle; no caller needs those yet)
@@ -147,6 +151,7 @@ private:
         int32_t k0, k4, gripMax, grip, axleY, spin, k18, torqueFb;
         int32_t force[3], contact[3], normal[3];
         bool front, burst = false, skid, spinning, onGround = false, slide;
+        bool rimSparks = false;   // +0x54: a burst tyre on the ground above 10 units a second scrapes its rim
     };
     struct Rec { int32_t p[3]; int32_t n[3]; int32_t t; int32_t depth; int surface; };   // sCollisionRecord
 
@@ -227,6 +232,11 @@ private:
     int32_t steerInputAbs_ = 0, throttleAbs_ = 0, steerAngle_ = 0, traction_ = 0, sticky_ = 0x1000;   // +0xAE8 +0xAEC +0xB20 +0xB2C +0xB3C
     uint8_t b62_ = 0;                         // what the driver does: 1 gas, 2 brake, 4 left, 8 right, 0x10/0x40 handbrake
     uint16_t b64_ = 0;
+    // burnouts (+0xB63 state: 1 spinning on the spot, 2 released, 3 launched with flaming tyres), their build-up
+    // (+0xB40, at most 0x1000) and the window to launch after letting go (+0xB44); info +0x8E bit 9 allows them
+    uint8_t burnout_ = 0;
+    int32_t burnoutPower_ = 0, burnoutWindow_ = 0;
+    bool canBurnout_ = false;
     int16_t handbrakeTimer_ = 0;              // +0xB4E (reversing with the handbrake)
     int16_t handbrakeTimerHb_ = 0;            // +0xB56 (frames the handbrake is held)
     int32_t lowGearGrip_ = 0x1000;            // +0xB48
@@ -243,7 +253,8 @@ private:
     int32_t wobble_ = 0, tilt_ = 0, wobbleV_ = 0, tiltV_ = 0;                 // +0xAD8, +0xADC, +0xAE0, +0xAE4
     int32_t swayK_[6] = {0, 0, 0, 0, 0, 0};  // +0xB00..+0xB14 (info +0x74..+0x88): stiffness, damping, lean
     void updateSuspension();
-    void addSkidmarks() const;
+    void burnout();   // cWheeledVehicle::Burnout
+    friend void Vehicles_AddSkidmarks(class Game& game, const Vehicle& car);
     void modelMatrix(float out[16]) const;
     void onCollision(const int32_t force[3], const Vehicle* other);   // OnCollision + DoOnCollisionWorking
     void setDead();
@@ -285,3 +296,6 @@ private:
     friend class AIDriving;
     friend class Fountain;   // cFountainStream::OnCollision applies its jet as a world force
 };
+
+// cWheeledVehicle::AddSkidmarks / cBike::AddSkidmarks (vehicleskids.cpp)
+void Vehicles_AddSkidmarks(class Game& game, const Vehicle& car);

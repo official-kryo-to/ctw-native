@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
         else if (!strcmp(option, "--veh")) values = 4;
         else if (strcmp(option, "--data") && strcmp(option, "--mods") && strcmp(option, "--shot") &&
                  strcmp(option, "--frames") && strcmp(option, "--keys") && strcmp(option, "--export-textures") && strcmp(option, "--ui") && strcmp(option, "--state") &&
-                 strcmp(option, "--enter") && strcmp(option, "--handbrake") && strcmp(option, "--hour") &&
+                 strcmp(option, "--enter") && strcmp(option, "--handbrake") && strcmp(option, "--burnout") && strcmp(option, "--hour") &&
                  strcmp(option, "--weather") && strcmp(option, "--weapon") && strcmp(option, "--fire") && strcmp(option, "--throw")) {
             fprintf(stderr, "Unknown option: %s\n", option);
             return 4;
@@ -99,6 +99,9 @@ int main(int argc, char** argv) {
             TheGame().scriptedSteer = atoi(argv[i + 2]);
         }   // shot mode: print the player state every frame
         if (!strcmp(argv[i], "--handbrake")) TheGame().scriptedHandbrakeFrame = atoi(argv[i + 1]);   // hold it from frame N
+        if (!strcmp(argv[i], "--burnout") &&   // hold the burnout button over frames A:B
+            sscanf(argv[i + 1], "%d:%d", &TheGame().scriptedBurnoutFrom, &TheGame().scriptedBurnoutTo) == 2)
+            TheGame().scriptedInput = true;
         if (!strcmp(argv[i], "--car") && i + 3 < argc)   // testing: an extra parked car (x y heading-degrees)
             extraCars.push_back({(float)atof(argv[i + 1]), (float)atof(argv[i + 2]), (float)atof(argv[i + 3])});
         if (!strcmp(argv[i], "--veh") && i + 4 < argc)   // testing: an extra vehicle of this info id (id x y heading-degrees)

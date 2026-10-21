@@ -27,6 +27,7 @@ struct CollisionTestAccess {
 
 struct VehicleTestAccess {
     static int32_t pendingLift(Vehicle& c) { c.recalcKinematics(); return c.vel[2]; }
+    static void launched(Vehicle& c) { c.burnout_ = 3; c.playerDriving_ = true; c.hx = 0x1000; }
 };
 
 static void reset(Game& g, bool water) {
@@ -148,6 +149,16 @@ int main() {
         }
         check(g.fires.list().empty() && frames > 60 && frames < 70,
               "a fire beside a fountain is put out after its 127 health is worn down two at a time");
+    }
+
+    // cWheeledVehicle::AddSkidmarks: a launched burnout drops a short fire at each back wheel every frame
+    {
+        reset(g, false);
+        addCar(g, 13);
+        VehicleTestAccess::launched(g.cars[0]);
+        Vehicles_AddSkidmarks(g, g.cars[0]);
+        check(g.fires.list().size() == 2 && g.fires.list()[0].style == 5 && g.fires.list()[0].life >= 20 &&
+              g.fires.list()[0].life < 40, "a launched burnout leaves a style-5 flame at each back wheel");
     }
 
     g.fires.clear();

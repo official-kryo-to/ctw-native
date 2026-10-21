@@ -29,6 +29,41 @@ struct VehicleTestAccess {
     }
     static bool fire(const Vehicle& v) { return v.fire_ != nullptr; }
     static void bike(Vehicle& v, bool bike) { v.bike_ = bike; }
+    static void burnouts() {
+        VehicleInfo info{}; info.raw[0x8F] = 2;   // info +0x8E bit 9: burnouts allowed
+        info.raw[0x51] = 0x20;                     // mass 0x2000 (heavier than 0xBFF)
+        const int32_t at[3] = {};
+        Vehicle v; v.init(info,0,at,0,0);
+        v.engineOn = true; v.gear_ = 1; v.tyre_[1].onGround = true;
+        Vehicle::Controls held; held.burnout = true; held.throttle = -0x1000;
+        v.act(held,true,nullptr);
+        check(v.burnout_ == 1 && v.tyre_[1].spinning && v.burnoutPower_ == 0x1B && v.burnoutWindow_ == 0x800,
+              "the burnout button spins the back wheels on the spot and builds up its power");
+        for (int i = 1; i < 60; ++i) v.act(held,true,nullptr);
+        Vehicle::Controls none;
+        v.act(none,true,nullptr);
+        check(v.burnout_ == 2, "letting go of the burnout opens the launch window");
+        const int32_t before = v.vel[1];
+        Vehicle::Controls gas; gas.throttle = 0x1000;
+        v.act(gas,true,nullptr);
+        check(v.burnout_ == 3 && v.vel[1] - before >= 0xC000 - 0x1000, "accelerating in the window launches it forward");
+        Vehicle closed; closed.init(VehicleInfo{},0,at,0,0); closed.tyre_[1].onGround = true;
+        closed.act(held,true,nullptr);
+        check(closed.burnout_ == 0, "a vehicle without the burnout flag cannot burn out");
+        // CEngine::Update: damage takes the power away
+        const_cast<GameplayTables&>(TheGameplayTables()).gearRatio[2] = 0x100000000LL;   // (no game binary here)
+        Vehicle engine; engine.init(info,0,at,0,0); engine.engineOn = true; engine.b62_ = 1;
+        engine.maxTorque_ = 0x100000; engine.throttleAbs_ = 0x1000; engine.finalDrive_ = 0x1000;
+        auto force = [&](uint8_t health, uint8_t burnout) {   // one Update in first gear, no shift pending
+            engine.gear_ = 1; engine.shiftDelay_ = 0; engine.health_ = health; engine.burnout_ = burnout;
+            engine.updateEngine();
+            return engine.driveForce_;
+        };
+        const int32_t full = force(0xFF, 0);
+        check(full != 0 && force(0x40, 0) == full >> 1, "a damaged engine has half its power");
+        check(force(0x10, 0) == (int32_t)(((int64_t)full * 0x333) >> 12), "a burning engine has a fifth of its power");
+        check(force(0xFF, 3) == (int32_t)(((int64_t)full * 0xA000) >> 12), "a heavy vehicle's burnout launch has ten times the power");
+    }
     static void flaps() {
         VehicleInfo info{}; info.raw[0x94]=1; info.raw[0x110]=2;
         const int32_t at[3]={};
@@ -1442,7 +1477,7 @@ int main() {
     check(!Audio_SfxPlaying(voice), "resumed sound effect finishes normally");
     playerFrameIntegration();
     PlayerTestAccess::fightIdle(); SoundTestAccess::run(); CollisionTestAccess::run(); CollisionTestAccess::cameraTests(); PropTestAccess::run(); PropDynamicsTestAccess::run();
-    slats(); garbage(); VehicleTestAccess::flaps(); VehicleTestAccess::debris(); WaterTestAccess::run(); randomStreams(); explosionsAndShake(); fireAndCamera(); RadioTestAccess::run();
+    slats(); garbage(); VehicleTestAccess::flaps(); VehicleTestAccess::burnouts(); VehicleTestAccess::debris(); WaterTestAccess::run(); randomStreams(); explosionsAndShake(); fireAndCamera(); RadioTestAccess::run();
     Audio_Shutdown();
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }
