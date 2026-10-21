@@ -318,6 +318,16 @@ void AISpline::shuffleDownAtBaseRatio(const RoadNetwork& rn, bool cop) {   // cA
     param_ = (int16_t)(((int32_t)t_[1].ratio << 12) / 10000);
 }
 
+bool AISpline::journeyStraight(const RoadNetwork& rn) const {   // cAISpline::IsJourneyStraightLine
+    int32_t p[3][3];
+    for (int i = 0; i < 3; ++i) worldPos(rn, t_[i + 1], seed_, p[i]);
+    int32_t a[3], b[3];
+    for (int k = 0; k < 3; ++k) { a[k] = p[2][k] - p[1][k]; b[k] = p[1][k] - p[0][k]; }
+    Normalise3(a);
+    Normalise3(b);
+    return (int64_t)a[0] * b[0] + (int64_t)a[1] * b[1] + (int64_t)a[2] * b[2] > 0xF0A3D8;
+}
+
 void AISpline::getPosAndDir(const RoadNetwork& rn, int32_t pos[2], int32_t dir[2]) {   // cAISpline::GetPosAndDir
     if (dirty_) {
         int32_t a[3], b[3];

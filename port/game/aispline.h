@@ -33,6 +33,8 @@ public:
     bool inc(const RoadNetwork& rn, int32_t dist, bool cop);                     // advance; true if it shuffled
     // cAISpline::ShuffleDownAtBaseRatio: on to the next target, the parameter at the new T1's ratio
     void shuffleDownAtBaseRatio(const RoadNetwork& rn, bool cop);
+    // cAISpline::IsJourneyStraightLine: T1 -> T2 and T2 -> T3 within about 20 degrees (dot > 0.94)
+    bool journeyStraight(const RoadNetwork& rn) const;
     // cAISpline::IsToSlowForHoldingPattern: a red light / dead end ahead -> distance to the stop point
     bool tooSlowForHoldingPattern(const RoadNetwork& rn, uint32_t frame, int32_t& dist, bool& deadEnd);
     int currentLinkA() const { return t_[1].a; }

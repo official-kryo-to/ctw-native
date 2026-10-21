@@ -16,11 +16,12 @@
 // accelerates by 0x4CE a frame to the road speed (6 + a little, x2 / x2.5 on two-lane roads) and brakes with
 // v^2 / d towards whatever VehicleSimpleProximityProcess found ahead (cars in a box 6..9 units + the car's radius
 // in front, peds in its path) or a red light (1024-frame cycle). When something hits it, it becomes a normal
-// physics car. Its driver retains a rejoin task and drives back toward the road before resuming the spline.
-// A driver who reacts to damage by driving away (cVehicle::HandleReaction, reaction 3) takes the speed value 0x78
-// and wanders the roads under physics from then on (cWanderRoadsUnderPhysics): it rejoins the road, then drives
-// at each next spline target in a straight line (cGotoTargetInVehicleStraightLine), moving on when it is within
-// half its speed (2.5..10 units) of it.
+// physics car: cWanderRoads gives up and CreateWanderRoads hands it a cWanderRoadsUnderPhysics, which rejoins the
+// road and then drives at each next spline target in a straight line (cGotoTargetInVehicleStraightLine) at the
+// road's speed, moving on when it is within half its speed (2.5..10 units) of it. It goes back on rails only once
+// the car is off screen with a straight road ahead (cAISpline::IsJourneyStraightLine), so it is never seen to snap.
+// A driver who reacts to damage by driving away (cVehicle::HandleReaction, reaction 3) keeps the speed value 0x78
+// and a target of his own, so he stays under physics.
 #pragma once
 #include "aispline.h"
 #include "driving.h"
@@ -84,6 +85,7 @@ private:
         int32_t aim[3]{};
         uint8_t speedValue = 6;              // the vehicle's +0x955 (cVehicle constructor default)
         bool underPhysics = false;           // cWanderRoadsUnderPhysics
+        bool reacting = false;               // ... from HandleReaction: its speed fixed (flag bit 29), a target
         bool following = false;              // ... past its rejoin: driving at the spline's targets
         Vehicle::Controls controls;
         DrivingRecovery recovery;
@@ -123,5 +125,6 @@ private:
     bool completedAim(const Game& g, const Vehicle& v, Driver& d);
     void rejoin(Game& g, Vehicle& v, Driver& d);
     void wanderUnderPhysics(Game& g, Vehicle& v, Driver& d);   // cWanderRoadsUnderPhysics::Process
+    int32_t roadSpeed(Game& g, const Vehicle& v, const Driver& d) const;   // iAITask::GetRoadSpeed
     friend struct TrafficTestAccess;
 };

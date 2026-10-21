@@ -355,6 +355,17 @@ void Traffic::proximity(Game& g) {   // cPhysicalIntegrator::VehicleSimpleProxim
     }
 }
 
+int32_t Traffic::roadSpeed(Game& g, const Vehicle& v, const Driver& d) const {
+    // iAITask::GetRoadSpeed: 6 + (id & 15) x 0x66 - 0x2CA; x2 on two-lane roads (x2.5 in the outer lane)
+    int32_t target = ((int32_t)((v.uid & 0xF) * 0x66) | (6 << 12)) - 0x2CA;
+    const LinkTarget& t2 = d.spline.target(2);
+    if (t2.valid()) {
+        RoadMeta m = g.roads.meta(t2.metaB ? t2.b : t2.a);
+        if (!m.flag5 && m.lanes > 1) target = t2.lane ? mulq(target, 0x2800) : target * 2;
+    }
+    return target;
+}
+
 void Traffic::forwardSpeed(Game& g, Vehicle& v, Driver& d) {   // cWanderRoads::FindForwardSpeed
     int32_t holdDist = 0x3E8000;
     bool deadEnd = false;
@@ -376,13 +387,7 @@ void Traffic::forwardSpeed(Game& g, Vehicle& v, Driver& d) {   // cWanderRoads::
             target = 0;
             stopping = stop;
         } else {
-            // iAITask::GetRoadSpeed: 6 + (id & 15) x 0x66 - 0x2CA; x2 on two-lane roads (x2.5 in the outer lane)
-            target = ((int32_t)((v.uid & 0xF) * 0x66) | (6 << 12)) - 0x2CA;
-            const LinkTarget& t2 = d.spline.target(2);
-            if (t2.valid()) {
-                RoadMeta m = g.roads.meta(t2.metaB ? t2.b : t2.a);
-                if (!m.flag5 && m.lanes > 1) target = t2.lane ? mulq(target, 0x2800) : target * 2;
-            }
+            target = roadSpeed(g, v, d);
             stopping = false;
             d.horn = 0;
         }
@@ -479,8 +484,14 @@ void Traffic::update(Game& g) {
             d.controls={};
             d.movementRequested=false;
             std::copy(v.pos,v.pos+3,d.beforePhysics);
+            if (!d.underPhysics && (v.physicsActive() || d.rejoining)) {
+                // cWanderRoads::Process gives up on a physics car that is not frozen; CreateWanderRoads makes it a
+                // cWanderRoadsUnderPhysics, which starts with its rejoin
+                d.underPhysics = true;
+                d.following = false;
+                d.rejoining = d.aimValid = d.rejoinFailed = false;
+            }
             if (d.underPhysics) wanderUnderPhysics(g,v,d);
-            else if (v.physicsActive() || d.rejoining) rejoin(g,v,d);
             else wander(g,v,d);
         }
     }
@@ -630,6 +641,7 @@ bool Traffic::driveAway(Game& g, Vehicle& v) {   // cVehicle::HandleReaction, re
     Driver& d = it->second;
     v.setToPhysics(true);
     d.speedValue = 0x78;
+    d.reacting = true;
     if (d.underPhysics) return true;
     d.underPhysics = true;
     d.following = false;
@@ -661,6 +673,21 @@ void Traffic::wanderUnderPhysics(Game& g, Vehicle& v, Driver& d) {   // cWanderR
             d.spline.shuffleDownAtBaseRatio(g.roads, d.cop);
         }
         aim[2] = 0;
+        if (!d.reacting) {
+            // off screen ((+0x77 & 3) == 0) with a straight road ahead and no target: SetToPhysics(false) and a
+            // cWanderRoads on rails from the spline (CreateWanderRoads), unseen
+            if (v.screenTimer != 0xFF && d.spline.journeyStraight(g.roads)) {
+                int32_t p[2], dir[2];
+                d.spline.getPosAndDir(g.roads, p, dir);
+                v.setToPhysics(false);
+                d.speed = 0;   // the new cWanderRoads' +0xE8
+                v.placeOnRail(p[0], p[1], d.spline.z(), dir, d.speed);
+                d.underPhysics = d.following = false;
+                d.lastFrame = g.frame;
+                return;
+            }
+            d.speedValue = (uint8_t)(roadSpeed(g, v, d) >> 12);   // +0x955 = GetRoadSpeed (flag bit 29 clear)
+        }
         bool left, right;
         d.spline.yokeIndicators(left, right);   // cAISpline::InaugerateYoke
         v.setIndicatorsFromYoke(left, right);

@@ -221,8 +221,12 @@ int main() {
     check(game.traffic.controls(999999).throttle==0,"unowned vehicles receive no traffic input");
     game.traffic.forget(npc.uid);
     npc.setToPhysics(false);npc.pos[0]=0;npc.pos[1]=20*4096;npc.setToPhysics(true);
-    TrafficTestAccess::attach(game.traffic,game,npc);game.traffic.update(game);
-    check(game.traffic.count()==1 && !npc.physicsActive(),"a successful road rejoin resumes rail movement");
+    TrafficTestAccess::attach(game.traffic,game,npc);
+    for (int i=0;i<5;++i) game.traffic.update(game);
+    check(game.traffic.count()==1 && npc.physicsActive(),"on screen a rejoined car keeps driving under physics (no snap)");
+    npc.screenTimer=0;
+    for (int i=0;i<5 && npc.physicsActive();++i) game.traffic.update(game);
+    check(game.traffic.count()==1 && !npc.physicsActive(),"off screen on a straight road it goes back on rails");
     check(game.traffic.driveAway(game,npc) && npc.physicsActive() && game.traffic.drivingAway(npc.uid),
           "a driver reacting with reaction 3 goes under physics (cVehicle::HandleReaction)");
     for (int i=0;i<3;++i) game.traffic.update(game);
