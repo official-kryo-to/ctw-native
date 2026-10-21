@@ -1,0 +1,67 @@
+# GitLab mirror of .github/workflows: the Python and Linux checks on every push, and the progress site on GitLab
+# Pages from the default branch. The Windows build and the Porter release still run on GitHub Actions only.
+stages: [test, deploy]
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+python:
+  stage: test
+  image: python:3.12
+  script:
+    - python -m pip install -r requirements-setup.txt
+    - python -m unittest discover -s tests -v
+
+linux:
+  stage: test
+  image: ubuntu:24.04
+  variables:
+    DEBIAN_FRONTEND: noninteractive
+  before_script:
+    - apt-get update
+    - >
+      apt-get install -y build-essential cmake ninja-build git python3 libx11-dev libxext-dev libxrandr-dev
+      libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols
+      libgl1-mesa-dev libegl1-mesa-dev libasound2-dev libpulse-dev libudev-dev libdbus-1-dev
+  script:
+    # the game, the showcase and the mod kit; no game data is needed
+    - cmake -S . -B port/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+    - cmake --build port/build
+    - ctest --test-dir port/build --output-on-failure
+
+porter:
+  stage: test
+  image: rust:1
+  variables:
+    DEBIAN_FRONTEND: noninteractive
+  before_script:
+    - apt-get update && apt-get install -y python3 python3-pip python3-venv g++-aarch64-linux-gnu
+    - python3 -m venv /tmp/venv && . /tmp/venv/bin/activate && pip install -r requirements-setup.txt
+    - rustup component add clippy rustfmt
+  script:
+    - . /tmp/venv/bin/activate
+    - cd porter
+    - cargo fmt --all --check
+    - cargo test -p ctw-porter-core --locked
+    - cargo clippy -p ctw-porter-core --all-targets --locked -- -D warnings
+    # the Rust table extraction must give the same bytes as scripts/extract_tables.py
+    - core/tests/parity.sh
+
+# The badges, the progress map and the history (scripts/progress.py, scripts/progress_history.py).
+pages:
+  stage: deploy
+  image: python:3.12
+  variables:
+    GIT_DEPTH: 0
+  script:
+    - python scripts/progress.py public
+    - python scripts/progress_history.py public
+    - cp public/progress.html public/index.html
+  artifacts:
+    paths: [public]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
