@@ -279,4 +279,5 @@ private:
     void setDoorClosed(int seat);
     friend struct VehicleTestAccess;
     friend class PropDynamics;
+    friend class AIDriving;
 };

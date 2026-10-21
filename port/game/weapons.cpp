@@ -848,13 +848,20 @@ void Weapons_PlayerFrame(Game& g, bool fireHeld, int cycle, bool throwHeld) {
     // cPed::AnimateWalkRunCycleWeapons calls cSword::ProcessDelayedHit once per sword-swing tick, including
     // the firing tick. Keep that simulation work here, before ClearStateHistory; Player::animate only selects
     // the sprites. Damage uses the current position/facing at contact, so moving away can evade the swing.
-    if (c.type == 3 && g.playerCar < 0 && !g.player.dead && !g.player.attached && !g.player.reacting() &&
+    const bool onFootAnimation=g.playerCar<0 && !g.player.dead && !g.player.attached && !g.player.reacting();
+    if (c.type==0 && onFootAnimation && (c.state==1 || (c.flags&2)))
+        TheSound().playerEvent(9,50,200); // native unarmed cue 0x902218, animation call 0x87e228
+    if (c.type == 3 && onFootAnimation &&
         ((c.state && (c.state == 1 || !(c.flags & 1))) || (c.flags & 2))) {
         Weapon& sword = *m.current();
+        // Native animation branch at 0x87e258 checks the previous sprite update, before advancing it again.
+        if (g.player.enteredUpperFrame(8) || g.player.enteredUpperFrame(12))
+            TheSound().playerEvent(152,127,200); // native sword cue at 0x906058
         if (sword.delayedHit && --sword.delayedHit == 0)
             hitStuff(g, sword, 0x2000, Weapons_Info(3).damage, 3, 11);
     }
     g.player.weaponType = c.type;
+    g.player.weaponMovementScale=Weapons_Info(c.type).scale[fire ? 1 : 0];
     g.player.weaponState = c.state;
     g.player.weaponFlags = c.flags;
     // cPed::Render -> cFlameThrower::Render -> CreateGasJet; built once per tick (its Rand32Critical)

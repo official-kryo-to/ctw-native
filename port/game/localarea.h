@@ -86,16 +86,25 @@ public:
     bool createPosition(Game& g, const int32_t centre[3], int32_t radius, int32_t out[3], NodeRef& a, NodeRef& b);
     // GetNearestNodePosition (pavement, no constraints): the nearest point within `range` on a link; t = Q12 ratio.
     bool nearestNodePosition(Game& g, const int32_t p[3], int32_t range, NodeRef& a, NodeRef& b, int32_t point[3],
-                             int32_t& t) const;
+                             int32_t& t, int network = 1) const;
     const std::vector<Link>& pavement() const { return links_; }
+    const std::vector<Link>& roads() const { return roadLinks_; }
+    bool rebuiltEntities() const { return rebuiltEntities_; } // Update rebuilt the entity-cache half this frame
+    bool entityCacheResetDue() const { return entityCacheResetDue_; } // the non-fired Update ResetCache branch
 private:
     void addPavement(Game& g, const int32_t player[3]);   // AddPathingNodes, the pavement half
+    void addRoads(Game& g, const int32_t player[3]);      // AddPathingNodes, the loaded-sector road-node half
     void dropInvalid(Game& g);                       // ResetCache: links whose sector unloaded
-    void add(const Link& l);                         // AddToArray(network 1)
+    void add(const Link& l, int network = 1);         // AddToArray
     FrameScheduler::Schedule schedule_;
     std::vector<Link> links_;
+    std::vector<Link> roadLinks_;
     uint16_t cursor_ = 0;                            // +0x306: GetCreatePosition's round robin
     bool roads_ = false;                             // +0xC3B: the next fired update rebuilds the road links
+    bool rebuiltEntities_ = false;
+    bool entityCacheResetDue_ = false;
+    friend struct PedsTestAccess;
+    friend struct TrafficTestAccess;
 };
 
 // maths::GetChordCircle: where the segment a -> b crosses the circle (centre c, radius r): t0 <= t1 in 0..4096 along

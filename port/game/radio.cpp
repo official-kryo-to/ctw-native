@@ -384,7 +384,7 @@ void Radio::appPointer(float x, float y, bool down, bool pressed, Game& game) {
         // cRadioApp::OnDrag: one station per gesture, after five logical pixels, with PlayHudSfx(0x35F, 0x10)
         appStation(x > pointerX_ ? -1 : 1, game);
         pointerSwiped_ = true;
-        TheSound().playResident(0x35F, 0x10);
+        TheSound().playHud(0x35F, 0x10);
     } else if (!down && pointerDown_ && !pointerSwiped_ && pointerX_ >= 0 && pointerX_ <= kAppW &&
                std::fabs(x - pointerX_) < 5 && std::fabs(y - pointerY_) < 5) {
         appClick(x, y, game);

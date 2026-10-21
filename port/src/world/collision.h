@@ -23,7 +23,7 @@
 //          i32 x, y, z}; type 0 = steam (cParticleEmitterSteam), 1 = fountain (cFountainStream)
 //   +0x138 (attractors - not used yet)
 //   +0x140 ground map: 40 x 40 x 2 bits (1.25-unit squares): 1 = land (z 0), 2 = lake (z -2.5), else sea (-7.5)
-//   +0x148 (not used yet)
+//   +0x148 global road-node references: u16 count, count x u16 node indices
 // All values are 20.12 fixed point; the queries below take and return floats in world units.
 #pragma once
 #include <cstdint>
@@ -66,6 +66,7 @@ public:
     static_assert(sizeof(PathNode) == 10, "cBaseNode");
     struct PedPaths { std::vector<PathNode> nodes; std::vector<uint16_t> links; std::vector<std::pair<uint16_t, uint16_t>> bridges; };
     const PedPaths* pedPaths(int cx, int cy);   // nullptr: no pavement nodes in this 50-unit cell
+    const std::vector<uint16_t>* roadNodes(int cx, int cy); // global road-node references in a loaded cell
     void setPropLibrary(const class PropLibrary* library) { propLibrary_ = library; }
     // Runtime state of a prop (0 = standing; the game sets others when one is knocked over or smashed). A prop that
     // is not solid keeps its shapes aside until it is made solid again.
@@ -135,6 +136,7 @@ private:
         std::vector<PropShapes> propShapes;   // per prop: its shapes in boxes / cyls
         std::vector<CityEmitter> emitters;
         PedPaths pedPaths;
+        std::vector<uint16_t> roadNodes;
         bool loaded = false;              // false = no data (off-map)
     };
     const Cell* cell(int cx, int cy);

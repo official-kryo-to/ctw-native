@@ -75,7 +75,7 @@ const Collision::Cell* Collision::cell(int cx, int cy) {
         out.assign(d.begin() + p, d.begin() + p + len);
         p += len;
     };
-    std::vector<uint8_t> sec[11];
+    std::vector<uint8_t> sec[12];
     for (auto& s : sec) section(s);
     auto count = [](const std::vector<uint8_t>& s) { uint32_t k = 0; if (s.size() >= 4) memcpy(&k, s.data(), 4); return k; };
     if (uint32_t k = count(sec[0]); k && sec[0].size() >= 4 + k * 28) {
@@ -160,6 +160,14 @@ const Collision::Cell* Collision::cell(int cx, int cy) {
         C.carGens.resize(k);
         memcpy(C.carGens.data(), &sec[7][4], k * 20);
     }
+    if (sec[11].size() >= 2) { // native sector +0x148 (0x9171E8 / 0x911800)
+        uint16_t k;
+        memcpy(&k, sec[11].data(), 2);
+        if (sec[11].size() >= 2 + (size_t)k * 2) {
+            C.roadNodes.resize(k);
+            memcpy(C.roadNodes.data(), sec[11].data() + 2, (size_t)k * 2);
+        }
+    }
     C.loaded = true;
     return &C;
 }
@@ -213,6 +221,11 @@ const std::vector<Collision::Prop>* Collision::props(int cx, int cy) {
 const std::vector<Collision::CarGen>* Collision::carGens(int cx, int cy) {
     const Cell* C = cell(cx, cy);
     return C && !C->carGens.empty() ? &C->carGens : nullptr;
+}
+
+const std::vector<uint16_t>* Collision::roadNodes(int cx, int cy) {
+    const Cell* C = cell(cx, cy);
+    return C ? &C->roadNodes : nullptr;
 }
 
 const Collision::PedPaths* Collision::pedPaths(int cx, int cy) {

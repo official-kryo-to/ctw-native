@@ -38,4 +38,6 @@ public:
 private:
     std::vector<Node> nodes_;
     std::vector<uint16_t> links_;
+    friend struct TrafficTestAccess;
+    friend struct PedsTestAccess;
 };

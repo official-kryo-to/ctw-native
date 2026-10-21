@@ -52,6 +52,10 @@ bool Sound::Bank::sample(int i, const uint8_t*& pcm, uint32_t& len, uint32_t& ra
 }
 
 bool Sound::init(const std::string& dataDir) {
+    for(auto& item:people_)stopSlots(item.second);
+    people_.clear();commentHistory_.clear();
+    for(auto& voice:comments_)voice={};smallCommentCursor_=largeCommentCursor_=0;
+    commentTables_.load(dataDir+"/ped_comments.bin");
     for (auto& item : ents_) stopSlots(item.second);
     for (auto& item : water_) stopSlots(item.second);
     water_.clear();
@@ -237,6 +241,14 @@ void Sound::playResident(int sample, int volume) {   // cAudioManager::PlaySfx(s
     const uint8_t* pcm; uint32_t len, rate;
     if (!res_.sample(sample, pcm, len, rate)) return;
     Audio_SfxPlay(pcm, len, (int)rate, std::clamp(volume, 0, 127) / 127.f, 0.f, false);
+}
+
+void Sound::playHud(int sample, int volume) {
+    // HUD calls at 0x6b14f4 start direct playback, including responses made while gameplay is paused.
+    // The SDL backend keeps those responses separate from suspended world voices.
+    const uint8_t* pcm; uint32_t len,rate;
+    if (res_.sample(sample,pcm,len,rate))
+        Audio_HudSfxPlay(pcm,len,(int)rate,std::clamp(volume,0,127)/127.f);
 }
 
 void Sound::propSmash(const int32_t pos[3], int effect) {
@@ -482,8 +494,8 @@ void Sound::playerPed(Game& g) {
         if (g.playerCar >= 0 || player.hidden || player.attached || player.dead) stopSlots(ped_);
         return;
     }
-    // Observed in Android 4.4.243 ProcessEntityTypePlayerPed: the unarmed cycle emits event 0x35
-    // at frames 6 and 13, volume 0x23 and squared radius 200. The foot alternates once per half-cycle.
+    // Walking-audio branch at 0x6b4cc4: walkFrame selects the upper/legs cycle by weapon;
+    // emit event 0x35 at frames 6 and 13, volume 0x23 and squared radius 200, alternating half-cycles.
     int frame = player.walkFrame();
     if (frame == lastWalkFrame_) return;
     if ((firstFoot_ && frame >= 6 && frame < 13) || (!firstFoot_ && frame >= 13)) {
@@ -495,6 +507,7 @@ void Sound::playerPed(Game& g) {
 
 void Sound::update(Game& g) {
     if (!ok()) return;
+    updatePedComments(g);
     ++ticks_;
     for(auto it=water_.begin();it!=water_.end();) {
         if(!it->second.seen) { stopSlots(it->second); it=water_.erase(it); continue; }

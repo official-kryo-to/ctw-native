@@ -10,4 +10,8 @@ unsigned char gCarCollisionEventsMed[12] = {7};
 unsigned char gCarCollisionEventsHigh[12] = {8};
 unsigned char gPropSfx[57 * 4] = {11, 12, 13};
 unsigned char TextColours[92] = {9, 10, 11};
+unsigned char gDrivingProps[1030] = {3, 4, 5, 6};
+unsigned short stuckReverse1[4] = {100, 110, 120, 130};
+unsigned short stuckReverse2[4] = {30, 40, 50, 60};
+int stuckReverseSteer[10][2] = {{4096, -4096}, {2048, 0}};
 }

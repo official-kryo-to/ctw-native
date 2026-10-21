@@ -16,9 +16,11 @@
 // accelerates by 0x4CE a frame to the road speed (6 + a little, x2 / x2.5 on two-lane roads) and brakes with
 // v^2 / d towards whatever VehicleSimpleProximityProcess found ahead (cars in a box 6..9 units + the car's radius
 // in front, peds in its path) or a red light (1024-frame cycle). When something hits it, it becomes a normal
-// physics car (the driver's rejoin task, cRejoinNetworkInVehicle, is not ported: it stays put).
+// physics car. Its driver retains a rejoin task and drives back toward the road before resuming the spline.
 #pragma once
 #include "aispline.h"
+#include "driving.h"
+#include "trafficavoidance.h"
 #include <cstdint>
 #include <map>
 #include <string>
@@ -32,6 +34,11 @@ public:
     bool init(const std::string& dataDir);
     bool ok() const { return !makeups_.empty(); }
     void update(Game& g);   // once per game frame, before the vehicles act
+    void afterPhysics(Game& g);
+    Vehicle::Controls controls(uint32_t uid) const;
+    bool pedIntercept(Game& g, uint32_t uid, TrafficAvoidance::Intercept& out) {
+        return avoidance_.interceptPed(g,uid,out);
+    }
 
     struct ZoneInfo { int fields[20]; int pedMakeup, vehMakeup, pedDensity, carDensity, sex = 0; };   // sex: 1 male, 2 female
     const ZoneInfo* zoneAt(int32_t x, int32_t y, bool night) const;
@@ -56,6 +63,16 @@ private:
         bool noNext = false;       // +0xF9
         bool cop = false;          // +0xF8
         uint32_t lastFrame = 0;    // +0xF0
+        bool rejoining = false, aimValid = false, rejoinFailed = false;
+        int32_t aim[3]{};
+        Vehicle::Controls controls;
+        DrivingRecovery recovery;
+        int32_t beforePhysics[3]{}, stuckOrigin[2]{};
+        uint16_t stuckFrames = 0;
+        bool trackingStuck = false, stuck = false, movementRequested = false;
+        int16_t previousTargetCheck[2] = {-1,-1};
+        uint8_t completionFrame = 0;
+        bool cachedCompletion = false;
     };
     std::map<uint32_t, Driver> drivers_;   // by Vehicle::uid
 
@@ -68,6 +85,9 @@ private:
     std::vector<Makeup> makeups_;
     std::vector<std::vector<std::pair<uint16_t, uint16_t>>> pedMakeups_;
     uint32_t linkCursor_ = 0;
+    uint8_t spawnFallback_ = 0; // ordinary population spawn retry state (+0x5A)
+    DrivingProps drivingProps_;
+    TrafficAvoidance avoidance_;
 
     int vehicleFromMakeup(const Game& g, int makeup, int limit) const;   // cPopInfoManager::GetVehicleId
     bool createPos(Game& g, int network, int& a, int& b, int32_t pos[3], int& lane, int32_t& ratio);
@@ -75,4 +95,9 @@ private:
     void proximity(Game& g);
     void wander(Game& g, Vehicle& v, Driver& d);
     void forwardSpeed(Game& g, Vehicle& v, Driver& d);
+    bool copyRoadPosition(Game& g, const Vehicle& v, Driver& d, int32_t& distance);
+    bool computeAim(Game& g, const Vehicle& v, Driver& d);
+    bool completedAim(const Game& g, const Vehicle& v, Driver& d);
+    void rejoin(Game& g, Vehicle& v, Driver& d);
+    friend struct TrafficTestAccess;
 };

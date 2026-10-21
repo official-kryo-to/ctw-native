@@ -164,7 +164,14 @@ void Fires::ignite(Game& g, const Fire& f) {
 }
 
 void Fires::processFire(Game& g, Fire& f) {   // cFire::Process
-    if (f.attach != None && !attachedPos(g, f, f.pos)) f.out = true;   // AttachLinkRemoved
+    if (f.attach != None) {
+        if (!attachedPos(g, f, f.pos)) { f.out = true; return; }   // AttachLinkRemoved
+        // cFire::Process: attached fires are extinguished when their owner is in water.
+        if (g.collision.ground(f.pos[0] / 4096.f, f.pos[1] / 4096.f, f.pos[2] / 4096.f).surface == 2) {
+            f.out = true;
+            return;
+        }
+    }
     if (f.attach == None) {   // cObject::Process: the loose fire moves with its velocity
         int32_t step[3];
         for (int k = 0; k < 3; ++k) step[k] = (int32_t)((17LL * f.vel[k]) >> 9);

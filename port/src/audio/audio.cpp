@@ -92,6 +92,7 @@ struct SfxVoice {
     float vol = 1, pan = 0, pitch = 1;
     int rate = 22050, id = 0;
     bool loop = false, active = false;
+    bool pauseWithWorld = true;
 };
 static SfxVoice g_sfx[32];
 static int g_sfxNext = 1;
@@ -99,10 +100,9 @@ static std::atomic<float> g_sfxVolume{0.8f};
 static bool g_sfxPaused = false;   // protected by the audio device lock
 
 static void mixSfx(int16_t* out, int frames) {
-    if (g_sfxPaused) return;
     const float master = g_sfxVolume.load();
     for (SfxVoice& v : g_sfx) {
-        if (!v.active) continue;
+        if (!v.active || (g_sfxPaused && v.pauseWithWorld)) continue;
         const double step = (double)v.rate * v.pitch / kOutRate;
         // equal-power pan
         float a = (v.pan + 1.f) * 0.25f * 3.14159265f;
@@ -123,7 +123,7 @@ static void mixSfx(int16_t* out, int frames) {
     }
 }
 
-int Audio_SfxPlay(const unsigned char* pcm, unsigned len, int rate, float volume, float pan, bool loop) {
+static int playSfx(const unsigned char* pcm, unsigned len, int rate, float volume, float pan, bool loop, bool pauseWithWorld) {
     if (!g_dev || !pcm || !len) return 0;
     SDL_LockAudioDevice(g_dev);
     int h = 0;
@@ -132,12 +132,21 @@ int Audio_SfxPlay(const unsigned char* pcm, unsigned len, int rate, float volume
             v = SfxVoice{};
             v.data.assign(pcm, pcm + len); v.len = len; v.rate = rate > 0 ? rate : 22050;
             v.vol = volume; v.pan = pan; v.loop = loop; v.active = true;
+            v.pauseWithWorld = pauseWithWorld;
             v.id = h = g_sfxNext++;
             if (g_sfxNext <= 0) g_sfxNext = 1;
             break;
         }
     SDL_UnlockAudioDevice(g_dev);
     return h;
+}
+
+int Audio_SfxPlay(const unsigned char* pcm, unsigned len, int rate, float volume, float pan, bool loop) {
+    return playSfx(pcm,len,rate,volume,pan,loop,true);
+}
+
+int Audio_HudSfxPlay(const unsigned char* pcm, unsigned len, int rate, float volume) {
+    return playSfx(pcm,len,rate,volume,0.f,false,false);
 }
 
 static SfxVoice* findVoice(int h) {

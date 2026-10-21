@@ -40,9 +40,18 @@ static const int32_t kGravity = 0x1ED0;   // per frame, units per second
 
 int16_t Player::heading() const { return (int16_t)-atan2q(-fwd[0], fwd[1]); }
 
+int Player::walkFrame() const {
+    // Walking-audio branch at 0x6b4cc4: weapon mask 0x3FC1E selects the legs (+0x29C),
+    // since these weapons replace the upper cycle (+0x254). The taser does so only in states 1/2.
+    const bool weaponLegs = (weaponType >= 0 && weaponType < 20 && ((1u << weaponType) & 0x3FC1Eu)) ||
+                            (weaponType == 19 && (weaponState == 1 || weaponState == 2));
+    return (weaponLegs || fightIdleFrames_ ? frameLegs_ : frameUpper_) >> 8;
+}
+
 int32_t Player::currentSpeed() const {
     if (level_ == 0) return 0;
-    int32_t s = (int32_t)(((int64_t)kLevelMul[level_] * kBaseSpeed) >> 12);   // unarmed: weapon factor 1.0
+    const int32_t base=mulq(kBaseSpeed,weaponMovementScale); // native 0x87cd44/0x87cd54, before gait rounding
+    int32_t s = mulq(kLevelMul[level_],base);
     if (level_ != 3) s = (int32_t)(((int64_t)s * kHoldMul) >> 12);
     return s * 30;
 }
@@ -118,7 +127,7 @@ void Player::act(const Input& in, const PedSprites* sprites) {
     if (reacting()) { actReaction(sprites); return; }
     // cPed::Act
     updateSpeed(in);
-    animate(sprites);
+    if (!in.taskAnimation) animate(sprites);
     if (onGround_) {   // velocity from the facing, only while standing on something
         int32_t sp = (int32_t)(currentSpeed() * speedScale);
         int32_t v[3] = {mulq(sp, fwd[0]), mulq(sp, fwd[1]), vel[2] + mulq(sp, fwd[2])};
@@ -515,7 +524,7 @@ void Player::constrainByCollision(Collision* col, int32_t moveLen, bool& walkabl
 // cPed::AnimateWalkRunCycleWeapons (the player never has +0x210 set: his fire chance is 100): the upper-body
 // animation for the held weapon. hold: show its first frame (it was fired this frame); sync: it steps with the
 // walk speed like the legs instead of at the fixed rate.
-static int weaponUpper(int base, int up, int type, int state, uint32_t flags, bool& hold, bool& sync, uint8_t& punch) {
+static int weaponUpper(int base, int up, bool moving, int type, int state, uint32_t flags, bool& hold, bool& sync, uint8_t& punch) {
     hold = sync = false;
     if (type == 0) {   // fists: a punch while the swing runs (cPlayer::GetMeleeAnim; the combo is not ported)
         bool swing = false, fresh = false;
@@ -539,6 +548,7 @@ static int weaponUpper(int base, int up, int type, int state, uint32_t flags, bo
             return base + 257;
         case 3:   // sword
             if ((state && (state == 1 || !(flags & 1))) || (flags & 2)) { hold = fireHold; return base + 232; }
+            if (moving) { sync = true; return base + 240; } // native moving hold at 0x87de2c
             return base + 214;
         case 4:   // chainsaw
             if (!state || (flags & 1)) { sync = true; return base + 229; }
@@ -589,7 +599,23 @@ static int weaponUpper(int base, int up, int type, int state, uint32_t flags, bo
     }
 }
 
+bool Player::fightIdle(int& upper, int& legs) { // cPlayer::DoFightIdle
+    if (upperAim) fightIdleFrames_=90;
+    if (upperAim && (weaponType==5 || weaponType==7 || weaponType==8 || weaponType==9 || weaponType==6)) {
+        upper=bodySet*275+(weaponType==6 ? 231 : weaponType==8 || weaponType==9 ? 239 : 234);
+        fightIdleFrames_=0;
+        return true;
+    }
+    if (level_==3 || weaponType) { fightIdleFrames_=0;return false; }
+    if (!fightIdleFrames_) return false;
+    --fightIdleFrames_;
+    upper=bodySet*275+104;legs=bodySet*275+105;
+    return true;
+}
+
 void Player::animate(const PedSprites* sprites) {
+    previousUpperFrame_ = frameUpper_ >> 8;
+    animationRotation_ = 0;
     oneShotTicks_ = 0;
     if (!sprites || !sprites->ok()) return;
     int base = bodySet * 0x113, up, legs;
@@ -597,22 +623,33 @@ void Player::animate(const PedSprites* sprites) {
     switch (level_) {
         case 1: up = base + 2; legs = base + 3; break;
         case 2: up = base + 4; legs = base + 5; break;
-        case 3: up = base + 0xA0; legs = base + 0xA1; break;   // the player's sprint (class 0x36)
+        case 3:
+            up = base + (playerControlled ? 160 : 162);
+            legs = up + 1; // native class-54 player and ordinary-pedestrian sprint pairs at 0x87e8d4
+            break;
         default: up = base; legs = base + 1; break;
     }
+    const int locomotionUpper=up,locomotionLegs=legs;
+    const bool idlePose=playerControlled && fightIdle(up,legs);
+    if (level_) legs=locomotionLegs; // moving peds retain their gait's legs (0x87ea48)
     bool hold = false, sync = false;
     uint8_t punchNext = punch;
-    const int weaponUp = playerControlled ? weaponUpper(base, up, weaponType, weaponState, weaponFlags, hold, sync, punchNext) : up;
+    const int weaponUp = playerControlled ? weaponUpper(base, up, level_!=0, weaponType, weaponState, weaponFlags, hold, sync, punchNext) : up;
     punch = punchNext;
-    if (weaponUp != up) {   // AnimateWalkRunCycle with a weapon pose: it restarts when it changes and steps at the
+    if (weaponType==0 && (weaponUp==base+233 || weaponUp==base+243))
+        fightIdleFrames_=90; // GetMeleeAnim calls cPlayer::StartFightIdle for each active unarmed swing
+    if (weaponUp != locomotionUpper || idlePose) {   // AnimateWalkRunCycle with a weapon pose: it restarts when it changes and steps at the
         // fixed rate (0x88 >> 4) unless synced with the legs; the legs keep their own cycle
         if (weaponUp != animUpper_) { animUpper_ = weaponUp; frameUpper_ = 0; }
         if (legs != animLegs_) { animLegs_ = legs; frameLegs_ = 0; }
         const int step = (int)(((int64_t)currentSpeed() * 0x88) >> 16);
         if (level_) frameLegs_ = sprites->advance(animLegs_, frameLegs_, step);
+        else if (legs!=locomotionLegs) frameLegs_=sprites->advanceOneFrame(animLegs_,frameLegs_);
         else frameLegs_ = 0;
+        // Standing resets before Animate; moving resets after it (native 0x87ed3c / 0x87ed20).
+        if (hold && !level_) frameUpper_=0;
         if (!(sync && !level_)) frameUpper_ = sprites->advance(animUpper_, frameUpper_, sync ? step : 0x88 >> 4);
-        if (hold) frameUpper_ = 0;
+        if (hold && level_) frameUpper_ = 0;
         return;
     }
     if (level_ == 0) {   // standing: both sprites hold their first frame
@@ -641,6 +678,7 @@ void Player::animate(const PedSprites* sprites) {
 }
 
 void Player::ride(int upper, int legs, const PedSprites* sprites) {
+    animationRotation_ = 0;
     oneShotTicks_ = 0;
     upper += bodySet * 0x113;
     legs += bodySet * 0x113;
@@ -673,7 +711,8 @@ void Player::renderRiding(const PedSprites* sprites, const PedLight* light, cons
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_ALPHA_TEST);
     glAlphaFunc(GL_GREATER, 8.f / 256.f);
-    float h = -heading * 3.14159265f / 32768.f;
+    const int16_t spriteAngle=(int16_t)(heading+(int16_t)(spriteHeading()-this->heading()));
+    float h = -spriteAngle * 3.14159265f / 32768.f;
     float pl[3] = {legs[0] / 4096.f, legs[1] / 4096.f, legs[2] / 4096.f}, pu[3] = {upper[0] / 4096.f, upper[1] / 4096.f, upper[2] / 4096.f};
     sprites->draw(pl, h, animLegs_, frameLegs_, palUpper, palLegs, 0.5f, 0.2998f, light, flip_);
     sprites->draw(pu, h, animUpper_, frameUpper_, palUpper, palUpper, 1.0f, 0.75f, light, flip_);
@@ -688,14 +727,15 @@ void Player::setHeading(int16_t h) {
     fwd[2] = 0;
 }
 
-void Player::playOneShot(int upper, int legs, bool flip) {
+void Player::playOneShot(int upper, int legs, bool flip, bool preserveSpeed) {
+    animationRotation_ = 0;
     animUpper_ = upper + bodySet * 0x113;
     animLegs_ = legs + bodySet * 0x113;
     frameUpper_ = frameLegs_ = 0;
     oneShotTicks_ = 0;
     doneUpper_ = doneLegs_ = false;
     flip_ = flip;
-    level_ = 0;
+    if (!preserveSpeed) level_ = 0;
 }
 
 bool Player::stepOneShot(const PedSprites* sprites) {   // cOneShotAnimationTask::Process
@@ -723,7 +763,7 @@ void Player::render(const PedSprites* sprites, const PedLight* light) const {
     glAlphaFunc(GL_GREATER, 8.f / 256.f);
     float p[3];
     posf(p);
-    float h = -heading() * 3.14159265f / 32768.f;   // PedSprites: radians, counter-clockwise
+    float h = -spriteHeading() * 3.14159265f / 32768.f;   // PedSprites: radians, counter-clockwise
     // cAnimation selects sprite pose 3 while fallen (0x733 high), pose 0
     // for an impact's upper half, and restores the legs first in state 1.
     const int animation = animUpper_ - bodySet * 0x113;

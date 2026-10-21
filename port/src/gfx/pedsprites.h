@@ -46,6 +46,7 @@ public:
 
     // cPedSprite::Animate: frame (24.8) advanced by rate * step >> 8, wrapping (or holding for one-shots).
     int advance(int anim, int frame, int step) const;
+    int advanceOneFrame(int anim, int frame) const; // native 0x89a468 frame step, independent of animation rate
 
     // Draws one sprite (all layers of `anim` at `frame` (24.8)) at the feet position, facing heading
     // (radians, 0 = +y), with palettes `palA` (first layers, higher) and `palB` (the rest).
@@ -55,6 +56,7 @@ public:
     bool advanceOneShot(int anim, int& frame, int step) const;
 
 private:
+    int finishFrame(int anim, int frame) const;
     const uint8_t* animData(int anim) const;
     std::vector<uint8_t> anims_, palettes_;
 };

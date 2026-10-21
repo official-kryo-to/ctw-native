@@ -34,6 +34,8 @@ public:
     void propSmash(const int32_t pos[3], int effect, int radius);
     void pedDeath(const int32_t pos[3], bool male, bool inWater);   // cAudioManager::PlayDeathSound
     void playResident(int sample, int volume);                     // cAudioManager::PlaySfx: not positional
+    void playHud(int sample, int volume);                          // resident HUD channel, independent of world pause
+    void conversation(Game& game, uint32_t uid);                    // native comment type 5, on-foot civilian speech
     void waterStream(uint32_t id, const int32_t pos[3], int volume); // cannon event 0x6C, refreshed each tick
     void playerEvent(int event, int volume, int radius);           // AddSoundEvent on the player ped (weapons)
     void scriptSfx(const int32_t pos[3], int sample, int volume, int radius);   // cAudioManager::PlayScriptSfx
@@ -67,6 +69,14 @@ private:
     struct Entity { Slot s[5]; int32_t pos[3] = {0, 0, 0}; bool seen = false; };
     std::map<uint32_t, Entity> ents_;
     std::map<uint32_t, Entity> water_;
+    std::map<uint32_t, Entity> people_; // independent namespace from vehicle sound IDs
+    PedCommentTables commentTables_;
+    struct CommentVoice { bool active=false; uint32_t uid=0; int slot=-1,sample=-1; uint64_t deadline=0; } comments_[2];
+    struct CommentHistory { int type=-1; uint64_t time=0; };
+    std::map<uint32_t,CommentHistory> commentHistory_;
+    int smallCommentCursor_=0,largeCommentCursor_=0;
+    bool conversationAt(Game& game,uint32_t uid,uint32_t now);
+    void updatePedComments(Game& game);
     uint32_t ticks_ = 0;
     uint32_t lastCollision_ = 0;
 
@@ -74,7 +84,7 @@ private:
     void processEntity(Game& g, Entity& e, bool persistent);              // ProcessStandardSfx
     void carEngine(Game& g, Vehicle& v, Entity& e);                       // ProcessEntityTypeCar
     void playerCar(Game& g, Vehicle& v, Entity& e);                       // ProcessEntityTypePlayerCar
-    void playerPed(Game& g);                                            // unarmed ProcessEntityTypePlayerPed
+    void playerPed(Game& g);                                            // walking ProcessEntityTypePlayerPed
     Entity ped_;
     Entity script_[8];   // original PlayScriptSfx pool: eight positional one-shots
     int lastWalkFrame_ = -1;

@@ -106,8 +106,32 @@ struct WaterTestAccess {
 };
 
 struct PlayerTestAccess {
-    static void gait(Player& p, int frame, int level = 2, bool grounded = true) {
-        p.frameUpper_ = frame << 8; p.level_ = (uint8_t)level; p.onGround_ = grounded;
+    static void fightIdle() {
+        Player player;int upper=0,legs=1;
+        player.upperAim=true;
+        check(player.fightIdle(upper,legs) && player.fightIdleFrames_==89 &&
+              upper==player.bodySet*275+104 && legs==player.bodySet*275+105,
+              "unarmed aiming refreshes ninety fight-idle ticks before consuming the current tick");
+        player.upperAim=false;
+        for(int i=0;i<89;++i) check(player.fightIdle(upper,legs),"fight idle retains its original ninety-frame duration");
+        check(!player.fightIdle(upper,legs),"fight idle releases its pose on the exact timer boundary");
+        for(int weapon:{5,7,6,8,9}) {
+            player.weaponType=weapon;player.upperAim=true;
+            check(player.fightIdle(upper,legs) && player.fightIdleFrames_==0 &&
+                  upper==player.bodySet*275+(weapon==6?231:weapon==8||weapon==9?239:234),
+                  "aimed sidearms use their native pose without retaining an unarmed fight timer");
+        }
+        player.weaponType=0;player.upperAim=true;player.level_=3;
+        check(!player.fightIdle(upper,legs) && player.fightIdleFrames_==0,"sprinting cancels the unarmed fight-idle timer");
+        player.level_=2;player.upperAim=false;player.fightIdleFrames_=10;
+        player.frameUpper_=0;player.frameLegs_=6<<8;
+        check(player.walkFrame()==6,"fight-idle footsteps use the moving legs rather than the independent combat upper body");
+        player.weaponType=3;
+        check(!player.fightIdle(upper,legs) && !player.fightIdleFrames_,"equipping a melee weapon ends unarmed fight idle");
+    }
+    static void gait(Player& p, int frame, int level = 2, bool grounded = true, int legsFrame = -1) {
+        p.frameUpper_ = frame << 8; p.frameLegs_ = (legsFrame < 0 ? frame : legsFrame) << 8;
+        p.level_ = (uint8_t)level; p.onGround_ = grounded;
     }
 };
 
@@ -200,6 +224,29 @@ struct SoundTestAccess {
         check(footfalls() == 0, "entry animations discard pending footsteps");
         game.player.attached = false; game.player.dead = true; sound.playerPed(game);
         check(footfalls() == 0, "dead player does not emit footsteps");
+        game.player.dead = false;
+        for (int weapon = 0; weapon < 28; ++weapon) {
+            sound.stopSlots(sound.ped_); sound.firstFoot_ = true; sound.lastWalkFrame_ = -1;
+            game.player.weaponType = weapon; game.player.weaponState = 0;
+            PlayerTestAccess::gait(game.player, 0, 2, true, 6);
+            sound.playerPed(game);
+            const bool legs = weapon < 20 && ((1u << weapon) & 0x3FC1Eu);
+            check(footfalls() == (legs ? 1 : 0),
+                  "held weapons select the original upper/legs footstep cycle, including the sword");
+            if (legs) {
+                PlayerTestAccess::gait(game.player, 0, 2, true, 13); sound.playerPed(game);
+                check(footfalls() == 2, "a fixed weapon upper pose cannot suppress alternating leg footfalls");
+            }
+        }
+        for (int state = 0; state <= 4; ++state) {
+            sound.stopSlots(sound.ped_); sound.firstFoot_ = true; sound.lastWalkFrame_ = -1;
+            game.player.weaponType = 19; game.player.weaponState = state;
+            PlayerTestAccess::gait(game.player, 0, 2, true, 6); sound.playerPed(game);
+            check(footfalls() == ((state == 1 || state == 2) ? 1 : 0),
+                  "taser footsteps select the legs only while firing or cooling down");
+        }
+        game.player.weaponType = game.player.weaponState = 0;
+        sound.stopSlots(sound.ped_);
 
         // Arbitrary synthetic mapping and PCM, not the game's sound table or recordings.
         sound.res_.data.resize(0x20 + 2048, 128);
@@ -1068,16 +1115,14 @@ static void fireAndCamera() {
     check(!game.showDebug, "prototype HUD and collision diagnostics are off by default");
     check(game.key(SDL_SCANCODE_F3) && game.showDebug, "F3 enables all debug drawing");
     check(game.key(SDL_SCANCODE_F3) && !game.showDebug, "F3 disables all debug drawing again");
-    // the pause menu (PC extra): Esc pauses instead of quitting
+    // PC bindings for the original pause overlay: gameplay keys stay consumed while paused.
     check(game.key(SDL_SCANCODE_ESCAPE) && game.pauseOpen && game.uiPaused && !game.quitRequested,
           "Esc opens the pause menu and pauses the simulation");
-    check(game.key(SDL_SCANCODE_W) && game.pauseChoice == 3, "the pause menu wraps upwards");
-    game.key(SDL_SCANCODE_DOWN); game.key(SDL_SCANCODE_DOWN); game.key(SDL_SCANCODE_DOWN);
-    check(game.pauseChoice == 2 && game.key(SDL_SCANCODE_RETURN) && game.pauseControls, "Controls opens its page");
-    check(game.key(SDL_SCANCODE_BACKSPACE) && !game.pauseControls && game.pauseOpen, "B / Backspace leaves the page");
+    check(game.key(SDL_SCANCODE_W) && game.pauseOpen, "paused gameplay input is consumed");
     check(game.key(SDL_SCANCODE_ESCAPE) && !game.pauseOpen && !game.uiPaused, "Esc resumes");
-    game.key(SDL_SCANCODE_ESCAPE); game.key(SDL_SCANCODE_UP);
-    check(game.key(SDL_SCANCODE_RETURN) && game.quitRequested, "Quit to desktop asks the main loop to stop");
+    game.key(SDL_SCANCODE_ESCAPE);
+    check(game.key(SDL_SCANCODE_RETURN) && !game.pauseOpen && !game.quitRequested,
+          "the confirm binding resumes the original overlay");
     game.setPause(false); game.quitRequested = false;
     WorldCamera cam; game.setRenderDistance(720); game.viewCamera(cam);
     check(cam.zFar > 720 && cam.zFar > game.freeCam.cam.zFar, "freecam far plane includes the requested radius and camera altitude");
@@ -1300,6 +1345,32 @@ struct RadioTestAccess {
     }
 };
 
+static void playerFrameIntegration() {
+    // Exercise the complete frame: a second Integrate after the convenience update
+    // doubles distance even though CurrentSpeed and the acceleration tests still pass.
+    for (int gait : {1, 2, 3}) {
+        Game game;
+        game.scriptedInput = true;
+        game.scriptedMove[1] = 1;
+        game.scriptedState = gait;
+        game.clockRunning = false;
+        game.peds.densityScale = game.traffic.densityScale = 0;
+        game.camera.reset(game.player.pos, 0);
+        Player reference = game.player;
+        Player::Input input;
+        input.moving = true;
+        input.sprint = gait == 3;
+        input.maxLevel = gait == 1 ? 1 : 3;
+        bool matches = true;
+        for (int frame = 0; frame < 60; ++frame) {
+            reference.update(input, nullptr, nullptr);
+            game.tick();
+            matches = matches && std::equal(reference.pos, reference.pos + 3, game.player.pos);
+        }
+        check(matches, "a complete walking/running/sprinting game frame integrates the player exactly once");
+    }
+}
+
 int main() {
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1);
     check(Audio_Init() && Audio_Init(), "audio initialization is idempotent");
@@ -1312,12 +1383,15 @@ int main() {
     Audio_SetSfxPaused(true);
     source.assign(2205, 140);
     voice = Audio_SfxPlay(source.data(), (unsigned)source.size(), 22050, 1, 0, false);
+    const int hudVoice = Audio_HudSfxPlay(source.data(), (unsigned)source.size(), 22050, 1);
     SDL_Delay(180);
     check(voice && Audio_SfxPlaying(voice), "paused sound effects do not advance or finish while browsing radio");
+    check(hudVoice && !Audio_SfxPlaying(hudVoice), "HUD clicks play and finish while world sound effects remain paused");
     Audio_SetSfxPaused(false);
     for (int i = 0; i < 50 && Audio_SfxPlaying(voice); ++i) SDL_Delay(20);
     check(!Audio_SfxPlaying(voice), "resumed sound effect finishes normally");
-    SoundTestAccess::run(); CollisionTestAccess::run(); CollisionTestAccess::cameraTests(); PropTestAccess::run(); PropDynamicsTestAccess::run();
+    playerFrameIntegration();
+    PlayerTestAccess::fightIdle(); SoundTestAccess::run(); CollisionTestAccess::run(); CollisionTestAccess::cameraTests(); PropTestAccess::run(); PropDynamicsTestAccess::run();
     slats(); garbage(); VehicleTestAccess::flaps(); VehicleTestAccess::debris(); WaterTestAccess::run(); randomStreams(); explosionsAndShake(); fireAndCamera(); RadioTestAccess::run();
     Audio_Shutdown();
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;

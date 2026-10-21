@@ -17,18 +17,23 @@
 // the SetPedType palettes for their subtype.
 //
 // Walking (cWanderPath): the pavement network of each world sector (Collision::PedPaths). The target is the next
-// node plus up to +-0.75 units of random offset per axis (Rand16Critical(101)); within 0.5 units the ped picks a
+// node plus up to +-0.75 units of random offset per axis (Rand16Critical(101)); within 1 unit the ped picks a
 // random onward link, not going back unless it must. Bridge nodes on a sector edge continue in the neighbouring
 // sector (cSectorNodeData::ResolveBridgeNodeId). The ped body is the ported on-foot controller (player.cpp) at
 // walking speed.
 //
-// Speed (cWanderPath::Process): peds walk; joggers (civilian subtype 1) and everyone in rain (time cycle rain
+// Speed (native wander processing): peds walk; joggers (civilian subtype 1) and everyone in rain (time cycle rain
 // >= 0x800) run.
 //
 // Evasive rolls (cWanderPath::HandleEvasiveManeuvers): within 25 units of the player, a ped in the path of the
 // player's car moving at 10 units/s or more rolls to a random side of it (cRollOutOfVehicle: cAnimation state 0xB,
-// animations 0x3C / 0x3D, 20 units/s with the cAnimation::ApplyPhysics ground drag), then sprints while the player's
-// car stays within 25 units, and walks again after that.
+// animations 0x3C / 0x3D, 20 units/s with the cAnimation::ApplyPhysics ground drag), then runs while the player's
+// car stays within 25 units, and walks again after that. Nearby peds run even if no roll is needed: the
+// handler skips the ordinary walk restriction, while Process's existing maximum of run cannot be raised.
+// Lost node IDs rejoin the nearest cached pavement link before proceeding. A ped that requests movement but
+// remains within one unit of its retained position for 46 ticks receives the native ten-unit, ten-tick goto
+// detour. Eligible civilians pause at mooch nodes: a 75% roll every 150 ticks selects a 20..89-tick idle task
+// with the original 172/173 animation pair. Talking and attractor tasks still need their world dependencies.
 //
 // Reactions (cPed::GetReactionHelper / HandleReaction): pedinfo.bin gives each ped type and subtype a list of
 // {chance, reaction, action} records; the first record for the action (or for any action, 9) whose
@@ -40,15 +45,16 @@
 // Generic type-0/type-4 blasts apply distance-based damage and effect-2 knockdowns to on-foot peds;
 // seated occupants are protected from direct blast damage and die through their vehicle instead.
 //
-// Not ported yet (approximations are marked in peds.cpp): attractors and doors, talking, mooching, the roll's
-// facing quadrants, combat and ped-on-ped collision. Being run over knocks a ped down with the on-ground death
-// animation.
+// Not ported yet (approximations are marked in peds.cpp): attractors and doors, talking, road-link rejoin
+// fallback, the roll's facing quadrants, target-blocked/contact detours and combat. Being run over knocks a ped
+// down; central impacts above 25 units/s kill an NPC, while slower damaging hits allow recovery.
 #pragma once
 #include "player.h"
 #include "traffic.h"
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <array>
 
 class Game;
 class PedSprites;
@@ -65,8 +71,9 @@ public:
     struct NodeRef {
         int16_t cx = -1, cy = -1;
         uint16_t index = 0;
+        uint8_t network = 1; // 0: global road node; 1: a sector's pavement node
         bool valid() const { return cx >= 0; }
-        bool operator==(const NodeRef& o) const { return cx == o.cx && cy == o.cy && index == o.index; }
+        bool operator==(const NodeRef& o) const { return network == o.network && cx == o.cx && cy == o.cy && index == o.index; }
     };
     struct Ped {
         Player body;
@@ -81,8 +88,25 @@ public:
         NodeRef cur, prev;           // walking from prev towards cur
         int32_t target[2] = {0, 0};  // cWanderPath's cTarget
         int deadFrames = -1;         // >= 0: knocked down
-        int stuckFrames = 0;
-        bool evading = false;        // cWanderPath +0x6A: rolled away from the player's car, sprints while it is near
+        // The process manager's movement-intent flag and sStuckRecord, retained across AI subtasks.
+        bool wantsMovement = false;
+        struct Stuck {
+            bool tracked = false, stuck = false;
+            uint16_t frames = 0;
+            int32_t origin[2]{};
+        } stuck;
+        struct Wander {
+            enum Phase { Rejoin, Walk, Mooch } phase = Walk;
+            bool initialized = false, joining = false, idleAnimation = false;
+            uint16_t socialStart = 0;
+            uint32_t idleFrames = 0;
+            int32_t joinTarget[2]{};
+        } wander;
+        struct Goto {             // cGotoTargetOnFootStraightLine's temporary avoidance target
+            uint8_t detourFrames = 0;
+            int32_t target[2]{};
+        } go;
+        bool evading = false;        // cWanderPath +0x6A: already rolled away from the nearby player's car
         int rollFrames = -1;         // >= 0 while rolling (cRollOutOfVehicle)
         int32_t rollVel[2] = {0, 0}; // units/s
         bool movementPrepared = false;
@@ -92,6 +116,20 @@ public:
             uint32_t fromCar = 0;          // follows this vehicle while it exists (0: a fixed point)
             int32_t to[2] = {0, 0};        // straight-line target
         } flee;
+        uint32_t socialFriend = 0;
+        bool socialFriendVehicle = false;
+        uint16_t talkingCooldown = 0;
+        bool ambientDisabled = false;
+        struct Talk {
+            enum Role { None, Initiator, Responder } role = None;
+            int state = 0; // native states: 1 waiting, 10 speaking, 11 listening, 12 finished, 20 approach, 21 ready
+            uint32_t partner = 0;
+            uint16_t timer = 0, idleTimer = 0;
+            uint8_t exchanges = 0, limit = 0;
+            int16_t heading = 0;
+            int gesture = 0;
+            bool approachStarted = false, idle = false, animation = false;
+        } talk;
     };
     std::vector<Ped> peds;
     int maxPeds = 0;
@@ -105,6 +143,7 @@ public:
     struct Record {
         uint8_t type, subtype, maleOnly, femaleOnly, legsPalette, upperPalette;
         std::vector<Reaction> reactions;
+        std::array<uint8_t,7> enemies{}, friends{}; // cThreats: masks of native pedinfo record indices
     };
     const Record* record(int type, int subtype) const;
     void dress(Ped& p, int zoneSex) const;   // cPed::cPed + SetPedType + SetMale (looks only)
@@ -143,6 +182,16 @@ private:
     bool appearance(Game& g, Ped& p, int type, const Traffic::ZoneInfo& z);
     void updateOccupant(Game& g, Ped& p);
     void wander(Game& g, Ped& p);
+    bool rejoin(Game& g, Ped& p);
+    bool idle(Game& g, Ped& p);
+    void updateSocialSensor(Game& g, Ped& p);
+    bool canTalk(const Ped& p) const;
+    void startTalk(Ped& p);
+    void finishTalk(Ped& p);
+    bool talk(Game& g, Ped& p);
+    void talkIdle(Game& g, Ped& p);
+    void gotoTarget(Game& g, Ped& p, const int32_t target[2], int maxLevel, bool sprint = false);
+    static void updateStuck(Ped& p, const int32_t before[3]);
     bool advance(Game& g, Ped& p);
     void setTarget(Game& g, Ped& p);
     void runOver(Game& g, Ped& p);

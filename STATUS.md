@@ -9,6 +9,7 @@ compatibility with the original.
   street furniture, street lights, steam vents and fountains.
 - **On foot:** the player character with movement, sprinting and collision. The follow camera counts consecutive
   blocked views and uses the original roof-edge escape and safe above-target recovery.
+  Movement now integrates once per tick; weapon-dependent footsteps use the correct upper/leg animation cycle.
 - **Gameplay HUD:** the original north-up radar tiles, frame, north marker, rotating player/vehicle arrow and
   health semicircle. The map follows the controlled character or vehicle and uses the original map coordinates,
   clipping and colours. The PC uses the phone radar size.
@@ -41,17 +42,24 @@ compatibility with the original.
   owns pedestrian drivers; they animate out when the player takes the seat and are released on destruction.
   Closed-car interiors still hide the original pedestrian sprites. Turn signals follow cAISpline::ShouldIndicate /
   InaugerateYoke (the last 10 units before a junction and through the turn) and stay on a car knocked into physics.
-  A car knocked off its route does not drive back onto it yet (cRejoinNetworkInVehicle and the AI driving stack).
+  Ordinary drivers retain their task after an impact and steer back to the road, with gear-dependent controls,
+  queued-vehicle prediction and timed reverse recovery. Seated drivers no longer block their own cars.
+  Spawns use the loaded road-link cache and the original retry/fallback state. Dynamic/mission networks and
+  the full task graph still need parity work.
 - **Pedestrians:** civilians and cops walk the pavement network of each world sector, using the original zone
   population, spawn schedule, spawn ring, cleanup distance and `pedinfo.bin` looks (gender, body, colours).
-  Joggers run, and everyone hurries in the rain. They roll out of the way of the player's speeding car and sprint
-  while it is near. Dynamic pedestrian/player/vehicle contacts change velocity before movement, using the original
+  Joggers run, and everyone hurries in the rain. Nearby player vehicles retain the task's run-speed limit;
+  pedestrians can roll out of a speeding car's path using scheduled interception checks and the original
+  roll quadrants. Fleeing NPCs use their own sprint poses. Pavement/land-road rejoin, timed idle opportunities and
+  collision-based stuck records replace the old timed path reversal. Dynamic contacts change velocity before movement, using the original
   1.25-radius body spheres and 0.875-radius static sweeps. Vehicle run-over damage, fatal-task ordering,
   impact drag, grounded sliding and living knockdown/getup transitions follow the Android routines. A body
   stays down while a vehicle is above it. Generic explosions apply distance-based health damage and high
   knockdowns, including zero-damage fringe hits. Seated occupants are protected from direct blasts.
 - **Sound:** engines, horns, doors, impacts, object smashing, explosions, the player's footsteps, music, the city,
-  rain and airport ambience, and pedestrian screams and falls.
+  rain and airport ambience, and pedestrian screams and falls. Footsteps use the legs while holding the sword
+  or using unarmed fight idle; sword and fist swing cues follow the original animation timing. HUD sounds
+  continue during pause while world sounds are suspended.
 - **Random numbers:** the original four-stream generator and seed.
 - **Radio:** the original radio app (**Tab** in a car): the station carousel (the original's quarter-step scrolling,
   swipe sound and "Music Player" heading), the equaliser driven by the music, favourite stars and the volume meter,
@@ -73,8 +81,10 @@ compatibility with the original.
   See the [modding guide](ctw-modkit/README.md).
 - **Stats:** cStatsManager's counters (kills, explosions, playing time, days, distances, time in a vehicle and more)
   are kept as in the original save section; there is no stats screen yet.
-- **PC extras:** game controllers (any SDL controller: sticks, triggers and buttons for every action), a pause menu
-  (**Esc** / **Start**) and Linux builds. Mod texture changes are composited on the GPU and spread over frames, so
+- **Pause:** the original free-play HUD overlay, using local HUD artwork and GXT text, darkening, touch bounds
+  and input delay. **Esc** / **Start** open it; mission/replay confirmations require the missing mission host.
+- **PC extras:** game controllers (any SDL controller: sticks, triggers and buttons for every action) and Linux
+  builds. Mod texture changes are composited on the GPU and spread over frames, so
   switching a texture mod on or off no longer stalls the game.
 - **Tools:** the Porter, which makes the game from your APK and lets you pick which bundled mods to include, and a
   showcase viewer for the game's assets.
@@ -102,12 +112,12 @@ compatibility with the original.
 - Other debris, buoyancy and splashes. Gate slats retain the original zero-height
   floor test; this does not fix the remaining waterfront mesh/collision clipping reports.
   Specialised prop smash branches, water-stream contact/extinguishing, the shared vehicle-fragment pool,
-  complete carjacking reactions and traffic returning to its route after an impact remain incomplete.
+  complete carjacking reactions and specialised traffic/task branches remain incomplete.
 - Scripted, aiming and specialised cameras, shake through camera-mode/death transitions, and the hidden-player
   visibility aid.
 - Boats, the jet ski, helicopters and the tank.
 - The SDK covers what is ported (v10 adds giving the player weapons, v11 switching them); wanted levels, missions, saves and custom audio remain unavailable.
-- Weapons: the weapon table, cWeaponManager (slots, switching, ammo and clips, reloads), the weapon wheel and HUD button, and firing for the pistols, SMGs, shotguns, rifles and the minigun (accuracy spread, wall hits, peds and vehicles hit, damage and deaths, bullet traces, fire sounds); fists, nightstick, bat and chainsaw hits; the original auto-aim (cPlayerSensorCone: target priorities and distance bands, the 45-degree fire cone, the turning fire direction and the target marker); the RPG, grenades, molotovs, flash bangs and proximity mines (cBaseProjectile physics, bounces, fuses, the throw power and its arc, explosion types 0 to 3); the sword's delayed swing hit; cMuzzleFlashes (per-weapon flash type, size and jitter, drawn additively); wall ricochet sounds (AddRicochet); armour absorption and the radar's armour arc; blood drops (cParticleEmitterBlood) for bullet, minigun, melee and run-over damage; the flamethrower (its pilot light, flame particles, smoke and setting people and vehicles on fire); burning (cFire: burning people take damage until they die, vehicle fires, molotov ground fires and petrol flames that ignite whoever walks into them, sliding fires that stop at walls, and the looping fire sound); the taser (its dart, wire, electric arc, sparks and steam, shocks that end with the victim on fire, and its charge); the sniper rifle's scope (the top-down scope camera and model, zoom, and shots that hit whoever is under the crosshair). Not yet: the sword's prop hits and swing sounds, the chainsaw's blood spray, the flash bang's daze, water splashes, the gamepad lock-on and target cycling, hit reactions, AI peds with guns and pickups. Muzzle flashes stay up for one simulation tick (the original clears them after one 30 Hz draw).
+- Weapons: the weapon table, cWeaponManager (slots, switching, ammo and clips, reloads), the weapon wheel and HUD button, and firing for the pistols, SMGs, shotguns, rifles and the minigun (accuracy spread, wall hits, peds and vehicles hit, damage and deaths, bullet traces, fire sounds); fists, nightstick, bat and chainsaw hits; the original auto-aim (cPlayerSensorCone: target priorities and distance bands, the 45-degree fire cone, the turning fire direction and the target marker); the RPG, grenades, molotovs, flash bangs and proximity mines (cBaseProjectile physics, bounces, fuses, the throw power and its arc, explosion types 0 to 3); the sword's delayed swing hit; cMuzzleFlashes (per-weapon flash type, size and jitter, drawn additively); wall ricochet sounds (AddRicochet); armour absorption and the radar's armour arc; blood drops (cParticleEmitterBlood) for bullet, minigun, melee and run-over damage; the flamethrower (its pilot light, flame particles, smoke and setting people and vehicles on fire); burning (cFire: burning people take damage until they die, vehicle fires, molotov ground fires and petrol flames that ignite whoever walks into them, sliding fires that stop at walls, and the looping fire sound); the taser (its dart, wire, electric arc, sparks and steam, shocks that end with the victim on fire, and its charge); the sniper rifle's scope (the top-down scope camera and model, zoom, and shots that hit whoever is under the crosshair). Not yet: the sword's prop hits, the chainsaw's blood spray, the flash bang's daze, water splashes, the gamepad lock-on and target cycling, hit reactions, AI peds with guns and pickups. Muzzle flashes stay up for one simulation tick (the original clears them after one 30 Hz draw).
   Character model overrides work for mobile DFF/ANPK/PVR assets; general model/material/shader interfaces and
   rigid object spawning are still missing.
 - The third-person camera and imported LCS people are PC additions. The donor roster uses Toni and LCS civilian

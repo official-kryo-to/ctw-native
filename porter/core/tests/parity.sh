@@ -41,7 +41,7 @@ compare() {  # compare <label> <python output> <rust output>
 for opt in O1 O2 Os; do
     so="$work/libGame_$opt.so"
     (cd "$work" && aarch64-linux-gnu-g++ -$opt -fPIC -shared -o "$so" game.cpp data.cpp blob.S restart.S \
-        -Wl,--build-id=0xa4c441f4943abbcc72e8270ec18248e4358a89e2 -Wl,--section-start=.blob=0x460000)
+        -Wl,--build-id=0xa4c441f4943abbcc72e8270ec18248e4358a89e2 -Wl,--section-start=.blob=0x460000 -Wl,--section-start=.pedcomments=0xe00670)
     python3 "$here/parity.py" tables "$so" > "$work/py.txt"
     "$rust" tables "$so" > "$work/rs.txt"
     grep -q ERROR "$work/py.txt" && { echo "fixture $opt did not extract"; fail=1; }
@@ -49,6 +49,10 @@ for opt in O1 O2 Os; do
         grep -q "^${table}_tables.bin " "$work/py.txt"
         grep -q "^${table}_tables.bin " "$work/rs.txt"
     done
+    grep -q '^driving_props.bin ' "$work/py.txt"
+    grep -q '^driving_props.bin ' "$work/rs.txt"
+    grep -q '^ped_comments.bin ' "$work/py.txt"
+    grep -q '^ped_comments.bin ' "$work/rs.txt"
     compare "tables, fixture -$opt" "$work/py.txt" "$work/rs.txt"
 done
 for lib in libc.so.6 libm.so.6 libstdc++.so.6; do

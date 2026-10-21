@@ -41,6 +41,15 @@ struct SoundTables {
     bool load(const std::string& path);
 };
 
+struct PedCommentTables {
+    struct Range { int32_t first, count; } samples[2][26]{};
+    struct Timing { uint32_t ownGap, randomGap, repeatGap, reserved, peerGap, reserved2; uint64_t nextAllowed; } timing[26]{};
+    int32_t recentSmall[2]{}, recentLarge[4]{};
+    bool loaded = false;
+    bool load(const std::string& path);
+};
+static_assert(sizeof(PedCommentTables::Timing)==32,"native comment timing record");
+
 struct GameplayTables {
     int64_t gearRatio[8]{};
     int32_t topRatio[6]{};
@@ -82,7 +91,7 @@ struct WeaponInfo {
     int32_t textId;            // +0x28: e_main.gxt string
     int32_t slot;              // +0x2C: cWeaponManager slot (byte)
     int32_t effect;            // +0x30: sDamageInfo +0x24
-    int16_t scale[2];          // +0x34: (+0x36 > 0: AnimateWalkRunCycle's strafe pair)
+    int16_t scale[2];          // +0x34/+0x36: movement factor without/with fire held (Q12); zero stops movement
     int32_t rank;              // +0x38
 };
 static_assert(sizeof(WeaponInfo) == 60, "cWeaponInfo");

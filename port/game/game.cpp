@@ -35,6 +35,7 @@ bool Game::init(const std::string& data, const std::string& mods) {
     if (!world.init(dataDir)) return false;
     world.setRadius(1);   // the game keeps a 3 x 3 sector window; one block ring around the player covers it
     Hud_Init(dataDir);
+    if (!pauseScreen.init(dataDir)) fprintf(stderr, "SS_Hud missing: pause-screen artwork unavailable\n");
     if (!gameplayHud.init(dataDir)) fprintf(stderr, "radar map / SS_AlwaysLoaded missing: no radar HUD\n");
     if (props.load()) collision.setPropLibrary(&props);   // before any collision cell loads
     else fprintf(stderr, "prop definitions not found: no street furniture\n");
@@ -823,11 +824,12 @@ void Game::tick() {
             return;
         }
         traffic.update(*this);
-        for (int i = 0; i < (int)cars.size(); ++i) cars[i].act(i == playerCar ? dc : Vehicle::Controls{}, i == playerCar, &collision);
+        for (int i = 0; i < (int)cars.size(); ++i) cars[i].act(i == playerCar ? dc : traffic.controls(cars[i].uid), i == playerCar, &collision);
         peds.update(*this);
         Vehicle::collideCars(cars, playerCar, frame);
         propDynamics.checkImpacts(*this);
         for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); c.processDebris(carModel(c.infoId)); c.processDamage(frame); }
+        traffic.afterPhysics(*this);
         projectiles.process(*this);
         processVehicleDeaths();
         if (playerCar < 0) {
@@ -928,12 +930,12 @@ void Game::tick() {
         Weapons_PlayerFrame(*this, fire && !busy, weaponCycle, throwing && !busy);
         weaponCycle = 0;
     }
-    if (!busy) player.update(in, &collision, &pedSprites);
+    // Prepare movement before dynamic contacts; the shared integration below advances it once.
+    if (!busy) player.act(in, &pedSprites);
     else if (player.dead) player.stepOneShot(&pedSprites);
     else if (player.reacting()) player.actReaction(&pedSprites,Pedestrians::vehicleAbove(*this,player));
-    else if (player.dead) player.stepOneShot(&pedSprites);
     traffic.update(*this);
-    for (Vehicle& c : cars) c.act(Vehicle::Controls{}, false, &collision);
+    for (Vehicle& c : cars) c.act(traffic.controls(c.uid), false, &collision);
     const bool wasDead = player.dead;
     peds.update(*this);
     if (!wasDead && player.dead) {
@@ -945,6 +947,7 @@ void Game::tick() {
     Vehicle::collideCars(cars, -1, frame);
     propDynamics.checkImpacts(*this);
     for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); c.processDebris(carModel(c.infoId)); c.processDamage(frame); }
+    traffic.afterPhysics(*this);
     projectiles.process(*this);
     processVehicleDeaths();
     updateWorldObjects();
@@ -1070,9 +1073,9 @@ void Game::render(int W, int H) {
     applyGrade(W, H);
 
     Hud_Begin(W, H);
-    gameplayHud.render(*this, W, H);
+    if (!pauseOpen) gameplayHud.render(*this, W, H);
     if (showDebug) drawDebug(W, H);
-    WeaponHud_Render(*this, W, H);   // the game's HUD, under the mods' windows
+    if (!pauseOpen) WeaponHud_Render(*this, W, H);   // the game's HUD, under the mods' windows
     Plugins_DrawHud(W, H);
     if (deathFrames_ >= 60 && deathFrames_ < 84) {
         int alpha = deathFrames_ < 72 ? (deathFrames_ - 60) * 255 / 12 : (84 - deathFrames_) * 255 / 12;
@@ -1121,91 +1124,24 @@ bool Game::key(int k) {
     return false;
 }
 
-// ---- the pause menu (PC extra) -----------------------------------------------------------------------------------
-namespace {
-const char* const kPauseItems[4] = {"Resume", "Mod menu", "Controls", "Quit to desktop"};
-const char* const kControlLines[] = {
-    "On foot", "  W A S D / left stick: move     Shift / A: sprint     Ctrl: walk",
-    "  Space, left mouse / RT: fire     G, right mouse / LT: throw     Q E / LB RB: weapon",
-    "  F, Enter / Y: get in a vehicle     Tab / Back: weapon wheel",
-    "Driving", "  W S / RT LT: accelerate, brake     A D / left stick: steer     Space / A: handbrake",
-    "  H / X: horn     F / Y: get out     Tab / Back: radio",
-    "Game", "  Esc / Start: this menu     F4: mod menu     F3: debug overlay",
-};
-}   // namespace
-
+// ---- HUD pause screen ---------------------------------------------------------------------------------------
 void Game::setPause(bool open) {
     if (open == pauseOpen) return;
     pauseOpen = open;
-    pauseChoice = 0;
-    pauseControls = false;
-    uiPaused = open;               // the simulation stops underneath, as for the radio app
+    uiPaused = open;
     Audio_SetSfxPaused(open);
+    if (open) pauseScreen.opened(OS_TimeAccurate());
 }
 
 bool Game::pauseKey(int k) {
-    switch (k) {
-    case SDL_SCANCODE_ESCAPE: case SDL_SCANCODE_BACKSPACE:
-        if (pauseControls) pauseControls = false;
-        else setPause(false);
-        break;
-    case SDL_SCANCODE_UP: case SDL_SCANCODE_W: if (!pauseControls) pauseChoice = (pauseChoice + 3) % 4; break;
-    case SDL_SCANCODE_DOWN: case SDL_SCANCODE_S: if (!pauseControls) pauseChoice = (pauseChoice + 1) % 4; break;
-    case SDL_SCANCODE_RETURN: case SDL_SCANCODE_SPACE: case SDL_SCANCODE_F:
-        if (pauseControls) { pauseControls = false; break; }
-        switch (pauseChoice) {
-        case 0: setPause(false); break;
-        case 1: setPause(false); Plugins_Key(SDL_SCANCODE_F4); break;
-        case 2: pauseControls = true; break;
-        case 3: quitRequested = true; break;
-        }
-        break;
-    default: break;
+    // PC bindings for the original pause/resume action; other input stays out of gameplay.
+    if (k == SDL_SCANCODE_ESCAPE || k == SDL_SCANCODE_BACKSPACE || k == SDL_SCANCODE_RETURN) {
+        TheSound().playHud(326, 127);
+        setPause(false);
     }
-    return true;   // nothing reaches the game while it is paused
+    return true;
 }
 
-void Game::renderPause(int W, int H) {
-    if (!pauseOpen) return;
-    Hud_Rect(0, 0, (float)W, (float)H, 0x000000B4u);
-    const float k = std::max(0.6f, std::min(W / 1280.f, H / 720.f));
-    const char* hint = pauseControls ? "Esc / B: back" : "Up / Down: choose   Enter: select   Esc: resume";
-    float pw = std::max(380.f * k, Hud_TextWidth(hint, 0.8f * k) + 48.f * k);   // sized to its text
-    if (pauseControls)
-        for (const char* line : kControlLines) pw = std::max(pw, Hud_TextWidth(line, 0.95f * k) + 48.f * k);
-    const float row = 46.f * k;
-    const float ph = pauseControls ? (float)(sizeof kControlLines / sizeof *kControlLines) * 26.f * k + 120.f * k
-                                   : 4 * row + 110.f * k;
-    const float px = (W - pw) * 0.5f, py = (H - ph) * 0.5f;
-    Hud_Rect(px, py, pw, ph, 0x14151BF0u);
-    Hud_Rect(px + 12.f * k, py, pw - 24.f * k, 2.f * k, 0xF2C230FFu);
-    Hud_Text(px + 24.f * k, py + 20.f * k, 1.5f * k, 0xF4F5F8FFu, pauseControls ? "Controls" : "Paused");
-    int mx, my;
-    Host_GetMouse(&mx, &my);
-    const bool clicked = Plugins_HostApi().mouse_clicked(0) != 0;
-    if (pauseControls) {
-        float y = py + 70.f * k;
-        for (const char* line : kControlLines) {
-            const bool heading = line[0] != ' ';
-            Hud_Text(px + 24.f * k, y, (heading ? 0.95f : 0.85f) * k, heading ? 0xF2C230FFu : 0xC8CAD2FFu, line);
-            y += 26.f * k;
-        }
-        Hud_Text(px + 24.f * k, py + ph - 34.f * k, 0.8f * k, 0x9A9DAAFFu, hint);
-        if (clicked) pauseControls = false;
-        return;
-    }
-    for (int i = 0; i < 4; ++i) {
-        const float y = py + 70.f * k + i * row;
-        const bool hot = mx >= px && mx < px + pw && my >= y && my < y + row - 6.f * k;
-        if (hot) pauseChoice = i;
-        if (i == pauseChoice) {
-            Hud_Rect(px + 16.f * k, y, pw - 32.f * k, row - 6.f * k, 0xF2C2301Cu);
-            Hud_Rect(px + 16.f * k, y + 8.f * k, 3.f * k, row - 22.f * k, 0xF2C230FFu);
-        }
-        Hud_Text(px + 32.f * k, y + 10.f * k, 1.05f * k, i == pauseChoice ? 0xF4F5F8FFu : 0x9A9DAAFFu, kPauseItems[i]);
-        if (hot && clicked) pauseKey(SDL_SCANCODE_RETURN);
-    }
-    Hud_Text(px + 24.f * k, py + ph - 34.f * k, 0.8f * k, 0x9A9DAAFFu, hint);
-}
+void Game::renderPause(int W, int H) { pauseScreen.render(*this, W, H); }
 
-void Game::shutdown() { WeaponHud_Shutdown(); gameplayHud.shutdown(); radio.shutdown(); Plugins_Shutdown(); }
+void Game::shutdown() { pauseScreen.shutdown(); WeaponHud_Shutdown(); gameplayHud.shutdown(); radio.shutdown(); Plugins_Shutdown(); }

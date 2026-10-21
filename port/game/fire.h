@@ -17,7 +17,7 @@
 // A new fire takes one of three looping fire sounds (resident sample 0x1ED, squared radius 500), or the one of the
 // farthest fire if that is farther than the new one; sounds fade in and out by 10 volume steps a frame.
 //
-// Not ported yet: water hits, the burnt colours, style 5's smoke and the scripted fire styles.
+// Not ported yet: the burnt colours, style 5's smoke and the scripted fire styles.
 #pragma once
 #include <cstdint>
 #include <vector>

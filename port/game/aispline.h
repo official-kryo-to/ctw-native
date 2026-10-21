@@ -45,6 +45,8 @@ public:
     void yokeIndicators(bool& left, bool& right) const;
     int16_t param() const { return param_; }
     int32_t length() const { return len_; }
+    int32_t z() const { return water_ ? -30720 : 0; } // cAISpline::Z
+    int32_t project(const RoadNetwork& rn, const int32_t pos[3]);
     const LinkTarget& target(int i) const { return t_[i]; }
 
     static void worldPos(const RoadNetwork& rn, const LinkTarget& t, int seed, int32_t out[3]);   // cTarget::GetWorldPos
@@ -66,6 +68,7 @@ private:
     int seed_ = 0;               // +0xB0
     int16_t param_ = 0;          // +0xC8 (Q12)
     bool dirty_ = true;          // +0xB4
+    bool water_ = false;         // +0xCD: set from the original starting node's height
     int32_t p1_[2] = {0, 0}, p2_[2] = {0, 0};   // cached T1 / T2 positions (+0x10, +0x18)
     bool left_ = false, right_ = false;          // +0xCB, +0xCC (indicators)
 };

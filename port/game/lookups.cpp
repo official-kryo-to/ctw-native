@@ -50,6 +50,16 @@ bool PopulationTables::load(const std::string& path) {
     return true;
 }
 
+bool PedCommentTables::load(const std::string& path) {
+    *this={};PedCommentTables next;auto file=openTable(path);char header[8];
+    if(!read(file,header,8) || std::memcmp(header,"CTWPEDV1",8) ||
+       !read(file,next.samples,sizeof next.samples) || !read(file,next.timing,sizeof next.timing) ||
+       !read(file,next.recentSmall,sizeof next.recentSmall) || !read(file,next.recentLarge,sizeof next.recentLarge) || !end(file))return false;
+    for(const auto& gender:next.samples)for(const auto& range:gender)
+        if(range.first<0 || range.count<0 || range.first>65535 || range.count>65536-range.first)return false;
+    next.loaded=true;*this=next;return true;
+}
+
 bool SoundTables::load(const std::string& path) {
     *this = SoundTables{};
     std::istringstream file = openTable(path);

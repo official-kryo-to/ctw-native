@@ -23,6 +23,20 @@ const Collision::PathNode* nodeOf(Game& g, const Pedestrians::NodeRef& r) {
     if (!paths || r.index >= paths->nodes.size()) return nullptr;
     return &paths->nodes[r.index];
 }
+
+bool linkNode(Game& g, const Pedestrians::NodeRef& r, int32_t out[3], uint16_t& flags) {
+    if (r.network == 0) {
+        if (!r.valid() || r.index >= g.roads.count()) return false;
+        g.roads.pos(r.index, out);
+        flags = g.roads.node(r.index).flags;
+        return true;
+    }
+    const auto* n = nodeOf(g, r);
+    if (!n) return false;
+    nodePos(*n, out);
+    flags = n->flags;
+    return true;
+}
 }   // namespace
 
 // ---- FrameScheduler -------------------------------------------------------------------------------------------------
@@ -237,8 +251,11 @@ bool ChordCircle(const int32_t a[2], const int32_t b[2], const int32_t c[2], int
 
 void LocalArea::reset(FrameScheduler& scheduler) {
     links_.clear();
+    roadLinks_.clear();
     cursor_ = 0;
     roads_ = false;
+    rebuiltEntities_ = false;
+    entityCacheResetDue_ = false;
     scheduler.create(schedule_, 16);
 }
 
@@ -248,31 +265,81 @@ void LocalArea::dropInvalid(Game& g) {   // ResetCache: swap out links whose nod
         links_[i] = links_.back();
         links_.pop_back();
     }
+    for (size_t i = 0; i < roadLinks_.size();) {
+        if (roadLinks_[i].a.index < g.roads.count() && roadLinks_[i].b.index < g.roads.count()) { ++i; continue; }
+        roadLinks_[i] = roadLinks_.back();
+        roadLinks_.pop_back();
+    }
 }
 
-void LocalArea::add(const Link& l) {   // AddToArray: when full, replace the shortest chord with a longer one
-    if (links_.size() < 48) { links_.push_back(l); return; }
+void LocalArea::add(const Link& l, int network) {   // AddToArray: replace the shortest chord with a longer one
+    auto& links = network == 0 ? roadLinks_ : links_;
+    if (links.size() < 48) { links.push_back(l); return; }
     int32_t least = 409600000;
     int pick = -1;
     for (int i = 0; i < 48; ++i) {
-        const int32_t m = (int32_t)(((int64_t)(int16_t)(links_[i].t1 - links_[i].t0) * links_[i].length) >> 12);
+        const int32_t m = (int32_t)(((int64_t)(int16_t)(links[i].t1 - links[i].t0) * links[i].length) >> 12);
         if (least > m) pick = i;
         if (least >= m) least = m;
     }
-    if (pick >= 0 && least < (int32_t)(((int64_t)(int16_t)(l.t1 - l.t0) * l.length) >> 12)) links_[pick] = l;
+    if (pick >= 0 && least < (int32_t)(((int64_t)(int16_t)(l.t1 - l.t0) * l.length) >> 12)) links[pick] = l;
 }
 
 void LocalArea::update(Game& g) {   // cLocalAreaKnowledge::Update
-    if (!FrameScheduler::fired(schedule_, g.frame)) { dropInvalid(g); return; }
+    rebuiltEntities_ = false;
+    entityCacheResetDue_ = !FrameScheduler::fired(schedule_, g.frame);
+    if (entityCacheResetDue_) { dropInvalid(g); return; }
     if (roads_) {
-        // the road links (network 0) are not ported here: traffic chooses its own; the pavement links stay
+        roadLinks_.clear();
+        int32_t p[3];
+        g.focus(p);
+        addRoads(g, p);
     } else {
+        rebuiltEntities_ = true;
         links_.clear();   // Reset clears the half that is rebuilt
         int32_t p[3];
         g.focus(p);
         addPavement(g, p);
     }
     roads_ = !roads_;
+}
+
+// Native loaded-sector road-link collection (0x911730..0x911E50). Read each sector's global-node references
+// in load order, visiting a node once, and keep chords of the 100-unit player circle. On land the budgets are
+// 48 land links / 12 water links, with 48 total slots. The reverse-link lookup suppresses an already-seen link.
+void LocalArea::addRoads(Game& g, const int32_t player[3]) {
+    std::vector<bool> seen((size_t)g.roads.count(), false);
+    int land = 48, water = 12;
+    for (uint16_t sector : g.sectors.list()) {
+        const auto* ids = g.collision.roadNodes(sector / 100, sector % 100);
+        if (!ids) continue;
+        for (uint16_t index : *ids) {
+            if (index >= g.roads.count() || seen[index]) continue;
+            seen[index] = true;
+            const auto& node = g.roads.node(index);
+            if (node.flags & 3) continue;
+            int& budget = node.z < -4 ? water : land;
+            int32_t at[3]; g.roads.pos(index, at);
+            const NodeRef self{0, 0, index, 0};
+            for (int k = 0; k < g.roads.linkCount(index); ++k) {
+                if (!budget) break;
+                const int next = g.roads.link(index, k);
+                if (next >= g.roads.count() || (g.roads.node(next).flags & 3)) continue;
+                const NodeRef other{0, 0, (uint16_t)next, 0};
+                bool added = false;
+                for (const Link& l : roadLinks_) added = added || (l.a == other && l.b == self);
+                if (added) continue;
+                int32_t to[3]; g.roads.pos(next, to);
+                Link l{self, other};
+                if (!ChordCircle(at, to, player, 100 * 4096, l.t0, l.t1, l.length)) continue;
+                add(l, 0);
+                --budget;
+                if (roadLinks_.size() == 48) return;
+                // The native optional reverse insertion checks for this just-added forward link first
+                // (0x911BD0..0x911C88), so it retains the first encountered orientation.
+            }
+        }
+    }
 }
 
 void LocalArea::addPavement(Game& g, const int32_t player[3]) {   // AddPathingNodes, sector nodes
@@ -357,16 +424,15 @@ bool LocalArea::createPosition(Game& g, const int32_t centre[3], int32_t radius,
 }
 
 bool LocalArea::nearestNodePosition(Game& g, const int32_t p[3], int32_t range, NodeRef& a, NodeRef& b,
-                                    int32_t point[3], int32_t& t) const {   // GetNearestNodePosition
+                                    int32_t point[3], int32_t& t, int network) const {   // GetNearestNodePosition
     int64_t best = (((int64_t)range << 12) * ((int64_t)range << 12)) >> 24;
     bool found = false;
-    for (const Link& l : links_) {
-        const Collision::PathNode* na = nodeOf(g, l.a);
-        const Collision::PathNode* nb = nodeOf(g, l.b);
-        if (!na || !nb) continue;
+    for (const Link& l : network == 0 ? roadLinks_ : links_) {
         int32_t A[3], B[3];
-        nodePos(*na, A);
-        nodePos(*nb, B);
+        uint16_t af, bf;
+        if (!linkNode(g, l.a, A, af) || !linkNode(g, l.b, B, bf)) continue;
+        // Wander's secondary query uses network 0, land constraint 2 and no restricted links.
+        if (network == 0 && (((af | bf) & 0x800) || A[2] < -0x2000)) continue;
         const int32_t d[3] = {B[0] - A[0], B[1] - A[1], B[2] - A[2]};
         const int32_t len = (int32_t)(uint32_t)std::sqrt((double)(uint64_t)((int64_t)d[1] * d[1] + (int64_t)d[0] * d[0] +
                                                                            (int64_t)d[2] * d[2]));

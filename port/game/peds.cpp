@@ -17,7 +17,7 @@
 namespace {
 constexpr int32_t kSpawnRadius = 0x3C000;            // cPositionConstraints::Reset(network 1): 60 units
 constexpr int64_t kRemoveDist2 = 0x1C39000000LL;     // cPed::ShouldBeDestroyed: about 85 units
-constexpr int32_t kArrive = 0x800;                   // cWanderPath: cTarget radius 0.5
+constexpr int32_t kArrive = 0x1000;                  // native completion (0x6EE9B8) clamps the target radius to 1
 constexpr int32_t kFleeArrive = 0x2000;              // cFleeOnFoot: cTarget::SetNode(node, 2.0)
 constexpr int32_t kNearPlayer = 0x19000;             // HandleEvasiveManeuvers: 25 units
 constexpr int kSectorColumns = 140;                  // cNodeId / cWorld sector grid
@@ -68,8 +68,9 @@ bool vehicleContact(Player& body, const Vehicle& car, int32_t normal[3], int32_t
     }
     for (int k = 0; k < 3; ++k)
         normal[k] = (int32_t)(((int64_t)n[0]*car.right[k] + (int64_t)n[1]*car.fwd[k] + (int64_t)n[2]*car.up[k]) >> 12);
-    // cPedCollisionData's gentle-contact branch returns without an impulse.
-    if ((int64_t)car.speed() * 2 >= 0x3000) body.dynamicContact(normal, atVelocity, depth);
+    // cPedCollisionData's gentle-contact branch sets its slow-vehicle flag,
+    // then still applies the relative-velocity impulse (0x8860E8 -> 0x886204).
+    body.dynamicContact(normal, atVelocity, depth);
     return true;
 }
 
@@ -116,6 +117,10 @@ bool Pedestrians::init(const std::string& dataDir) {
     }
     for (size_t o = recOffset; o + 32 <= d.size(); o += 32) {
         Record r{d[o + 0xD], d[o + 0xE], d[o + 0x19], d[o + 0x1A], d[o + 0x1B], d[o + 0x1C], {}};
+        uint32_t enemies, friends;
+        memcpy(&enemies,&d[o],4);memcpy(&friends,&d[o+4],4);
+        if ((size_t)enemies+7<=d.size()) std::copy_n(d.data()+enemies,7,r.enemies.begin());
+        if ((size_t)friends+7<=d.size()) std::copy_n(d.data()+friends,7,r.friends.begin());
         uint32_t at;
         memcpy(&at, &d[o + 8], 4);
         for (size_t k = 0; k < d[o + 0xC] && (size_t)at + 3 * k + 3 <= d.size(); ++k)
@@ -166,15 +171,18 @@ void Pedestrians::dress(Ped& p, int zoneSex) const {
 }
 
 void Pedestrians::setTarget(Game& g, Ped& p) {   // cWanderPath::SetNext
-    const Collision::PedPaths* paths = g.collision.pedPaths(p.cur.cx, p.cur.cy);
-    if (!paths || p.cur.index >= paths->nodes.size()) return;
     int32_t at[3];
-    nodePos(paths->nodes[p.cur.index], at);
+    if (!nodeAt(g, p.cur, at)) return;
     p.target[0] = at[0] + jitter();
     p.target[1] = at[1] + jitter();
 }
 
 bool Pedestrians::nodeAt(Game& g, const NodeRef& n, int32_t out[3]) {
+    if (n.network == 0) {
+        if (!n.valid() || n.index >= g.roads.count()) return false;
+        g.roads.pos(n.index, out);
+        return true;
+    }
     const Collision::PedPaths* paths = g.collision.pedPaths(n.cx, n.cy);
     if (!paths || n.index >= paths->nodes.size()) return false;
     nodePos(paths->nodes[n.index], out);
@@ -210,6 +218,18 @@ bool Pedestrians::resolveBridge(Game& g, const NodeRef& bridge, NodeRef& out) co
 // such). With a best direction the most aligned candidate wins (ties: the later one), otherwise
 // Rand16Critical(count). A candidate that is a bridge node and was not resolved is resolved at the end.
 bool Pedestrians::nextNode(Game& g, const NodeRef& cur, const int32_t from[2], const int32_t* best, NodeRef& out) const {
+    if (cur.network == 0) {
+        if (!cur.valid() || cur.index >= g.roads.count()) return false;
+        std::vector<uint16_t> candidates;
+        for (int k = 0; k < g.roads.linkCount(cur.index); ++k) {
+            const int next = g.roads.link(cur.index, k);
+            if (next < g.roads.count() && !(g.roads.node(next).flags & 0x803)) candidates.push_back((uint16_t)next);
+        }
+        if (candidates.empty()) return false;
+        // Native world-node choice without previous-node/lane hints (0x6EF6D4).
+        out = {0, 0, candidates[Rand16Critical((uint32_t)candidates.size())], 0};
+        return true;
+    }
     const Collision::PedPaths* paths = g.collision.pedPaths(cur.cx, cur.cy);
     if (!paths || cur.index >= paths->nodes.size()) return false;
     const Collision::PathNode& node = paths->nodes[cur.index];
@@ -292,7 +312,9 @@ bool Pedestrians::advance(Game& g, Ped& p) {
     int32_t from[3];
     if (!p.prev.valid() || !nodeAt(g, p.prev, from)) nodeAt(g, p.cur, from);
     NodeRef next;
-    if (!nextNode(g, p.cur, from, nullptr, next)) return false;
+    // The native road fallback chooses from its previous global node; sector paths choose from the arrival node.
+    const NodeRef source = p.prev.valid() && p.prev.network == 0 ? p.prev : p.cur;
+    if (!nextNode(g, source, from, nullptr, next) || next == p.cur) return false;
     p.prev = p.cur;
     p.cur = next;
     setTarget(g, p);
@@ -362,6 +384,8 @@ bool Pedestrians::appearance(Game& g, Ped& p, int type, const Traffic::ZoneInfo&
     }
     dress(p, z.sex);
     p.body.playerControlled = false;
+    p.wander.socialStart = (uint16_t)g.frame;
+    p.wander.initialized = true;
     return true;
 }
 
@@ -475,24 +499,23 @@ void Pedestrians::runOver(Game& g, Ped& p) {
     }
 }
 
-// cWanderPath::HandleEvasiveManeuvers. The original asks cLocalAreaKnowledge::GetIntercept for a vehicle reaching the
-// ped within 30 frames; this uses the car's straight line over the next second. Within 25 units of the player in a
-// car: a ped that has rolled away sprints; otherwise one in the path of the car, driven at 10 units/s or more and
-// heading towards it, rolls along the car's right axis, to a random side (Rand16Critical(2)).
+// Native evasive-handler branch at 0x722210: the scheduled interception cache chooses the vehicle.
+// A nearby player in a car preserves the run limit even when there is no qualifying intercept.
 bool Pedestrians::evade(Game& g, Ped& p) {
-    if (g.playerCar < 0 || dist2(p.body.pos, g.player.pos) > (int64_t)kNearPlayer * kNearPlayer) return false;
+    const int64_t dz = (int64_t)p.body.pos[2] - g.player.pos[2];
+    if (g.playerCar < 0 || g.playerCar >= (int)g.cars.size() ||
+        dist2(p.body.pos,g.player.pos)+dz*dz > (int64_t)kNearPlayer*kNearPlayer) return false;
     if (p.evading) return true;
-    const Vehicle& car = g.cars[g.playerCar];
-    const int64_t speed2 = (int64_t)car.vel[0] * car.vel[0] + (int64_t)car.vel[1] * car.vel[1] + (int64_t)car.vel[2] * car.vel[2];
-    if (speed2 < 0x64000001LL) return false;                                      // 10 units/s
-    const int64_t rel[2] = {(int64_t)p.body.pos[0] - car.pos[0], (int64_t)p.body.pos[1] - car.pos[1]};
-    if (rel[0] * car.fwd[0] + rel[1] * car.fwd[1] < 1) return false;              // the car heads towards the ped
-    // closest approach along the car's velocity within 30 frames
-    const double vx = car.vel[0] / 30.0, vy = car.vel[1] / 30.0, vv = vx * vx + vy * vy;
-    const double t = std::clamp((rel[0] * vx + rel[1] * vy) / vv, 0.0, 30.0);
-    const double cx = rel[0] - vx * t, cy = rel[1] - vy * t;
-    const double reach = (double)car.hx + Player::kRadius + 0x1000;
-    if (cx * cx + cy * cy > reach * reach) return false;
+    TrafficAvoidance::Intercept hit;
+    if (!g.traffic.pedIntercept(g,p.uid,hit) || hit.time >= 30*4096 || hit.pedestrian) return true;
+    // The native handler accepts driver types 13/16 (players); ordinary NPC drivers do not trigger its roll.
+    const Vehicle& car=g.cars[g.playerCar];
+    if (hit.uid != car.uid) return true;
+    const int64_t speed2=(int64_t)car.vel[0]*car.vel[0]+(int64_t)car.vel[1]*car.vel[1]+(int64_t)car.vel[2]*car.vel[2];
+    if (speed2 < 0x64000001LL) return true;
+    int64_t ahead=0;
+    for (int k=0;k<3;++k) ahead+=(int64_t)car.fwd[k]*(p.body.pos[k]-car.pos[k]);
+    if (ahead < 1) return true;
     const int side = Rand16Critical(2) ? -1 : 1;
     const int32_t dir[2] = {side * car.right[0], side * car.right[1]};
     startRoll(p, dir);
@@ -500,16 +523,26 @@ bool Pedestrians::evade(Game& g, Ped& p) {
     return true;
 }
 
-// cRollOutOfVehicle on foot -> cAnimation(state 0xB, direction, strength 0x14): the roll animations 0x3C / 0x3D and
-// ApplyPhysicalEffect(0), a push of strength x 1 unit/s along the direction. The original also turns the ped to one
-// of four quadrants of the direction (DetermineQuadrant); here it faces the roll.
+// On-foot roll setup (0x6fd7bc): select its native facing quadrant while the impulse keeps its own direction.
+// Sprite rotation is separate from body facing, as in 0x89ac44; a side roll must not turn the NPC toward its car.
 void Pedestrians::startRoll(Ped& p, const int32_t dir[2]) {
-    p.body.setHeading(padAngle(dir[0], dir[1]));
-    p.body.playOneShot(0x3C, 0x3D, false);
-    p.body.vel[0] = p.body.vel[1] = p.body.vel[2] = 0;
-    p.rollVel[0] = dir[0] * 0x14;
-    p.rollVel[1] = dir[1] * 0x14;
-    p.rollFrames = 0;
+    const int16_t angle=padAngle(dir[0],dir[1]);
+    const int32_t x=(int32_t)(sinf((float)angle*9.587378e-05f)*4096.f);
+    const int32_t y=(int32_t)(sinf((float)(angle+0x4000)*9.587378e-05f)*4096.f);
+    const int32_t forward=(int32_t)(((int64_t)x*p.body.fwd[0]+(int64_t)y*p.body.fwd[1])>>12);
+    const int64_t right=(int64_t)x*p.body.fwd[1]-(int64_t)y*p.body.fwd[0];
+    const int quadrant=forward>2896 ? 0 : forward < -2896 ? 3 : right < -11862016 ? 1 : 2;
+    int16_t facing=angle;
+    uint8_t rotation=0;
+    if (quadrant==1) { facing=padAngle(y,-x);rotation=2; }
+    else if (quadrant==2) { facing=padAngle(-y,x);rotation=1; }
+    else if (quadrant==3) { facing=(int16_t)(angle+0x7FFF);rotation=3; }
+    p.body.setHeading(facing);
+    p.body.playOneShot(0x3C,0x3D,false);
+    p.body.setAnimationRotation(rotation);
+    p.body.vel[0]=p.body.vel[1]=p.body.vel[2]=0;
+    p.rollVel[0]=x*0x14;p.rollVel[1]=y*0x14;
+    p.rollFrames=0;
 }
 
 // cAnimation::ApplyPhysics while rolling on the ground: the speed drops by min(0xFAE, max(0x28, 17 v^2 / 512 x 40))
@@ -702,44 +735,172 @@ void Pedestrians::fleeStep(Game& g, Ped& p) {
         p.target[0] = p.flee.to[0];
         p.target[1] = p.flee.to[1];
     }
-    Player::Input in;
-    in.moving = true;
-    in.heading = padAngle(p.target[0] - p.body.pos[0], p.target[1] - p.body.pos[1]);
-    in.sprint = true;
-    in.maxLevel = 3;
-    p.body.act(in, &g.pedSprites);
-    p.movementPrepared = true;
-    if (p.stuckFrames > 45) {
-        p.flee.straight = !p.flee.straight || !p.prev.valid();
-        p.flee.to[0] = p.flee.to[1] = 0;
-        int32_t back[3];
-        if (!p.flee.straight && (std::swap(p.cur, p.prev), nodeAt(g, p.cur, back))) { p.target[0] = back[0]; p.target[1] = back[1]; }
-        p.stuckFrames = 0;
-    }
+    gotoTarget(g, p, p.target, 3, true);
 }
 
-void Pedestrians::wander(Game& g, Ped& p) {   // cWanderPath::Process (walking part)
-    if (roll(g, p)) return;
-    if (p.flee.on) { fleeStep(g, p); return; }
-    if (!evade(g, p)) p.evading = false;      // cWanderPath +0x6A is cleared once the player's car is gone
-    if (roll(g, p)) return;
-    if (dist2(p.body.pos, p.target) <= (int64_t)kArrive * kArrive && !advance(g, p)) return;
+// Native process-manager movement records (0x916498 / 0x9162E0), for the on-foot population. An entity that
+// requests movement and moves less than sqrt(1509950) starts a record. It becomes stuck at tick 46 unless it
+// has moved one unit from the recorded XY point, or stopped requesting movement. This is unrelated to the
+// player's separate counter for hanging in the air.
+void Pedestrians::updateStuck(Ped& p, const int32_t before[3]) {
+    auto& s = p.stuck;
+    if (!p.wantsMovement || p.body.dead || p.body.attached) { s = {}; return; }
+    if (!s.tracked) {
+        int64_t moved2 = 0;
+        for (int k = 0; k < 3; ++k) { const int64_t d = (int64_t)p.body.pos[k] - before[k]; moved2 += d*d; }
+        if (moved2 >= 1509950) return;
+        s.tracked = true;
+        std::copy(p.body.pos, p.body.pos + 2, s.origin);
+        s.frames = 0;
+    }
+    if (dist2(p.body.pos, s.origin) >= 0x1000000) { s = {}; return; }
+    if (++s.frames >= 46) s.stuck = true;
+}
+
+// The native on-foot goto's entity-stuck branch (0x710228) substitutes a random point ten units away for
+// ten ticks, then retries the original target. It does not reverse the pavement nodes. Blocked-target and
+// dynamic-contact detours need their original sensor flags; only the established entity-stuck branch is here.
+void Pedestrians::gotoTarget(Game& g, Ped& p, const int32_t target[2], int maxLevel, bool sprint) {
+    if (p.go.detourFrames) --p.go.detourFrames;
+    if (!p.go.detourFrames && p.stuck.stuck) {
+        const int16_t angle = (int16_t)(Rand32Critical(0xFFFFu) - 0x7FFF);
+        p.go.target[0] = p.body.pos[0] + 10 * (int32_t)(sinf((float)angle * 9.587378e-05f) * 4096.f);
+        p.go.target[1] = p.body.pos[1] + 10 * (int32_t)(sinf((float)(angle + 0x4000) * 9.587378e-05f) * 4096.f);
+        p.go.detourFrames = 10;
+    }
+    const int32_t* aim = p.go.detourFrames ? p.go.target : target;
+    if (p.go.detourFrames && dist2(p.body.pos, aim) <= (int64_t)kFleeArrive * kFleeArrive)
+        p.go.detourFrames = 0;
     Player::Input in;
     in.moving = true;
-    in.heading = padAngle(p.target[0] - p.body.pos[0], p.target[1] - p.body.pos[1]);
-    // ConstrainWalkSpeed: walk; joggers (civilian subtype 1) and everyone in rain run; after a roll, sprint
-    in.maxLevel = 1;
-    if ((p.type == 1 && p.subtype == 1) || g.world.timeCycle().value(28) >= 2048.f) in.maxLevel = 2;
-    if (p.evading) { in.maxLevel = 3; in.sprint = true; }
+    in.heading = padAngle(aim[0] - p.body.pos[0], aim[1] - p.body.pos[1]);
+    in.maxLevel = (uint8_t)maxLevel;
+    in.sprint = sprint;
     p.body.act(in, &g.pedSprites);
-    p.movementPrepared = true;
-    // PC approximation: a ped that makes no progress for 1.5 seconds (blocked by something the pavement graph
-    // ignores) turns round instead of walking on the spot.
-    if (p.stuckFrames > 45 && p.prev.valid()) {
-        std::swap(p.cur, p.prev);
+    p.wantsMovement = p.movementPrepared = true;
+}
+
+// Native wander state 0 (0x721E5C) / on-foot network rejoin: approach the nearest pavement link at level 1.
+// Native link targets store the ratio in ten-thousandths (0x6EE1BC), then expand it back to Q12 (0x6EE498).
+// The original's secondary road-network query still needs the local-area road-link cache.
+bool Pedestrians::rejoin(Game& g, Ped& p) {
+    auto& w = p.wander;
+    auto wait = [&] {
+        Player::Input in;
+        in.maxLevel = 2;
+        p.body.act(in, &g.pedSprites);
+        p.movementPrepared = true;
+    };
+    if (!w.joining) {
+        NodeRef a, b;
+        int32_t at[3], ratio;
+        if (!g.localArea.nearestNodePosition(g, p.body.pos, 1000 * 4096, a, b, at, ratio) &&
+            !g.localArea.nearestNodePosition(g, p.body.pos, 1000 * 4096, a, b, at, ratio, 0)) {
+            p.cur = {}; p.prev = {};
+            wait();
+            return false;
+        }
+        int32_t A[3], B[3];
+        if (!nodeAt(g, a, A) || !nodeAt(g, b, B)) { wait(); return false; }
+        const int32_t encoded = (int16_t)(((int64_t)ratio * 10000) >> 12);
+        const int32_t t = encoded * 4096 / 10000;
+        for (int k = 0; k < 2; ++k)
+            w.joinTarget[k] = (int32_t)(((int64_t)A[k] * (4096-t)) >> 12) + (int32_t)(((int64_t)B[k] * t) >> 12);
+        p.prev = a; p.cur = b;
         setTarget(g, p);
-        p.stuckFrames = 0;
+        w.joining = true;
     }
+    if (dist2(p.body.pos, w.joinTarget) <= (int64_t)kFleeArrive * kFleeArrive) {
+        w.joining = false;
+        w.phase = Ped::Wander::Walk;
+        if (p.cur.network == 0) p.prev = p.cur;
+        wait();
+        return true;
+    }
+    gotoTarget(g, p, w.joinTarget, 1);
+    return true;
+}
+
+// cIdle(flags 0, duration): repeat the original 172/173 one-shot until the timed task completes. Locomotion
+// still decelerates and physics still integrates; the task overrides the sprite cycles supplied to cPed::Act.
+bool Pedestrians::idle(Game& g, Ped& p) {
+    auto& w = p.wander;
+    if (!w.idleFrames || --w.idleFrames == 0) {
+        w.phase = Ped::Wander::Walk;
+        w.idleAnimation = false;
+        Player::Input in;
+        in.maxLevel = 2;
+        p.body.act(in, &g.pedSprites);
+        p.movementPrepared = true;
+        return true;
+    }
+    Player::Input in;
+    in.maxLevel = 2;
+    in.taskAnimation = true;
+    p.body.act(in, &g.pedSprites);
+    if (!w.idleAnimation) {
+        p.body.playOneShot(172, 173, false, true);
+        w.idleAnimation = true;
+    } else if (p.body.stepOneShot(&g.pedSprites)) w.idleAnimation = false;
+    p.movementPrepared = true;
+    return true;
+}
+
+void Pedestrians::wander(Game& g, Ped& p) {   // Native wander processing (0x721760): supported on-foot states
+    if (roll(g, p)) return;
+    if (p.flee.on) { fleeStep(g, p); return; }
+    auto& w = p.wander;
+    if (!w.initialized) { w.socialStart = (uint16_t)g.frame; w.initialized = true; }
+    // Native long-frame schedule (0x8D47B8 / 0x8D47EC): the 16-bit clock handles wrap at 65536.
+    int elapsed = (uint16_t)g.frame - w.socialStart;
+    if (elapsed < -32767) elapsed += 65536;
+    const bool socialDue = elapsed >= 150;
+    if (socialDue) w.socialStart = (uint16_t)g.frame;
+    if (talk(g,p)) return;
+    if (w.phase == Ped::Wander::Mooch && idle(g, p)) return;
+    int32_t node[3];
+    if (!p.cur.valid() || !nodeAt(g, p.cur, node)) w.phase = Ped::Wander::Rejoin;
+    if (w.phase == Ped::Wander::Rejoin) { rejoin(g, p); return; }
+    if (socialDue) {
+        const bool opportunity=Rand16Critical(100)<=10;
+        if (opportunity && canTalk(p) && p.socialFriend) {
+            startTalk(p);
+            Player::Input in;in.maxLevel=2;p.body.act(in,&g.pedSprites);
+            p.movementPrepared=true;
+            return;
+        }
+        const auto* paths = p.cur.network == 1 ? g.collision.pedPaths(p.cur.cx, p.cur.cy) : nullptr;
+        const bool moochNode = p.cur.network == 0 ? (g.roads.node(p.cur.index).flags & 0x2000) != 0 :
+            paths && p.cur.index < paths->nodes.size() && (paths->nodes[p.cur.index].flags & 0x2000);
+        if (p.type == 1 && p.subtype != 1 && moochNode && Rand16Critical(100) <= 74) {
+            w.phase = Ped::Wander::Mooch;
+            w.idleFrames = Rand32Critical(70) + 20;
+            w.idleAnimation = false;
+            // AddSubTask does not process the newly created idle task until the next slice.
+            Player::Input in;
+            in.maxLevel = 2;
+            p.body.act(in, &g.pedSprites);
+            p.movementPrepared = true;
+            return;
+        }
+    }
+    const bool evasive = evade(g, p);
+    if (!evasive) p.evading = false;      // cWanderPath +0x6A is cleared once the player's car is gone
+    if (roll(g, p)) return;
+    if (!p.go.detourFrames && dist2(p.body.pos, p.target) <= (int64_t)kArrive * kArrive && !advance(g, p)) {
+        w.phase = Ped::Wander::Rejoin;
+        p.cur = {}; p.prev = {};
+        Player::Input in;
+        in.maxLevel = 2;
+        p.body.act(in, &g.pedSprites);
+        p.movementPrepared = true;
+        return;
+    }
+    // Process first caps the maximum at 2. Rain/joggers raise its minimum to 2; a nearby player's car skips the
+    // ordinary (1,1) walking restriction. A later (3,3) constraint cannot override that existing maximum.
+    int maxLevel = 1;
+    if ((p.type == 1 && p.subtype == 1) || g.world.timeCycle().value(28) >= 2048.f || evasive) maxLevel = 2;
+    gotoTarget(g, p, p.target, maxLevel);
 }
 
 void Pedestrians::update(Game& g) {
@@ -751,12 +912,17 @@ void Pedestrians::update(Game& g) {
     }
     for (Ped& p : peds) {
         p.body.playerControlled = false;
+        if (p.talkingCooldown) --p.talkingCooldown; // native 0x8576ac, time slice zero
+        if (p.talk.role!=Ped::Talk::None && (p.body.dead || p.body.reacting() || p.vehicle || p.flee.on || p.rollFrames>=0))
+            finishTalk(p);
         p.movementPrepared = false;
+        p.wantsMovement = false;
         if(p.vehicle) { updateOccupant(g,p); continue; }
         p.body.obstacles = still;
         if (p.body.reacting()) { p.body.actReaction(&g.pedSprites,vehicleAbove(g,p.body)); p.movementPrepared = true; }
         else if (p.deadFrames >= 0) { p.body.stepOneShot(&g.pedSprites); p.movementPrepared = true; }
         else wander(g, p);
+        updateSocialSensor(g,p);
         if (!p.body.reacting() && !p.body.dead && p.deadFrames >= 0) p.deadFrames = -1;
     }
     contacts(g);
@@ -765,9 +931,9 @@ void Pedestrians::update(Game& g) {
         runOver(g, p);
         if (p.deadFrames >= 0) ++p.deadFrames;
         if (!p.movementPrepared && !p.body.reacting()) continue;
-        const int32_t before[2] = {p.body.pos[0], p.body.pos[1]};
+        const int32_t before[3] = {p.body.pos[0], p.body.pos[1], p.body.pos[2]};
         p.body.advance(&g.collision, p.deadFrames < 0);
-        p.stuckFrames = dist2(before, p.body.pos) < 0x40 * 0x40 ? p.stuckFrames + 1 : 0;
+        updateStuck(p, before);
         if (p.rollFrames >= 0) { p.rollVel[0] = p.body.vel[0]; p.rollVel[1] = p.body.vel[1]; }
     }
     if (g.playerCar < 0 && !g.player.hidden && !g.player.attached) for (const Vehicle& car : g.cars) {

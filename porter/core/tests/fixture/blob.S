@@ -4,3 +4,5 @@
 .section .blob,"a"
 .globl ctw_blob
 ctw_blob: .incbin "blob.bin"
+.section .pedcomments,"a"
+.incbin "blob.bin", 0, 864

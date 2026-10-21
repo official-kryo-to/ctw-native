@@ -188,12 +188,23 @@ class GameBinary:
         colours = self.symbol_data('TextColours', 92)[:32]
         return b'CTWREND1' + self.read(0x486b04, 36) + self.read(0x486a8c, 24) + angles + colours
 
+    def ped_comments(self):
+        # Gender/sample ranges, timing records and initial repeat histories from this verified build.
+        return (b'CTWPEDV1' + self.read(0x480370, 2 * 26 * 8) + self.read(0xe00670, 26 * 32) +
+                self.read(0xe009b0, 8) + self.read(0xe009c0, 16))
+
     def gameplay(self):
         # The top-ratio table stores 64-bit integers even though its values fit in Q12 int32.
         top = struct.pack('<6i', *struct.unpack('<6q', self.read(0x487250, 48)))
         return (b'CTWGAME1' + self.read(0x4872c0, 64) + top + self.read(0x481b44, 7) +
                 self.read(0x481b4b, 7) + self.read(0x481b52, 52) + self.read(0x481b86, 52) +
                 self.read(0x48718e, 10) + self.read(0x469dd0, 16))
+
+    def driving(self):
+        # gDrivingProps: 103 vehicles, five {acceleration, deceleration} byte pairs each.
+        return (b'CTWDRIV2' + self.symbol_data('gDrivingProps', 1030) +
+                self.symbol_data('stuckReverse1', 8) + self.symbol_data('stuckReverse2', 8) +
+                self.symbol_data('stuckReverseSteer', 80))
 
     def radio(self):
         # cRadioApp::InitStationIconsAndText and cWavStream's fixed-width filename table.
@@ -220,4 +231,5 @@ def extract_tables(binary):
     return {'population_tables.bin': game.population(), 'sound_tables.bin': game.sound(),
             'render_tables.bin': game.render(), 'gameplay_tables.bin': game.gameplay(),
             'radio_tables.bin': game.radio(), 'restart_tables.bin': game.restart(),
-            'weather_tables.bin': game.weather(), 'weapon_tables.bin': game.weapons()}
+            'weather_tables.bin': game.weather(), 'weapon_tables.bin': game.weapons(),
+            'driving_props.bin': game.driving(), 'ped_comments.bin': game.ped_comments()}

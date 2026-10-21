@@ -10,6 +10,7 @@
 #include "gamehud.h"
 #include "localarea.h"
 #include "peds.h"
+#include "pausescreen.h"
 #include "player.h"
 #include "radio.h"
 #include "roads.h"
@@ -147,11 +148,9 @@ public:
     void enableExplosionRadiusCheck(bool enable) { explosionRadiusCheck_ = enable; } // native script switch; off at Reset
     struct FreeCamera { bool on = false; WorldCamera cam; } freeCam;   // mods: replaces the game camera
     bool uiPaused = false;               // a full-screen app (the radio) has paused the game
-    // PC extra: the pause menu (Esc, or Start on a controller): Resume, Mod menu, Controls, Quit. The phone game paused
-    // from its own PDA; the PC port used to quit on Esc.
+    // The original HUD pause screen, opened by the PC binding Esc / controller Start.
     bool pauseOpen = false;
-    int pauseChoice = 0;
-    bool pauseControls = false;          // showing the controls page
+    PauseScreen pauseScreen;
     bool quitRequested = false;
     void setPause(bool open);
     bool pauseKey(int scancode);

@@ -4,6 +4,7 @@
 // Sword contact timing and geometry on synthetic data; no original weapon tables are embedded here.
 #define SDL_MAIN_HANDLED
 #include "game.h"
+#include "sound.h"
 #include <SDL.h>
 #include <algorithm>
 #include <cmath>
@@ -33,6 +34,36 @@ struct ParticlesTestAccess {
     static const Particle* first(const Emitter& e) {
         for (const Particle& p : e.parts_) if (p.active) return &p;
         return nullptr;
+    }
+};
+
+struct PlayerTestAccess {
+    static void frames(Player& player,int previous,int current) {
+        player.previousUpperFrame_=previous;player.frameUpper_=current<<8;
+    }
+};
+
+struct SoundTestAccess {
+    static void prepare() {
+        Sound& sound=TheSound();sound.res_.data.resize(1);
+        sound.tables_.events[152].mode=sound.tables_.events[9].mode=2;sound.stopSlots(sound.ped_);
+    }
+    static int swordEvents() {
+        Sound& sound=TheSound();int count=0;
+        for (const auto& slot:sound.ped_.s) {
+            if (slot.event!=152) continue;
+            check(slot.volume==127 && slot.radius==200,"sword swings use the original event volume and squared radius");
+            ++count;
+        }
+        sound.stopSlots(sound.ped_);return count;
+    }
+    static int fistEvents() {
+        Sound& sound=TheSound();int count=0;
+        for(const auto& slot:sound.ped_.s) if(slot.event==9) {
+            check(slot.volume==50 && slot.radius==200,"unarmed swings use their original quieter sound event");
+            ++count;
+        }
+        sound.stopSlots(sound.ped_);return count;
     }
 };
 
@@ -69,6 +100,7 @@ int main() {
     const fs::path dir = fs::temp_directory_path() / "ctw-weapon-parity-test";
     fs::create_directories(dir);
     WeaponTables table{};
+    for(auto& weapon:table.info) weapon.scale[0]=weapon.scale[1]=4096;
     table.info[0].maxAmmo = table.info[3].maxAmmo = -1;
     table.info[3].slot = 1;
     table.info[3].damage = 17;
@@ -146,6 +178,40 @@ int main() {
     g.playerWeapons.setUse(0, false);
     for (int i = 0; i < 10; ++i) Weapons_PlayerFrame(g, false, 0);
     check(g.peds.peds[0].body.health == 127, "a sword stored in another slot does not hit");
+
+    scene(g);SoundTestAccess::prepare();
+    Weapons_PlayerFrame(g,true,0);
+    check(SoundTestAccess::swordEvents()==0,"pressing fire does not prematurely play the sword's animation sound");
+    for (const auto& frames: {std::pair<int,int>{6,7},{7,8},{8,8},{8,9},{10,11},{11,12},{12,12},{12,13}}) {
+        PlayerTestAccess::frames(g.player,frames.first,frames.second);
+        Weapons_PlayerFrame(g,false,0);
+        const bool cue=(frames.first==7 && frames.second==8)||(frames.first==11 && frames.second==12);
+        check(SoundTestAccess::swordEvents()==(int)cue,
+              "sword sound cues fire only on the exact seven-to-eight and eleven-to-twelve frame changes");
+    }
+    g.player.attached=true;PlayerTestAccess::frames(g.player,7,8);
+    Weapons_PlayerFrame(g,false,0);
+    check(SoundTestAccess::swordEvents()==0,"attached players cannot emit an on-foot sword swing cue");
+    g.player.attached=false;
+
+    scene(g);g.playerWeapons.setUse(0,false);SoundTestAccess::prepare();
+    Weapons_PlayerFrame(g,true,0);
+    check(SoundTestAccess::fistEvents()==1,"an unarmed swing plays its original firing sound on its first animation tick");
+    Weapons_PlayerFrame(g,false,0);
+    check(SoundTestAccess::fistEvents()==0,"the unarmed swing's cooling animation does not repeat its sound");
+
+    scene(g);
+    auto& movingWeapon=const_cast<WeaponInfo&>(Weapons_Info(3));
+    movingWeapon.scale[0]=2048;movingWeapon.scale[1]=0;
+    Weapons_PlayerFrame(g,true,0);
+    check(g.player.weaponMovementScale==0,"holding fire selects the weapon's firing movement scale, including zero");
+    Player::Input moving;moving.moving=true;moving.maxLevel=2;
+    for(int i=0;i<30;++i)g.player.act(moving,nullptr);
+    check(g.player.level()==2 && g.player.currentSpeed()==0,"a zero firing factor stops physical movement without changing the requested gait");
+    Weapons_PlayerFrame(g,false,0);
+    check(g.player.weaponMovementScale==2048 && g.player.currentSpeed()==24540,
+          "releasing fire restores the passive factor with native base-before-gait truncation");
+    movingWeapon.scale[0]=movingWeapon.scale[1]=4096;
 
     // cMuzzleFlashes: one flash per shot at the trace start, lying along the fire direction (+y here)
     auto flashAfterShot = [&](int type, float length, float width) {

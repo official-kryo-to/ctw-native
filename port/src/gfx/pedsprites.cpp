@@ -34,9 +34,16 @@ int PedSprites::rate(int anim) const { const uint8_t* a = animData(anim); int16_
 bool PedSprites::oneShot(int anim) const { const uint8_t* a = animData(anim); return a && (a[6] & 1); }
 
 int PedSprites::advance(int anim, int frame, int step) const {
+    return finishFrame(anim,frame+(int)(((int64_t)rate(anim)*step)>>8));
+}
+
+int PedSprites::advanceOneFrame(int anim, int frame) const {
+    return finishFrame(anim,(frame&~255)+256);
+}
+
+int PedSprites::finishFrame(int anim, int f) const {
     int n = numFrames(anim);
     if (n <= 0) return 0;
-    int f = frame + (int)(((int64_t)rate(anim) * step) >> 8);
     int end = n << 8;
     if (f >= end) f = oneShot(anim) ? end - 0x100 : f % end;
     if (f < 0) f = 0;

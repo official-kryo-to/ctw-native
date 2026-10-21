@@ -5,15 +5,16 @@
 #include "fixedmath.h"
 #include "lookups.h"
 #include "roads.h"
-#include "cargens.h"   // Rand32Critical
+#include "random.h"
 #include <cmath>
 #include <cstdlib>
+#include <algorithm>
 
 static inline int32_t mulq(int64_t a, int64_t b) { return (int32_t)((a * b) >> 12); }
 static int32_t isqrt64(int64_t v) { return v <= 0 ? 0 : (int32_t)std::sqrt((double)v); }
 static void normalise2(int32_t v[2]) { Normalise2(v); }
 static void normalise3(int32_t v[3]) { Normalise3(v); }
-static uint32_t rand16(uint32_t n) { return Rand32Critical(n); }
+static uint32_t rand16(uint32_t n) { return Rand16Critical(n); }
 
 // ============================================================================================== cTarget
 int AISpline::laneConvert(int from, int lane, int to, bool flag5) {   // DAT_00581b44 / 4b / 52 / 86
@@ -144,6 +145,7 @@ void AISpline::fixUpTuplet(const RoadNetwork& rn, int a, int b, int c, int slot,
 
 void AISpline::set(const RoadNetwork& rn, int a, int b, int16_t ratio, int lane, int lanes, bool cop, int seed) {
     seed_ = seed;
+    water_ = rn.node(a).z < -4; // native Set at 0x6ec0c0, before lane direction can swap A/B
     dirty_ = true;
     param_ = ratio;
     setLink(rn, t_[0], a, b, 0, 0, false);
@@ -357,6 +359,39 @@ bool AISpline::inc(const RoadNetwork& rn, int32_t dist, bool cop) {   // cAISpli
     }
     param_ = (int16_t)t;
     return shuffled;
+}
+
+// cAISpline::SetRatio: project an entity onto the active straight segment or sample the junction curve.
+int32_t AISpline::project(const RoadNetwork& rn, const int32_t pos[3]) {
+    int32_t a[3], b[3];
+    worldPos(rn,t_[1],seed_,a); worldPos(rn,t_[2],seed_,b);
+    if (sameLink(1,2)) {
+        int32_t delta[3], offset[3], dir[3];
+        int64_t squared = 0, offsetSquared = 0;
+        for (int i=0;i<3;++i) {
+            delta[i]=b[i]-a[i]; offset[i]=pos[i]-a[i];
+            squared+=(int64_t)delta[i]*delta[i]; offsetSquared+=(int64_t)offset[i]*offset[i];
+        }
+        const int32_t length=isqrt64(squared);
+        if (!length) { param_=0; return isqrt64(offsetSquared); }
+        int64_t dot=0;
+        for (int i=0;i<3;++i) { dir[i]=(int32_t)(((int64_t)delta[i]*4294967296LL/length)>>20); dot+=(int64_t)dir[i]*offset[i]; }
+        // The original truncates the dot to Q12 before its division.
+        const int64_t scaled=(int64_t)((uint64_t)dot<<20) & (int64_t)0xFFFFFFFF00000000ULL;
+        param_=(int16_t)std::clamp((int32_t)((scaled/length)>>20),0,4091);
+        const int32_t along=mulq(length,param_);
+        return isqrt64(std::max<int64_t>(0,offsetSquared-(int64_t)along*along));
+    }
+    int64_t best=0x989680000000LL;
+    int32_t distance=0;
+    param_=0;
+    for (int i=0,t=0;i<11;++i,t+=409) {
+        int32_t p[2],d[2]; curvePoint(a,icpt_,b,t,p,d);
+        int64_t x=(int64_t)p[0]-pos[0],y=(int64_t)p[1]-pos[1];
+        int64_t squared=x*x+y*y+(int64_t)pos[2]*pos[2];
+        if (squared<best) { best=squared; param_=(int16_t)t; distance=isqrt64(squared); }
+    }
+    return distance;
 }
 
 bool AISpline::tooSlowForHoldingPattern(const RoadNetwork& rn, uint32_t frame, int32_t& dist, bool& deadEnd) {

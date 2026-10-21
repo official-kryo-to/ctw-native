@@ -41,6 +41,7 @@ public:
         bool sprint = false;        // yoke +0x6B: the sprint button is held
         bool sprintReleased = false;// yoke +0x6C
         uint8_t maxLevel = 3;       // yoke +0xAD (3 for the player; a PC walk key lowers it to 1)
+        bool taskAnimation = false; // yoke +0xA9/+0xAA: a task supplies sprite cycles instead of locomotion
     };
 
     int32_t pos[3] = {-1000 * 4096, -1590 * 4096, 0};   // feet
@@ -79,6 +80,7 @@ public:
     uint32_t weaponFlags = 0;
     int16_t fireDir[3] = {0, 0x1000, 0};   // cPed +0x32A (FireDirection)
     bool upperAim = false;                 // cPed::Render draws the upper body along fireDir (+0x338 bit 30)
+    int16_t weaponMovementScale = 4096;     // selected cWeaponInfo +0x34/+0x36 for the current fire input
     uint8_t punch = 0;
     int throwPower = 0;                    // cPed +0x1E0: the thrown weapon's power, 0..128 (StandardConvertFromPower)                     // cPlayer +0x118D: which hand punches next (GetMeleeAnim)
     bool playerControlled = true; // cPlayer's extra static slide/grace behavior
@@ -92,7 +94,7 @@ public:
     bool hidden = false;   // inside a vehicle
     bool dead = false;
     void setHeading(int16_t h);
-    void playOneShot(int upper, int legs, bool flip);   // animation ids of body set 0 (+ 0x113 per body set)
+    void playOneShot(int upper, int legs, bool flip, bool preserveSpeed = false); // body-set-0 animation ids
     bool stepOneShot(const PedSprites* sprites);        // true when both halves have finished
     // cPed::AnimatePedInVehicle on a bike: loop this pair (switching keeps the phase), one step a frame
     void ride(int upper, int legs, const PedSprites* sprites);
@@ -101,9 +103,15 @@ public:
     void renderRiding(const PedSprites* sprites, const PedLight* light, const int32_t upper[3], const int32_t legs[3], int16_t heading) const;
 
     int16_t heading() const;          // cEntity::Heading
+    int16_t spriteHeading() const {
+        const int offset=animationRotation_==1 ? 0x4000 : animationRotation_==2 ? -0x4000 : animationRotation_==3 ? 0x8000 : 0;
+        return (int16_t)(heading()+offset);
+    }
+    void setAnimationRotation(uint8_t rotation) { animationRotation_=rotation&3; }
     int level() const { return level_; }
     bool onGround() const { return onGround_; }
-    int walkFrame() const { return frameUpper_ >> 8; }   // cSoundEvents reads the unarmed upper-body cycle
+    int walkFrame() const;            // cSoundEvents chooses the upper or legs cycle for the held weapon
+    bool enteredUpperFrame(int frame) const { return (frameUpper_ >> 8)==frame && previousUpperFrame_==frame-1; }
     void posf(float out[3]) const { for (int i = 0; i < 3; ++i) out[i] = pos[i] / 4096.f; }
     int32_t currentSpeed() const;     // cPed::CurrentSpeed, units per second (20.12)
     CtwCharacterPose renderPose(const PedSprites* sprites, uint32_t id, int type, uint32_t flags, float alpha = 1.f) const;
@@ -117,6 +125,7 @@ private:
     void integrate(Collision* col);
     void constrainByCollision(Collision* col, int32_t moveLen, bool& walkable, bool& hit);
     void animate(const PedSprites* sprites);
+    bool fightIdle(int& upper, int& legs);
     void reactionPose(int state);
 
     uint8_t level_ = 0, counter_ = 0, exhaustion_ = 0;   // cPed +0x357, +0x35A, +0x365
@@ -125,7 +134,10 @@ private:
     uint8_t airFrames_ = 0, stuckFrames_ = 0;             // +0x36E, +0x36D
     int32_t clearance_ = 0, lastPos_[3] = {0, 0, 0};     // +0x320, +0x2F8
     int animUpper_ = -1, animLegs_ = -1, frameUpper_ = 0, frameLegs_ = 0;
+    int previousUpperFrame_ = -1; // cPedSprite's previous integer frame, used by melee sound cues
+    uint8_t fightIdleFrames_ = 0; // cPlayer +4497
     bool flip_ = false, doneUpper_ = false, doneLegs_ = false;
+    uint8_t animationRotation_ = 0; // native sprite rotation, independent of collision/AI facing
     uint32_t oneShotTicks_ = 0;
     int reaction_ = -1, reactionTicks_ = 0;
     uint32_t reactionAge_ = 0;

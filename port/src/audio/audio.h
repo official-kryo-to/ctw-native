@@ -27,6 +27,8 @@ void Audio_MusicBands(float out[8]);      // band energies of the playing music 
 // A voice plays one sample (optionally looping) at volume 0..1, pan -1 (left) .. 1 (right) and a pitch factor.
 // Samples are copied into the voice so bank reloads cannot invalidate playback. Handles are > 0; 0 = no voice free.
 int Audio_SfxPlay(const unsigned char* pcm8, unsigned len, int rate, float volume, float pan, bool loop);
+// HUD channels continue while world effects are suspended by a game menu.
+int Audio_HudSfxPlay(const unsigned char* pcm8, unsigned len, int rate, float volume);
 void Audio_SfxSet(int voice, float volume, float pan, float pitch);
 void Audio_SfxStop(int voice);
 bool Audio_SfxPlaying(int voice);

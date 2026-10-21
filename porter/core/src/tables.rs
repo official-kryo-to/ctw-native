@@ -390,6 +390,15 @@ impl<'a> GameBinary<'a> {
         Ok(out)
     }
 
+    pub fn ped_comments(&self) -> Result<Vec<u8>, TableError> {
+        let mut out = b"CTWPEDV1".to_vec();
+        out.extend(self.read(0x480370, 2 * 26 * 8)?);
+        out.extend(self.read(0xe00670, 26 * 32)?);
+        out.extend(self.read(0xe009b0, 8)?);
+        out.extend(self.read(0xe009c0, 16)?);
+        Ok(out)
+    }
+
     pub fn gameplay(&self) -> Result<Vec<u8>, TableError> {
         let mut out = b"CTWGAME1".to_vec();
         out.extend(self.read(0x4872c0, 64)?);
@@ -400,6 +409,16 @@ impl<'a> GameBinary<'a> {
         for (a, n) in [(0x481b44, 7), (0x481b4b, 7), (0x481b52, 52), (0x481b86, 52), (0x48718e, 10), (0x469dd0, 16)] {
             out.extend(self.read(a, n)?);
         }
+        Ok(out)
+    }
+
+    pub fn driving(&self) -> Result<Vec<u8>, TableError> {
+        // gDrivingProps: 103 vehicles, five acceleration/deceleration byte pairs each.
+        let mut out = b"CTWDRIV2".to_vec();
+        out.extend(self.symbol_data("gDrivingProps", 1030)?);
+        out.extend(self.symbol_data("stuckReverse1", 8)?);
+        out.extend(self.symbol_data("stuckReverse2", 8)?);
+        out.extend(self.symbol_data("stuckReverseSteer", 80)?);
         Ok(out)
     }
 
@@ -484,6 +503,8 @@ pub fn extract_tables(binary: &[u8]) -> Result<Vec<(&'static str, Vec<u8>)>, Tab
         ("restart_tables.bin", game.restart()?),
         ("weather_tables.bin", game.weather()?),
         ("weapon_tables.bin", game.weapons()?),
+        ("driving_props.bin", game.driving()?),
+        ("ped_comments.bin", game.ped_comments()?),
     ])
 }
 
