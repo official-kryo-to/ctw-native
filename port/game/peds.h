@@ -171,6 +171,8 @@ public:
     bool createDriver(Game& g, Vehicle& car, int type, const Traffic::ZoneInfo& zone);
     bool exitOccupant(Game& g, Vehicle& car, int seat); // true when the seat is free
     void releaseOccupants(Game& g, Vehicle& car, bool killed);
+    // cVehicle::KnockOffDriver for a pedestrian at the wheel: cSeats::HelperWarpOutOf, then cPed::Damage type 21
+    void knockOffDriver(Game& g, Vehicle& car, const int32_t dir[3]);
     void discardOccupants(Vehicle& car); // removal of an offscreen generated car
 
 private:

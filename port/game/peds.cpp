@@ -469,6 +469,23 @@ void Pedestrians::releaseOccupants(Game& g, Vehicle& car, bool killed) {
     }
 }
 
+void Pedestrians::knockOffDriver(Game& g, Vehicle& car, const int32_t dir[3]) {
+    for (Ped& p : peds) {
+        if (p.vehicle != car.uid || p.seat != 0) continue;
+        if (car.seatUser[0] == (int)p.uid) car.seatUser[0] = -1;
+        p.vehicle = 0; p.seat = -1; p.exiting = false;
+        p.body.hidden = p.body.attached = false;
+        std::copy(car.pos, car.pos + 3, p.body.pos);   // HelperWarpOutOf: at the vehicle's position
+        p.body.placeOnGround(&g.collision);
+        std::fill(p.body.vel, p.body.vel + 3, 0);
+        if (p.body.knockedOff(dir) || p.body.dead) { p.deadFrames = 0; p.rollFrames = -1; }
+        g.addBlood(p.body.pos, 1);   // type 21 bleeds one drop
+        if (p.body.dead) TheSound().pedDeath(p.body.pos, p.male, false);
+        else react(g, p, 0, car.pos, 0);   // ReactToDamage: GetAction(21) is action 0
+        return;
+    }
+}
+
 void Pedestrians::discardOccupants(Vehicle& car) {
     peds.erase(std::remove_if(peds.begin(),peds.end(),[&](const Ped& p) {
         if(p.vehicle!=car.uid) return false;

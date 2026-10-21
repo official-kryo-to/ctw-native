@@ -72,6 +72,10 @@ public:
     int32_t mass() const { return mass_; }        // cPhysical::GetMass (+0x1A8)        // +0x99D: 255 = new; smoke below 190, burning below 31
     bool dead() const { return dead_; }
     int burnoutState() const { return burnout_; }   // cWheeledVehicle +0xB63
+    // cVehicle::KnockOffDriver, requested by cBike::OnCollision or cVehicle::CheckForDriverFallingOut and carried out
+    // by the game (Game::processKnockOffs): the rider leaves the seat at the vehicle's position and is thrown along dir
+    struct KnockOff { bool pending = false; int32_t dir[3] = {0, 0, 0}; } knockOff;
+    bool canFallOff = false;   // +0x957 (Vehicle::CanFallOffBike / CanFallOffVehicle)
     bool playerDriving() const { return playerDriving_; }   // the player holds it (cEntity +0x77 bit 0)
     void damage(int amount);                      // cVehicle::Damage (collision damage)
     // SetHealth(health, false) below full health: at 31 or more the burn timer restarts (190 or more would also
@@ -81,6 +85,7 @@ public:
     bool repair();                               // mod API: restore a living vehicle, without resurrecting wrecks
     void teleport(const int32_t pos[3], int16_t heading); // rebuild the physics transform, upright and stationary
     void processDamage(uint32_t frame);           // the damage part of cVehicle::Process
+    void checkForDriverFallingOut();              // cVehicle::CheckForDriverFallingOut
     void processDebris(const Model* model);
     void explosionDebris(const Model* model);
     bool justDied = false;
@@ -237,6 +242,7 @@ private:
     uint8_t burnout_ = 0;
     int32_t burnoutPower_ = 0, burnoutWindow_ = 0;
     bool canBurnout_ = false;
+    bool neverFallOut_ = false;   // info +0x8E bit 10: the driver never falls out when it tips over
     int16_t handbrakeTimer_ = 0;              // +0xB4E (reversing with the handbrake)
     int16_t handbrakeTimerHb_ = 0;            // +0xB56 (frames the handbrake is held)
     int32_t lowGearGrip_ = 0x1000;            // +0xB48

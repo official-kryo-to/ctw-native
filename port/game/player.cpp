@@ -5,6 +5,7 @@
 #include "gfx/pedsprites.h"
 #include "world/collision.h"
 #include "vehicle.h"
+#include "random.h"
 #include <glad/gl.h>
 #include <algorithm>
 #include <cmath>
@@ -320,6 +321,24 @@ bool Player::waterHit(const int32_t direction[3]) {
     return true;
 }
 
+bool Player::knockedOff(const int32_t direction[3]) {
+    if (dead || attached || hidden) return false;
+    const bool hadReaction = reacting();
+    takeDamage(1);
+    if (hadReaction) return false;   // FindTask(cAnimation) refuses a second one
+    if (dead) return true;           // SetDead's effect-4 task instead
+    reactionAge_ = 0;
+    reactionForward_ = (int64_t)direction[0]*fwd[0] + (int64_t)direction[1]*fwd[1] + (int64_t)direction[2]*fwd[2] > 0;
+    // eEffect 1 resolves to state 6; its SetupForState applies physical effect 1 along the animation's heading
+    const int16_t angle = atan2q(direction[0], direction[1]);
+    vel[0] = fastsin(angle) * 20;
+    vel[1] = fastsin(angle + 0x4000) * 20;
+    vel[2] = Rand16Critical(8) == 0 ? (int32_t)(Rand16Critical(15) << 12) : 0;
+    onGround_ = false; airFrames_ = 1;
+    reactionPose(6);
+    return true;
+}
+
 void Player::reactionPose(int state) {
     reaction_ = state; reactionTicks_ = 0;
     if (state == 5) recoveryAge_ = 0;
@@ -327,6 +346,7 @@ void Player::reactionPose(int state) {
     // selects front/back variants; the ped does not snap to face the car.
     int upper = 0x18;
     switch (state) {
+    case 6: upper = reactionForward_ ? 0x28 : 0x2A; break;
     case 7: upper = reactionForward_ ? 0x2C : 0x2E; break;
     case 14: upper = reactionForward_ ? 0x32 : 0x30; break;
     case 2: upper = reactionForward_ ? 0x1A : 0x18; break;
@@ -342,7 +362,7 @@ void Player::actReaction(const PedSprites* sprites, bool vehicleAbove) {
     if (reactionAge_ < UINT32_MAX) ++reactionAge_;
     if ((reaction_ == 5 || reaction_ == 1) && recoveryAge_ < UINT32_MAX) ++recoveryAge_;
     const bool done = stepOneShot(sprites);
-    if ((reaction_ == 7 || reaction_ == 14) && done) reactionPose(2);
+    if ((reaction_ == 6 || reaction_ == 7 || reaction_ == 14) && done) reactionPose(2);   // NextState
     else if (reaction_ == 2 && reactionTicks_ >= 30 && !dead && onGround_ && vel[2] <= 0 && !vehicleAbove) reactionPose(5);
     else if (reaction_ == 5 && done) reactionPose(dead ? 2 : 1);
     else if (reaction_ == 1 && done) { if (dead) reactionPose(2); else { resetReaction(); return; } }

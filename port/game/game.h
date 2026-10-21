@@ -205,6 +205,7 @@ private:
     bool explosionRadiusCheck_ = false;
     bool queueExplosion(const Explosion& explosion);
     void processVehicleDeaths();
+    void processKnockOffs();             // cVehicle::KnockOffDriver for the vehicles that asked for it
     void affectExplosion(const Explosion& explosion);
     void affectBlast(const struct ExplosionBlast& blast);   // cBaseExplosion::AffectEntities
     void processBigExplosion(Explosion& explosion);         // cExplosionBigVehicle::Process

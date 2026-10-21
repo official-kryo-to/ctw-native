@@ -620,6 +620,36 @@ void Game::killInVehicle(Vehicle& car) {
     radio.update(*this);
 }
 
+void Game::processKnockOffs() {
+    for (int i = 0; i < (int)cars.size(); ++i) {
+        Vehicle& car = cars[i];
+        if (!car.knockOff.pending) continue;
+        car.knockOff.pending = false;
+        const int32_t dir[3] = {car.knockOff.dir[0], car.knockOff.dir[1], car.knockOff.dir[2]};
+        if (i != playerCar) { peds.knockOffDriver(*this, car, dir); continue; }
+        // cSeats::HelperWarpOutOf: the player leaves the seat at once, at the vehicle's position
+        for (int& occupant : car.seatUser) if (occupant == -2) occupant = -1;
+        player.hidden = player.attached = false;
+        std::copy(car.pos, car.pos + 3, player.pos);
+        player.vel[0] = player.vel[1] = player.vel[2] = 0;
+        player.placeOnGround(&collision);
+        Plugins_EmitEvent(CTW_EVENT_PLAYER_EXITED_VEHICLE, car.uid, car.infoId);
+        playerCar = -1; task = CarTask{}; enterPressed = false;
+        int32_t previousView[3]; carCam.position(previousView);
+        camera.reset(player.pos, player.heading());
+        camera.inherit(previousView, carCam.yaw(), carCam.pitch(), carCam.blockedFrames());
+        radio.update(*this);
+        // cPed::Damage type 21: the fall grunt, one point, state 6 and one drop of blood
+        TheSound().playerEvent(0x82, 0x7F, 200);
+        player.knockedOff(dir);
+        addBlood(player.pos, 1);
+        if (player.dead) {
+            camera.position(deathEye_); deathYaw_ = (uint16_t)camera.yaw; deathPitch_ = camera.pitch();
+            deathFrames_ = 0; deathCameraSettled_ = false;
+        }
+    }
+}
+
 void Game::processVehicleDeaths() {
     for (Vehicle& car : cars) {
         if (!car.justDied) continue;
@@ -956,9 +986,10 @@ void Game::tick() {
         peds.update(*this);
         Vehicle::collideCars(cars, playerCar, frame);
         propDynamics.checkImpacts(*this);
-        for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); Vehicles_AddSkidmarks(*this, c); c.processDebris(carModel(c.infoId)); c.processDamage(frame); }
+        for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); Vehicles_AddSkidmarks(*this, c); c.processDebris(carModel(c.infoId)); c.processDamage(frame); c.checkForDriverFallingOut(); }
         traffic.afterPhysics(*this);
         projectiles.process(*this);
+        processKnockOffs();
         processVehicleDeaths();
         if (playerCar < 0) {
             finishShortFrame();
@@ -1074,9 +1105,10 @@ void Game::tick() {
     if (!player.hidden && !player.attached && (!busy || player.reacting())) player.advance(&collision);
     Vehicle::collideCars(cars, -1, frame);
     propDynamics.checkImpacts(*this);
-    for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); Vehicles_AddSkidmarks(*this, c); c.processDebris(carModel(c.infoId)); c.processDamage(frame); }
+    for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); Vehicles_AddSkidmarks(*this, c); c.processDebris(carModel(c.infoId)); c.processDamage(frame); c.checkForDriverFallingOut(); }
     traffic.afterPhysics(*this);
     projectiles.process(*this);
+    processKnockOffs();
     processVehicleDeaths();
     updateWorldObjects();
     TheParticles().update(frame,world.timeCycle().time(),playerCar >= 0 ? cars[playerCar].pos : player.pos);

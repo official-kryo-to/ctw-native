@@ -64,6 +64,28 @@ struct VehicleTestAccess {
         check(force(0x10, 0) == (int32_t)(((int64_t)full * 0x333) >> 12), "a burning engine has a fifth of its power");
         check(force(0xFF, 3) == (int32_t)(((int64_t)full * 0xA000) >> 12), "a heavy vehicle's burnout launch has ten times the power");
     }
+    static void knockOff() {
+        VehicleInfo info{}; info.raw[0] = 1;   // a bike
+        const int32_t at[3] = {};
+        Vehicle bike; bike.init(info,0,at,0,0); bike.seatUser[0] = -2; bike.playerDriving_ = true;
+        const int32_t soft[3] = {100 * 4096, 0, 0}, medium[3] = {300 * 4096, 0, 0}, hard[3] = {450 * 4096, 0, 0};
+        bike.onCollision(medium, nullptr);
+        check(!bike.knockOff.pending, "a moderate knock against the world keeps the player on an upright bike");
+        bike.onCollision(hard, nullptr);
+        check(bike.knockOff.pending && bike.knockOff.dir[0] == hard[0],
+              "a collision force above 400 against the world throws the player off along the impact");
+        Vehicle traffic; traffic.init(info,0,at,0,0); traffic.seatUser[0] = 7;
+        traffic.onCollision(soft, nullptr);
+        check(!traffic.knockOff.pending, "other riders keep their seat below 141");
+        traffic.onCollision(medium, nullptr);
+        check(traffic.knockOff.pending, "other riders fall off above 141");
+        traffic.knockOff.pending = false;
+        traffic.up[2] = 0x300; traffic.onCollision(soft, nullptr);
+        check(traffic.knockOff.pending, "any hit throws the rider off a bike lying tipped over");
+        Vehicle car; car.init(VehicleInfo{},0,at,0,0); car.seatUser[0] = -2; car.playerDriving_ = true;
+        car.onCollision(hard, nullptr);
+        check(!car.knockOff.pending, "car drivers are never thrown out by a collision");
+    }
     static void flaps() {
         VehicleInfo info{}; info.raw[0x94]=1; info.raw[0x110]=2;
         const int32_t at[3]={};
@@ -1477,7 +1499,7 @@ int main() {
     check(!Audio_SfxPlaying(voice), "resumed sound effect finishes normally");
     playerFrameIntegration();
     PlayerTestAccess::fightIdle(); SoundTestAccess::run(); CollisionTestAccess::run(); CollisionTestAccess::cameraTests(); PropTestAccess::run(); PropDynamicsTestAccess::run();
-    slats(); garbage(); VehicleTestAccess::flaps(); VehicleTestAccess::burnouts(); VehicleTestAccess::debris(); WaterTestAccess::run(); randomStreams(); explosionsAndShake(); fireAndCamera(); RadioTestAccess::run();
+    slats(); garbage(); VehicleTestAccess::flaps(); VehicleTestAccess::burnouts(); VehicleTestAccess::knockOff(); VehicleTestAccess::debris(); WaterTestAccess::run(); randomStreams(); explosionsAndShake(); fireAndCamera(); RadioTestAccess::run();
     Audio_Shutdown();
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }

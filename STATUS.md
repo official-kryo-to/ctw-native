@@ -23,7 +23,11 @@ compatibility with the original.
   original (accelerate + brake when stopped, on the vehicles whose data allows them): the car holds first gear and
   spins its back wheels in dark smoke, steering swings it round on the spot, and letting go of the brake launches it
   with a forward kick, up to ten times the engine power and flaming tyres while the build-up lasts. A damaged
-  engine has half its power from health 79 and a fifth once the car burns.
+  engine has half its power from health 79 and a fifth once the car burns. Bike and scooter riders are thrown off
+  in a hard crash (cBike::OnCollision: a collision force above 400, 600 against moving things, 141 for other riders,
+  or any knock while the bike lies tipped over) or when the vehicle tips past 60 degrees
+  (cVehicle::CheckForDriverFallingOut): they leave the seat at once, lose a point of health and fly off along the
+  impact in the original's state-6 tumble before lying down and getting up.
   Damaged doors and hatches swing with acceleration, turning and gravity; detached panels have independent
   motion and the burnt palette. Explosive destruction can tear off the five supported panels.
 - **Explosion effects:** the reference flash's two counter-rotating layers and the generic/ordinary-vehicle

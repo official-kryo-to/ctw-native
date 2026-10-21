@@ -64,6 +64,9 @@ static int32_t speedUnits(int32_t speed) {
 void Vehicle::init(const VehicleInfo& info, int id, const int32_t p[3], int16_t h, int pal) {
     infoId = id;
     bike_ = info.type() == 1;   // cPopulationManager: type 1 -> cBike
+    // +0x957 is never initialised by the constructors and only scripts change it; a free-roam bike throws its rider
+    // in a crash, so riders may fall off bikes (an assumption) and never out of other vehicles
+    canFallOff = bike_;
     palette = pal;
     // cWheeledVehicle::SetPropertiesFromVehicleInfo
     hx = (info.s16(0x28) * 0x2332 >> 12) >> 1;
@@ -71,6 +74,7 @@ void Vehicle::init(const VehicleInfo& info, int id, const int32_t p[3], int16_t 
     hz = (info.s16(0x2C) * 2) >> 1;
     mass_ = info.s32(0x50);
     canBurnout_ = ((info.raw[0x8E] | info.raw[0x8F] << 8) >> 9 & 1) != 0;
+    neverFallOut_ = ((info.raw[0x8E] | info.raw[0x8F] << 8) >> 10 & 1) != 0;
     int16_t cgx = info.s16(0x2E), cgy = info.s16(0x30), cgz = info.s16(0x32);
     if (cgx == 0 && cgy == 0 && cgz == 0) { cgLocal_[0] = 0; cgLocal_[1] = 0x1000; cgLocal_[2] = (int32_t)(((int64_t)info.s16(0x2C) * 0x332) >> 12); }
     else { cgLocal_[0] = cgx; cgLocal_[1] = cgy; cgLocal_[2] = cgz; }
@@ -1471,6 +1475,17 @@ void Vehicle::onCollision(const int32_t F[3], const Vehicle* other) {
         if (sp2 > 0x9C3FFFFFFULL) sp2 = 0x9C4000000ULL;
         TheSound().collision(*this, (int)(((sp2 >> 24) * 0x32) >> 12) + 0x32);
     }
+    // cBike::OnCollision: a hard enough hit, or any hit while the bike lies tipped over (up below 0.2), throws the
+    // rider off along the impact. The player falls for a collision force above 400 against the world or 600 against
+    // something that moves (an assumption for the record's +0x31 byte), other riders above 141.
+    if (bike_ && canFallOff && seatUser[0] != -1 && !knockOff.pending) {
+        const int64_t impulse = (int64_t)std::sqrt((double)F[0] * F[0] + (double)F[1] * F[1] + (double)F[2] * F[2]);
+        const int64_t threshold = playerDriving_ ? (other ? 0x258000000LL : 0x190000000LL) : (int64_t)0x8D000 << 12;
+        if ((impulse << 12) > threshold || up[2] <= 0x332) {
+            knockOff.pending = true;
+            std::copy(F, F + 3, knockOff.dir);
+        }
+    }
     // cVehicle::DoOnCollisionWorking
     bool otherIsVehicle = other != nullptr;
     if (dead_) return;
@@ -1550,6 +1565,13 @@ void Vehicle::setDead() {   // cVehicle::SetDead: the burnt wreck, black smoke a
     smokeVel_[0] = smokeVel_[1] = smokeVel_[2] = 0;
     if (fire_) TheParticles().remove(fire_);
     fire_ = TheParticles().add<FireEmitter>(pos);
+}
+
+void Vehicle::checkForDriverFallingOut() {   // cVehicle::CheckForDriverFallingOut
+    // a vehicle that may lose its driver and has tipped past 60 degrees drops him out backwards
+    if (neverFallOut_ || seatUser[0] == -1 || up[2] > 0x7FF || !canFallOff || knockOff.pending) return;
+    knockOff.pending = true;
+    knockOff.dir[0] = -fwd[0]; knockOff.dir[1] = -fwd[1]; knockOff.dir[2] = 0;
 }
 
 void Vehicle::processDamage(uint32_t frame) {   // the damage part of cVehicle::Process (+ cSmoke::Process)
