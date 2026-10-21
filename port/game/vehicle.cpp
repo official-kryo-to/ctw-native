@@ -558,6 +558,19 @@ void Vehicle::updatePhysics(Collision* col) {   // cWheeledVehicle::UpdatePhysic
         } else setToPhysics(false);
     }
     handleSettling(col);
+    damageWobble();
+}
+
+void Vehicle::damageWobble() {   // cWheeledVehicle::DamageWobble
+    // a car at health 159 or below rattles while it is in contact: a random kick to the body's wobble that grows
+    // with the damage and the speed (up to 30 units a second), at most 0x24
+    if (health_ > 0x9F || !collided_) return;
+    const int64_t speed2 = ((int64_t)vel[0] * vel[0] + (int64_t)vel[1] * vel[1] + (int64_t)vel[2] * vel[2]) >> 12;
+    const int32_t s = (int32_t)std::min<int64_t>(speed2, 0x384000);
+    const int64_t scaled = ((int64_t)(uint32_t)(0xA0000 - (health_ << 12)) * (s >> 9) * 5) >> 21;
+    const int32_t w = (int32_t)(((int64_t)(int32_t)scaled * 0x7A) >> 12);
+    const int32_t amount = w > 0x7A ? 0x24 : (int32_t)(((int64_t)w * 0x4CC) >> 12);
+    if (amount >= 1) wobbleV_ += (int32_t)Rand32Critical((uint32_t)(2 * amount)) - amount;
 }
 
 void Vehicle::burnout() {   // cWheeledVehicle::Burnout, cBike::Burnout

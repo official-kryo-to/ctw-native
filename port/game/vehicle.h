@@ -260,6 +260,7 @@ private:
     int32_t swayK_[6] = {0, 0, 0, 0, 0, 0};  // +0xB00..+0xB14 (info +0x74..+0x88): stiffness, damping, lean
     void updateSuspension();
     void burnout();   // cWheeledVehicle::Burnout
+    void damageWobble();   // cWheeledVehicle::DamageWobble
     friend void Vehicles_AddSkidmarks(class Game& game, const Vehicle& car);
     void modelMatrix(float out[16]) const;
     void onCollision(const int32_t force[3], const Vehicle* other);   // OnCollision + DoOnCollisionWorking
