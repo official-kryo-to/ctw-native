@@ -54,6 +54,8 @@ bool Radio::init(const std::string& dir) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, textureW_, textureH_, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
     stbi_image_free(pixels);
+    loadPdaSprite(fs, dir, "SS_PdaSprites.bin", "ss_pdasprites.png", 13, headingBar_);
+    loadPdaSprite(fs, dir, "SS_AlwaysLoaded.bin", "ss_alwaysloaded.png", 96, backButton_);
     GxtFile labels, names;
     labels.load(dir + "/e_pda.gxt"); names.load(dir + "/e_main.gxt");
     appHeading_ = text(names, 0x3F);   // cRadioApp::Init: AddHeading(GlobalText()->GetString(0x3F)), "Music Player"
@@ -123,12 +125,50 @@ float Radio::volumeAlpha(double now) const {
     return std::max(0.4f,1.f - (float)(frames-100) * 0.1f);
 }
 
+// One sprite of a 2x sprite sheet, uploaded on its own (the sheets are large and the radio app needs two pieces)
+bool Radio::loadPdaSprite(GameFs& fs, const std::string& dir, const char* bin, const char* png, int index, PdaSprite& out) {
+    std::vector<uint8_t> defs, image;
+    SpriteSet set;
+    if (!fs.read(bin, defs) || !set.parse(defs) || index >= (int)set.sprites().size() ||
+        !Data_ReadAll(dir + "/" + png, image)) return false;
+    int w, h, channels;
+    unsigned char* pixels = stbi_load_from_memory(image.data(), (int)image.size(), &w, &h, &channels, 4);
+    if (!pixels) return false;
+    out.def = set.sprites()[index];
+    const int x0 = out.def.x * 2, y0 = out.def.y * 2, cw = std::min(out.def.w * 2, w - x0), ch = std::min(out.def.h * 2, h - y0);
+    if (cw <= 0 || ch <= 0) { stbi_image_free(pixels); return false; }
+    std::vector<uint8_t> crop((size_t)cw * ch * 4);
+    for (int y = 0; y < ch; ++y) memcpy(&crop[(size_t)y * cw * 4], pixels + ((size_t)(y0 + y) * w + x0) * 4, (size_t)cw * 4);
+    stbi_image_free(pixels);
+    glGenTextures(1, &out.texture);
+    glBindTexture(GL_TEXTURE_2D, out.texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, cw, ch, 0, GL_RGBA, GL_UNSIGNED_BYTE, crop.data());
+    out.u0 = out.v0 = 0; out.u1 = out.v1 = 1;
+    return true;
+}
+
+void Radio::drawPdaSprite(const PdaSprite& s, float x, float y) {
+    if (!s.texture) return;
+    x -= s.def.offX; y -= s.def.offY;
+    const float w = s.def.w, h = s.def.h;
+    glEnable(GL_TEXTURE_2D); glBindTexture(GL_TEXTURE_2D, s.texture); glColor4f(1, 1, 1, 1);
+    glBegin(GL_QUADS);
+    glTexCoord2f(s.u0,s.v0); glVertex2f(x,y); glTexCoord2f(s.u1,s.v0); glVertex2f(x+w,y);
+    glTexCoord2f(s.u1,s.v1); glVertex2f(x+w,y+h); glTexCoord2f(s.u0,s.v1); glVertex2f(x,y+h);
+    glEnd();
+}
+
 void Radio::shutdown() {
     remember();
     if (!stations_.empty()) save();
     Audio_StopMusic();
     Audio_SetSfxPaused(false);
     if (texture_) glDeleteTextures(1, &texture_);
+    for (PdaSprite* s : {&headingBar_, &backButton_}) { if (s->texture) glDeleteTextures(1, &s->texture); *s = PdaSprite{}; }
     texture_ = 0; stations_.clear(); playing_ = -1;
     app_ = appTuning_ = false; pointerDown_ = pointerSwiped_ = false; listenClock_ = 0;
     ambience_ = -1; ambienceLevel_ = 0;
@@ -273,9 +313,12 @@ void Radio::sprite(int id, float x, float y, float scale, float alpha) const {
 // is min(9, sqrt(band energy x 64) x 9) (GetOutput) from the music's band filters (Audio_MusicBands). ProcessStars:
 // the dotted outline (sprite 17) at (181, 246), scale 2.35, and up to five stars (sprite 7, scale 2) at y 250,
 // x 273 down to 169, by ascending nonzero listening-time rank, capped at five. ProcessVolumeIcon: the meter (sprite 20 and the level
-// sprite) at (208, 270), fading back to 40 percent after a change. The heading is GlobalText 0x3F ("Music
-// Player"). Not ported yet: the PDA frame (SS_Icons / SS_Radio sprite windows at (0x110, 0x120) and (0xB0, 0x120)),
-// the help tips and the custom-playlist slot; the frame and the station name line are drawn in a PC style.
+// sprite) at (208, 270), fading back to 40 percent after a change; Init adds the volume buttons as sprite windows
+// (SS_Radio 13 at (0xB0, 0x120), 15 at (0x110, 0x120)). cRadioApp::Render clears the screen to black: there is no
+// panel and no station name, only the logos. The PDA adds the heading (cPdaApp::AddHeading: SS_PdaSprites 13 at
+// (8, -32) under GlobalText 0x3F, "Music Player", centred across the 480 pixels) and the task bar's back button
+// (SS_AlwaysLoaded 96; its place in the bottom-left corner is assumed, the task bar's layout is not ported). Not
+// ported: the help tips, the custom-playlist slot and the phone surround of cPda::RenderPhoneSurround.
 namespace {
 constexpr float kAppW = 480.f, kAppH = 340.f;
 uint32_t rgb555(uint16_t c, uint8_t alpha = 0xFF) {   // DrawDebugFan takes the 5-bit channels x 5
@@ -423,18 +466,11 @@ void Radio::renderApp(int W, int H, Game& game) {
     appPointer((mouseX - ox) / scale, (mouseY - oy) / scale, Host_MouseDown(0),
                Plugins_HostApi().mouse_clicked(0) != 0, game);
     if (!app_) return;
-    // cRadioApp disables world rendering; no city image shows through its screen.
+    // cRadioApp::Render: a black screen (world rendering is disabled)
     Hud_Rect(0, 0, (float)W, (float)H, 0x000000FFu);
     glPushMatrix();
     glTranslatef(ox, oy, 0);
     glScalef(scale, scale, 1);
-    Hud_Rect(0, -46, kAppW, kAppH + 46, 0x0B0D12FFu);
-    Hud_Rect(0, -46, kAppW, 2, 0xF2C230FFu);
-    const Station& s = stations_[selected_];
-    const std::string& name = s.name.empty() ? s.label : s.name;
-    Hud_Text(16, -36, 1.2f, 0xF4F5F8FFu, appHeading_.empty() ? "Music Player" : appHeading_);   // the PDA heading
-    const float nameScale = std::min(1.f, 300.f / std::max(1.f, Hud_TextWidth(name, 1.f)));
-    Hud_Text(kAppW - 16 - Hud_TextWidth(name, nameScale), -34, nameScale, 0xF2C230FFu, name);
 
     // PrintAllBars: the bars, then the floor reflection
     float energy[8];
@@ -470,7 +506,7 @@ void Radio::renderApp(int W, int H, Game& game) {
         if (x <= -0x81) x += appWidth_;
         if (x > appWidth_ - 0x80) x -= appWidth_;
         const float alpha = (float)std::min(std::abs(base - x), 240) * -0.004166667f + 1.f;
-        if (alpha > 0.f && x > -def->w && x < kAppW) sprite(st.icon, (float)x, 85.f - def->h * 0.5f + 40.f, 1.f, alpha);
+        if (alpha > 0.f && x > -def->w && x < kAppW) sprite(st.icon, (float)x, 85.f, 1.f, alpha);   // SetSpritePos(x, 0x55)
     }
 
     // ProcessStars hides the outline only for the off station.
@@ -486,7 +522,11 @@ void Radio::renderApp(int W, int H, Game& game) {
     sprite(20, 208, 270, 1.f, volAlpha);
     if (volume_ > 0) sprite(tables_.volumeSprites[volume_ - 1], 208, 270, 1.f, volAlpha);
     sprite(13, 176, 288); sprite(15, 272, 288);
-    Hud_Text(16, kAppH - 18, 0.8f, 0xF4F5F8FFu, "Back");
+    // the PDA: the heading bar and its centred title, the back button
+    drawPdaSprite(headingBar_, 8, -32);
+    const std::string& heading = appHeading_.empty() ? std::string("Music Player") : appHeading_;
+    Hud_Text(240.f - Hud_TextWidth(heading, 1.f) * 0.5f, -30, 1.f, 0xFFFFFFFFu, heading);
+    drawPdaSprite(backButton_, 8, kAppH - backButton_.def.h - 4);
     glPopMatrix();
 }
 

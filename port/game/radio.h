@@ -8,6 +8,7 @@
 #include <vector>
 
 class Game;
+class GameFs;
 class Radio {
 public:
     bool init(const std::string& dataDir);
@@ -38,6 +39,11 @@ private:
     std::vector<Station> stations_;
     unsigned texture_ = 0;
     int textureW_ = 0, textureH_ = 0;
+    // the PDA's own pieces: the heading bar (SS_PdaSprites 13) and the task bar's back button (SS_AlwaysLoaded 96)
+    struct PdaSprite { unsigned texture = 0; SpriteDef def{}; float u0 = 0, v0 = 0, u1 = 0, v1 = 0; };
+    PdaSprite headingBar_, backButton_;
+    bool loadPdaSprite(GameFs& fs, const std::string& dir, const char* bin, const char* png, int index, PdaSprite& out);
+    static void drawPdaSprite(const PdaSprite& s, float x, float y);
     int selected_ = 0, playing_ = -1, volume_ = 8;
     uint32_t carUid_ = 0;
     // cWavStream ambience: the city / rain / airport loop on the music stream when no station plays
