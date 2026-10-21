@@ -39,7 +39,8 @@ compatibility with the original.
   set people, vehicles and inflammable props within seven units alight (AffectEntities' fire radius,
   cDynamicProp::SetOnFire). Generic type-0/type-4 flash, sound and cloud start on the third Process call and retain the
   eleven-call final state. Type-4 debris uses the reference five horizontal fragments, launch, colour, gravity,
-  damping and lifetime; its trails are still missing. Nearby explosions shake the active on-foot or driving
+  damping and lifetime, each with its smoke trail (cTrailManager / cSimpleTrail: a tapering strip of up to
+  twelve points in the fragment's colour). Nearby explosions shake the active on-foot or driving
   camera with the original random stream, amplitude and decay. Fire, flash and explosion clouds use the
   original additive pass before ordinary alpha-blended smoke; the yellow flash no longer darkens the street.
   Generic type-0/type-4 blasts now damage and knock down on-foot people, damage and push vehicles, and apply
@@ -127,7 +128,7 @@ compatibility with the original.
   The implemented vehicle impact paths do not constitute complete death physics.
 - Full explosion entity ordering/limits, immunity and source-reaction flags, prop weapon/fire damage integration
   and health ownership, specialised duplicate-check exclusions and explosion pool limits; the vehicle
-  death-cause and chain scheduling still need full parity, and debris trails are missing.
+  death-cause and chain scheduling still need full parity.
   The generic vehicle impulse is consumed after integration to avoid losing it to parked-car settling, an
   adaptation pending the native entity scheduler. Prop health resets at the port's existing cleanup distance,
   not the native sector/entity lifetime. Other specialised explosions, and the original shared particle-pool capacity/update ordering remain

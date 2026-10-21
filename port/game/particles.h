@@ -29,7 +29,7 @@ struct Particle {   // sParticle
 class Emitter {
 public:
     Emitter(const int32_t pos[3], int count, int32_t range, uint8_t sprite, bool billboard);
-    virtual ~Emitter() = default;
+    virtual ~Emitter();
     void setPos(const int32_t p[3]);          // cParticleEmitterBase::SetPos
     virtual void process(uint32_t hours = 12u << 12); // Process -> ParticleUpdateLoop(true); time is Q12
     virtual void render(const WorldCamera& cam) const;

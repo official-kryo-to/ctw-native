@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 #include "particles.h"
+#include "trails.h"
 #include "random.h"
 #include "gfx/assets.h"
 #include "world/worldrenderer.h"
@@ -426,8 +427,8 @@ ExplosionDebris* ExplosionDebris::create(const int32_t at[3], int type) {
 ExplosionDebris::ExplosionDebris(const int32_t at[3], int type) : Emitter(at,5,0x4000,19,false) {
     Particle p{};
     p.p[2] = 0x1000; p.life = 31; p.alpha = 31;
-    p.alphaStep = -1; // reference stores its trail handle here; -1 while trails are unavailable
     for (int i = 0; i < 5; ++i) {
+        p.alphaStep = 0;   // AddDebrisParticle keeps the trail handle here (-1: none)
         if (type == 2) p.colour = 0x1D8E;
         else {
             const int shade = (int)Rand16NonCritical(25);
@@ -445,20 +446,35 @@ ExplosionDebris::ExplosionDebris(const int32_t at[3], int type) : Emitter(at,5,0
             p.p[k] = (int16_t)((p.p[k]*inv_) >> 12); p.v[k] = (int16_t)((p.v[k]*inv_) >> 12);
         }
         p.size = (int16_t)((p.size*inv_) >> 12);
+        // a smoke trail 0.3 wide in the fragment's colour (the molotov's 0x15F), halving each point, 12 at most
+        const int trail = TheTrails().getFree(this);
+        p.alphaStep = (int8_t)trail;
+        if (trail >= 0) {
+            const int32_t across[3] = {0x1000, 0, 0};   // the emitter's matrix row 0
+            TheTrails().init(trail, pos, across, type == 2 ? 0x15F : p.colour, 0x4CC, true, true, false, 1, 12, false);
+        }
         addFromData(p);
     }
     dying = true;
 }
 
 void ExplosionDebris::updateParticle(Particle& p) {
-    // Update samples one shared X/Y jitter for its trail point even if no trail was allocated.
-    randNC(0x1000);
+    // the trail point: the fragment's world position with one shared X/Y jitter (drawn even without a trail)
+    const int32_t range = (int32_t)((0x100000000000LL / inv_) >> 20);
+    const int32_t jitter = (int32_t)randNC(0x1000) - 0x800;
+    const int32_t point[3] = {pos[0] + jitter + (int32_t)(((int64_t)range * p.p[0]) >> 12),
+                              pos[1] + jitter + (int32_t)(((int64_t)range * p.p[1]) >> 12),
+                              pos[2] + (int32_t)(((int64_t)range * p.p[2]) >> 12)};
+    if (p.alphaStep != -1) TheTrails().addPoint(p.alphaStep, point);
     if (p.p[2] > 0) p.v[2] -= 0x199;
     for (int k = 0; k < 3; ++k) {
         p.p[k] = (int16_t)(p.p[k]+p.v[k]); p.v[k] = (int16_t)((p.v[k]*0xE66) >> 12);
     }
     p.angle = (uint16_t)(p.angle+p.spin); p.size = (int16_t)(p.size+p.grow); p.life -= 2;
-    if (p.size < 1 || (p.alpha == 0 && p.life <= 10)) p.life = 0;
+    if (p.size < 1 || ((int8_t)p.alpha <= 0 && p.life <= 10)) {
+        p.life = 0;
+        TheTrails().release(p.alphaStep);
+    } else if (p.life <= 3) TheTrails().release(p.alphaStep);   // (the handle is kept, as in the reference)
 }
 
 int32_t ExplosionTwirls::viewAxis_[2] = {0, 0};
@@ -516,6 +532,8 @@ void ExplosionTwirls::updateParticle(Particle& p) {   // cParticleEmitterExplosi
     const int32_t turn = (int32_t)(int16_t)(distance >> 12) * cross;
     std_.angle = (uint16_t)(std_.angle - (turn >> 15));
 }
+
+Emitter::~Emitter() { TheTrails().forget(this); }   // the trails' weak pointers to it
 
 Emitter::Emitter(const int32_t p[3], int count, int32_t range, uint8_t sprite, bool billboard)
     : range_(range), inv_(range ? (int32_t)((0x100000000000LL / range) >> 20) : 0), sprite_(sprite), billboard_(billboard) {
@@ -757,6 +775,7 @@ void Particles::update(uint32_t frame, uint32_t hours, const int32_t* playerPos)
     }
     emitters_.erase(std::remove_if(emitters_.begin(), emitters_.end(), [](const std::unique_ptr<Emitter>& e) { return e->finished(); }),
                     emitters_.end());
+    TheTrails().process();   // cTrailManager::Process
 }
 
 void RainEmitter::addDrops(unsigned n, uint16_t cameraYaw) {   // cParticleEmitterRain::AddParticle(uint)
@@ -825,6 +844,7 @@ void Particles::render(const WorldCamera& cam) const {
     glDisable(GL_CULL_FACE);
     glDisable(GL_ALPHA_TEST);
     glEnable(GL_DEPTH_TEST);
+    TheTrails().render();   // cTrailManager::Render
     // cEffectManager::Render draws emissive effects first, then smoke and other ordinary alpha effects.
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     for (const auto& e : emitters_) if (e->additive_) e->render(cam);
