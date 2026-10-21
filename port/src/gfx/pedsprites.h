@@ -12,7 +12,7 @@
 //   stand 0/1, walk 2/3, run 4/5, player sprint 0xA0/0xA1 (+ 275 for body set 1).
 // Colours: palettes = gGameDir[8] (2395), 16 RGB555 colours per palette; a layer's colour slot comes from a
 // per-body-type table (DAT_00586a8c). cPed::SetColour(a, b): upper body uses palette a, legs palette b (the
-// first layer of the legs uses a). The player uses palettes 4 and 5 (4 is never given to other peds).
+// first layer of the legs uses a). The player uses palettes 4 and 5 (cPed::cPed turns a random upper 4 into 5).
 // Heights (cPedSprite::mZPositions, pose 0 = on foot): upper body 2.0 (first layer) / 1.5, legs 1.0 / 0.5 above
 // the feet, each layer lowered by sSpriteOffset (-204/4096) times its index.
 // Daylight shading (cPedSprite::DrawPedPrim): from 07:00 to 20:00 each corner of a layer is pulled from its

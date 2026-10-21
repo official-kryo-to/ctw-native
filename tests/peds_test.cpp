@@ -174,10 +174,30 @@ int main() {
         Pedestrians::Ped c;
         c.type = 1;
         peds.dress(c, 0);
-        if (c.male) { ++men; palettesOk = palettesOk && c.body.bodySet == 1 && c.body.palUpper < 5 && c.body.palLegs < 5; }
-        else { ++women; palettesOk = palettesOk && c.body.bodySet == 0 && c.body.palUpper >= 30 && c.body.palUpper < 35; }
+        if (c.male) {   // cPed::cPed: the player's upper palette 4 becomes 5
+            ++men;
+            palettesOk = palettesOk && c.body.bodySet == 1 && c.body.palUpper <= 5 && c.body.palUpper != 4 && c.body.palLegs < 5;
+        } else {   // a woman's legs take her upper palette
+            ++women;
+            palettesOk = palettesOk && c.body.bodySet == 0 && c.body.palUpper >= 30 && c.body.palUpper < 35 &&
+                         c.body.palLegs == c.body.palUpper;
+        }
     }
-    check(palettesOk, "men use body set 1 and palettes 0..4, women body set 0 and palettes 30..34");
+    check(palettesOk, "men use body set 1 and palettes 0..5 but never the player's 4 above, women body set 0 and 30..34");
+    {
+        uint32_t seed = 0, a = 0, b = 0;
+        for (;; ++seed) {   // a seed that makes a man
+            RandInit(seed);
+            a = Rand16Critical(5); b = Rand16Critical(5);
+            if (Rand16Critical(100) > 40) break;
+        }
+        RandInit(seed);
+        Pedestrians::Ped c;
+        c.type = 1;
+        peds.dress(c, 0);
+        check(c.male && c.body.palUpper == (a == 4 ? 5 : (int)a) && c.body.palLegs == (int)b,
+              "a man's palettes are the two cPedSprite RandomColour rolls made before the sex roll");
+    }
     check(men > 200 && women > 120, "about 60% of civilians are men (cPed::cPed: Rand16Critical(100) > 40)");
     Pedestrians::Ped woman;
     woman.type = 1;

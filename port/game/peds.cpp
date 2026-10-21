@@ -144,30 +144,52 @@ int Pedestrians::alive() const {
 }
 
 void Pedestrians::dress(Ped& p, int zoneSex) const {
-    // cPed::cPed: Rand16Critical(100) > 40 is male; SetPedType applies the record; CreateRandomPed then
-    // applies the zone's sex makeup to civilians.
-    bool male = Rand16Critical(100) > 40;
-    const Record* r = record(p.type, p.subtype);
-    if (r && r->maleOnly) male = true;
-    else if (r && r->femaleOnly) male = false;
-    else if (p.type == 1 && zoneSex == 1) male = true;
-    else if (p.type == 1 && zoneSex == 2) male = false;
-    int upper, legs;
-    if (male) { upper = (int)Rand16Critical(5); legs = (int)Rand16Critical(5); }   // ChooseRandomMalePalette
-    else { upper = 30 + (int)Rand16Critical(5); legs = 30 + (int)Rand16Critical(5); }   // ChooseRandomFemalePalette
-    if (p.type == 10) {   // SetPedType: cop subtypes have their own uniform palettes
+    // The palette bytes as the original keeps them: u = the upper sprite's (+0x3D and +0x3E), a and l = the legs
+    // sprite's +0x3E (its first layer) and +0x3D (the rest).
+    int body = 0, u, a, l;
+    const auto maleChoice = [&] { u = a = (int)Rand16Critical(5); l = (int)Rand16Critical(5); };          // ChooseRandomMalePalette
+    const auto femaleChoice = [&] { u = a = 30 + (int)Rand16Critical(5); l = 30 + (int)Rand16Critical(5); };   // ChooseRandomFemalePalette
+    const auto setMale = [&](bool male, int type, int subtype) {   // cPed::SetMale
+        const Record* info = record(type, subtype);
+        if (info && info->maleOnly && male) return;
+        if (info && info->femaleOnly && !male) return;
+        if (type == 10 || subtype == 3 || subtype == 4) return;
+        body = male ? 1 : 0;
+        if (!male) femaleChoice();
+        else if ((unsigned)(a - 30) <= 4) maleChoice();   // only a woman's palettes are replaced
+    };
+    // cPed::cPed: each cPedSprite takes cPedInfoManager::RandomColour (Rand16Critical(5)); SetMale(Rand16Critical(100)
+    // > 40) for a type-1 subtype-0 ped; then the legs take their first layer's colour throughout, and an upper body
+    // in the player's palette 4 is given palette 5.
+    u = (int)Rand16Critical(5);
+    a = l = (int)Rand16Critical(5);
+    setMale(Rand16Critical(100) > 40, 1, 0);
+    l = a;
+    if (u == 4) u = 5;
+    a = u;
+    Rand32Critical(8);   // cPed::cPed: +0x338 bit 6 (Rand32Critical(8) > 1)
+    // cPed::SetPedType
+    const int t = p.type, sub = p.subtype;
+    if (t == 10) {   // cops: a uniform per subtype
         static const int cop[4] = {0x10, 0x12, 0x0C, 0x11};
-        male = true;
-        upper = legs = p.subtype >= 0 && p.subtype < 4 ? cop[p.subtype] : 0x10;
-    } else if (p.type == 1 && (p.subtype == 3 || p.subtype == 4)) {
-        male = true;
-        upper = legs = p.subtype == 3 ? 0x0D : 0x0E;
-    }
-    if (r && r->upperPalette) { upper = r->upperPalette - 1; legs = r->legsPalette - 1; }
-    p.male = male;
-    p.body.bodySet = male ? 1 : 0;   // cPed +0x220 selects the body set (0x113 animations each)
-    p.body.palUpper = upper;
-    p.body.palLegs = legs;
+        body = 1;
+        u = a = l = sub >= 0 && sub < 4 ? cop[sub] : 0x10;
+    } else if (t == 13 || t == 16) {   // dressed as the player: palettes 4 and 5
+        body = 1;
+        u = a = 4; l = 5;
+    } else if (t == 1) {
+        if (sub == 3 || sub == 4) { body = 1; u = a = l = sub == 3 ? 0x0D : 0x0E; }
+    } else if (t != 4 && t != 9) body = 1;   // other types are men (in whatever palettes cPed::cPed chose)
+    const Record* r = record(t, sub);
+    if (r && r->maleOnly) body = 1;
+    else if (r && r->femaleOnly) { body = 0; femaleChoice(); }
+    if (r && r->upperPalette) { u = a = r->upperPalette - 1; l = r->legsPalette - 1; }
+    // cPopulationManager::CreateRandomPed: a civilian takes the zone's sex makeup
+    if (t == 1 && (zoneSex == 1 || zoneSex == 2)) setMale(zoneSex == 1, t, sub);
+    p.male = body != 0;
+    p.body.bodySet = body;   // cPed +0x220 selects the body set (0x113 animations each)
+    p.body.palUpper = u;     // (a is always u here: the legs' first layer is drawn in palUpper)
+    p.body.palLegs = l;
 }
 
 void Pedestrians::setTarget(Game& g, Ped& p) {   // cWanderPath::SetNext
