@@ -82,7 +82,12 @@ compatibility with the original.
   weapons are crimes with the original points and instant-star rules. One lit star decays while no cop car is on
   screen (faster further from where a cop last saw him); two or more need cop cars taken down; a lost star stays
   dimmed through the 300-frame no-crime probation. The HUD shows the six stars (lit, half-alpha when taken down,
-  probation sprite, flashing and popping in as cMiniHud does). Cops do not chase yet.
+  probation sprite, flashing and popping in as cMiniHud does). The population answers it: WantedModifier puts
+  more cop cars in the mix per star (capped per level, fewer while a star is dimmed), from two stars on every
+  vehicle spawned is a cop (freeing the car off screen the longest when full), and the cop unit and vehicle come
+  from GetCopSubType / GetCopsVehicleId. Cops do not chase yet (cEnforcerWanderRoads, cArrestInCar,
+  cAggressiveDriving and cArrestOnFoot are next), and wanted cops spawn at the usual places, not on the original's
+  ring around the player.
 - **Pedestrians:** civilians and cops walk the pavement network of each world sector, using the original zone
   population, spawn schedule, spawn ring, cleanup distance and `pedinfo.bin` looks (gender, body, colours).
   Joggers run, and everyone hurries in the rain. Nearby player vehicles retain the task's run-speed limit;
