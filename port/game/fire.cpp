@@ -29,6 +29,9 @@ bool attachedPos(const Game& g, const Fires::Fire& f, int32_t out[3]) {
             for (const Vehicle& c : g.cars)
                 if (c.uid == f.uid) { c.localToWorld(f.offset, out); return true; }
             return false;
+        case Fires::Prop:   // a standing prop has not moved from where the fire started
+            if (!g.propDynamics.position(f.uid, out)) std::copy(f.pos, f.pos + 3, out);
+            return true;
     }
     return false;
 }

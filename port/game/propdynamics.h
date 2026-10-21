@@ -22,6 +22,9 @@ public:
     void update(Game& game);
     void render(Game& game) const;   // between the last two ticks when game.interpolate is on
     int looseCount() const { return (int)loose_.size(); }   // the debug overlay
+    // a prop's identity for the things attached to it (fires), and where it is now
+    static uint32_t key(int cx, int cy, int index) { return (uint32_t)(cx * 100 + cy) << 12 | (uint32_t)index; }
+    bool position(uint32_t key, int32_t out[3]) const;   // false: not a moving body (it has not moved)
 private:
     struct Loose {
         int cx, cy, index;
@@ -38,12 +41,15 @@ private:
     void applyForce(Game& game, Loose& prop, const int32_t point[3], const int32_t force[3],
                     const int32_t* sourcePos = nullptr, const int32_t* sourceVelocity = nullptr, bool vehicleImpact = false,
                     int forceType = 8);
+    // strength: Smash's uint, the force's magnitude (ApplyWorldForce) or the damage beyond the health (Damage)
     void smash(Game& game, Loose& prop, const int32_t point[3], const int32_t force[3],
-               const int32_t* sourcePos, const int32_t* sourceVelocity, bool vehicleImpact);
+               const int32_t* sourcePos, const int32_t* sourceVelocity, bool vehicleImpact, uint32_t strength);
+    void setOnFire(Game& game, Loose& prop);   // cDynamicProp::SetOnFire
     void damage(Game& game, Loose& prop, int amount, int kind, const int32_t direction[3]);
     int health(const Game& game, const Loose& prop) const;
     void smashParticles(Game& game, Loose& prop, const int32_t point[3], const int32_t force[3], int effect,
-                        const int32_t* sourcePos, const int32_t* sourceVelocity, bool vehicleImpact);
+                        const int32_t* sourcePos, const int32_t* sourceVelocity, bool vehicleImpact,
+                        uint32_t strength);
     bool hit(Game& game, Vehicle& car, Loose& prop);
     bool hit(Game& game, Loose& a, Loose& b);
     template<class A, class B>

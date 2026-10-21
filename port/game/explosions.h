@@ -11,6 +11,7 @@ struct ExplosionBlast {
     ExplosionBlast(const int32_t origin[3], int type, int32_t damageRadius, int32_t forceRadius, int32_t damageQ12,
                    int32_t pedDamageQ12);
     int32_t pos[3], damageRadius, forceRadius, damageQ12, pedDamageQ12;
+    int32_t fireRadius = 0;   // AffectEntities' sixth argument: what is closer than this is set on fire
     int type;
     int minCellX, minCellY, maxCellX, maxCellY;
     bool includesCell(const int32_t point[3]) const;

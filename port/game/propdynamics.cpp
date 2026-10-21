@@ -8,6 +8,7 @@
 #include "particles.h"
 #include "sound.h"
 #include "cargens.h"
+#include "fire.h"
 #include <algorithm>
 #include <cmath>
 
@@ -21,7 +22,8 @@ void normalise(int32_t p[3]) {
 }
 
 void PropDynamics::smashParticles(Game& g, Loose& l, const int32_t point[3], const int32_t force[3], int effect,
-                                 const int32_t* sourcePos, const int32_t* sourceVelocity, bool vehicleImpact) {
+                                 const int32_t* sourcePos, const int32_t* sourceVelocity, bool vehicleImpact,
+                                 uint32_t strength) {
     const int32_t at[3] = {l.prop.x,l.prop.y,l.prop.z};
     const uint32_t ambient = g.world.timeCycle().ok() ? g.world.timeCycle().colour(13) : 0x808080u;
     const int32_t half[3] = {l.body.hx,l.body.hy,l.body.hz};
@@ -65,10 +67,13 @@ void PropDynamics::smashParticles(Game& g, Loose& l, const int32_t point[3], con
         l.collidable = false; // Smash's +0x21 branch clears entity contact flags
         return;
     }
-    if ((effect == 23 || effect == 30) && vehicleImpact) {
-        // Smash2's hotdog cart struck by a vehicle: a small generic blast, without the gas-jet timer.
+    if (effect == 23 || effect == 30) {
+        // Smash2's hotdog cart: it catches fire; a vehicle or a hard hit (51 or more) bursts it at once as a small
+        // generic blast, anything softer opens its gas jet (a type-11 cExplosionHotDog along the force)
+        setOnFire(g, l);
         int32_t blast[3]; l.body.worldCG(blast);
-        g.addPropExplosion(blast,0x8CC);
+        if (vehicleImpact || strength >= 0x33) g.addPropExplosion(blast,0x8CC);
+        else g.addHotDogExplosion(blast, force);
         return;
     }
     if (effect == 26 || effect == 27) { // Smash2: slats span the prop's transformed right axis
@@ -191,7 +196,7 @@ void PropDynamics::applyForce(Game& g,Loose& l,const int32_t p[3],const int32_t 
             l.collidable=false; // UpRoot clears entity contacts, retaining world collisions for this effect
         } else l.body.applyWorldForce(p,f,forceType);
     }
-    if(smash) this->smash(g,l,p,f,sourcePos,sourceVelocity,vehicleImpact);
+    if(smash) this->smash(g,l,p,f,sourcePos,sourceVelocity,vehicleImpact,(uint32_t)magnitude);
     if(l.broken || l.uprooted) {
         g.collision.setPropState(l.cx,l.cy,l.index,1);
         g.collision.setPropSolid(l.cx,l.cy,l.index,false);
@@ -199,13 +204,14 @@ void PropDynamics::applyForce(Game& g,Loose& l,const int32_t p[3],const int32_t 
 }
 
 void PropDynamics::smash(Game& g, Loose& l, const int32_t p[3], const int32_t f[3],
-                         const int32_t* sourcePos, const int32_t* sourceVelocity, bool vehicleImpact) {
+                         const int32_t* sourcePos, const int32_t* sourceVelocity, bool vehicleImpact,
+                         uint32_t strength) {
     if (l.broken) return;
     const auto* kind = g.props.kindForProp(l.prop.prop); if (!kind) return;
     l.broken = true;
     const int32_t at[3] = {l.prop.x,l.prop.y,l.prop.z};
     TheSound().propSmash(at,kind->smashEffect);
-    smashParticles(g,l,p,f,kind->smashEffect,sourcePos,sourceVelocity,vehicleImpact);
+    smashParticles(g,l,p,f,kind->smashEffect,sourcePos,sourceVelocity,vehicleImpact,strength);
     int32_t axis[3] = {-f[1],f[0],0}; normalise(axis);
     if (kind->smashEffect == 7) { l.body.rotate(axis,0x16C); l.lampTimer=60; }
     else if (kind->smashEffect == 8) l.body.rotate(axis,0x3C72);
@@ -241,7 +247,35 @@ void PropDynamics::damage(Game& g, Loose& l, int amount, int damageKind, const i
     const int strength = damageKind == 4 ? 0 : bullet && damageKind == 2 ? amount/3 : amount;
     for (int k=0;k<3;++k) force[k] *= strength;
     const int32_t source[3] = {}; // generic explosions currently have no source-entity ownership
-    smash(g,l,source,force,nullptr,nullptr,false);
+    // Smash's strength: the damage beyond the remaining health (none for kind 4)
+    const uint32_t beyond = damageKind == 4 || amount <= before ? 0u : (uint32_t)(amount - before);
+    smash(g,l,source,force,nullptr,nullptr,false,beyond);
+}
+
+void PropDynamics::setOnFire(Game& g, Loose& l) {   // cDynamicProp::SetOnFire
+    const auto* kind = g.props.kindForProp(l.prop.prop);
+    if (!kind) return;
+    // props whose hit effect is not 1 or 5 first lose ten health; at zero they smash (straight up, strength 10)
+    if ((kind->hitEffect | 4) != 5 && health(g,l) >= 1) {
+        const int remaining = std::max(0, health(g,l) - 10);
+        auto& state = damaged_[{l.cx*100+l.cy,l.index}];
+        state.health = (int8_t)remaining; std::copy(l.body.pos,l.body.pos+3,state.pos);
+        if (!remaining) {
+            const int32_t at[3] = {l.prop.x,l.prop.y,l.prop.z}, up[3] = {0,0,0x1000};
+            smash(g,l,at,up,nullptr,nullptr,false,0xA000);
+        }
+    }
+    const uint32_t id = key(l.cx,l.cy,l.index);
+    if (!kind->inflammable || g.fires.burning(Fires::Prop,id)) return;   // IsInflammable, IsOnFire
+    // a style-3 fire with an emitter for 150 frames (5 x 30), attached to the prop
+    const int32_t at[3] = {l.body.pos[0],l.body.pos[1],l.body.pos[2]};
+    g.fires.start(g,at,Fires::Prop,id,150,3,true,false);
+}
+
+bool PropDynamics::position(uint32_t id, int32_t out[3]) const {
+    for (const Loose& l : loose_)
+        if (key(l.cx,l.cy,l.index) == id) { std::copy(l.body.pos,l.body.pos+3,out); return true; }
+    return false;   // standing where it always stood
 }
 
 template<class A, class B>
@@ -374,6 +408,8 @@ void PropDynamics::explosion(Game& g, const ExplosionBlast& blast) {
         direction[2] += 2048; Normalise3(direction);
         const int32_t magnitude = blast.force(squared);
         for (int k = 0; k < 3; ++k) force[k] = (int32_t)(((int64_t)direction[k] * magnitude) >> 12);
+        // AffectEntities sets props within the fire radius alight before it pushes them
+        if (blast.fireRadius && squared < (int64_t)blast.fireRadius * blast.fireRadius) setOnFire(g, l);
         applyForce(g, l, point, force, nullptr, nullptr, false, 16);
         if (squared <= (int64_t)blast.damageRadius * blast.damageRadius) {
             const int amount = (int)(((int64_t)ExplosionBlast::falloff(squared,blast.damageRadius) * blast.damageQ12) >> 24);

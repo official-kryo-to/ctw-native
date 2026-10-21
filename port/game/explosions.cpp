@@ -116,13 +116,33 @@ void Game::affectExplosion(const Explosion& explosion) {
     // cExplosionMolotov::Process: AffectEntities(6, 10, 320, half, whole, 7) with the molotov's damage. Types 0, 1, 3 and
     // 4 are all cExplosionGeneric (Explosion::AddExplosion) and keep the scale-based radii above.
     const int molotov = Weapons_Info(21).damage;
-    const ExplosionBlast blast = explosion.type == 2
+    ExplosionBlast blast = explosion.type == 2
         ? ExplosionBlast(explosion.pos, 2, 24576, 40960, (molotov << 11) & ~0xFFF, molotov << 12)
         : ExplosionBlast(explosion.pos, explosion.type, explosion.scale, Weapons_Info(20).damage);
+    if (explosion.type == 2) blast.fireRadius = 0x7000;
     affectBlast(blast);
 }
 
 void Game::affectBlast(const ExplosionBlast& blast) {
+    // AffectEntities sets people within the fire radius alight (cPed::SetOnFire) before it damages them
+    auto inFire = [&](const int32_t at[3]) {
+        if (!blast.fireRadius || !blast.includesCell(at)) return false;
+        const int64_t squared = ExplosionBlast::distanceSquared(at, blast.pos) >> 12;
+        return (int64_t)blast.fireRadius * blast.fireRadius > (squared << 12);
+    };
+    if (playerCar < 0 && !player.dead && !player.hidden && !player.attached && inFire(player.pos) &&
+        !fires.burning(Fires::Player, 0))
+        fires.start(*this, player.pos, Fires::Player, 0, 0x1E0, 1, true, true);
+    for (const Pedestrians::Ped& p : peds.peds)
+        if (!p.vehicle && !p.body.dead && inFire(p.body.pos)) Fires_SetPedOnFire(*this, p.uid);
+    // vehicles closer than the radius (whole-unit distance), except helicopters, catch fire (cVehicle::SetOnFire)
+    if (blast.fireRadius)
+        for (Vehicle& car : cars) {
+            if (car.dead() || !blast.includesCell(car.pos)) continue;
+            const int32_t distance = (int32_t)std::sqrt((double)ExplosionBlast::distanceSquared(car.pos, blast.pos));
+            if (distance < blast.forceRadius + car.boundRadius() && distance < blast.fireRadius)
+                Fires_SetVehicleOnFire(*this, car);
+        }
     int damage;
     if (playerCar < 0 && !player.dead && !player.hidden && !player.attached && blast.pedHit(player.pos, true, damage)) {
         int32_t direction[3]; for (int k = 0; k < 3; ++k) direction[k] = player.pos[k] - blast.pos[k];

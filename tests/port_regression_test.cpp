@@ -552,11 +552,24 @@ struct PropDynamicsTestAccess {
             check(ParticlesTestAccess::count() == before+2 && dynamic_cast<const ExplosionFlash*>(flash) &&
                   ParticlesTestAccess::particle(*flash).grow == 2815 && ParticlesTestAccess::particle(*flash).size == 112,
                   "vehicle-struck hotdog cart preserves the reference 0x8CC scale through its delayed flash");
+            // ApplyWorldForce hands Smash the force's magnitude: a hard push bursts the cart as the small blast
             Game other; PropTestAccess::furniture(other,effect); CollisionTestAccess::propScene(other);
-            auto unported = other.propDynamics.makeBody(other,20,20,0);
-            other.propDynamics.applyForce(other,unported,newsAt,force);
-            check(GameTestAccess::explosions(other) == 0,
-                  "nonvehicle hotdog-cart damage cannot silently substitute a generic explosion for the unported gas-jet reaction");
+            auto pushed = other.propDynamics.makeBody(other,20,20,0);
+            other.propDynamics.applyForce(other,pushed,newsAt,force);
+            check(GameTestAccess::explosions(other) == 1 && GameTestAccess::explosionType(other) == 0,
+                  "a hard nonvehicle push bursts a hotdog cart at once with the small generic blast");
+            // Damage hands Smash the damage beyond the health: finishing it off softly opens the gas jet
+            Game jet; PropTestAccess::furniture(jet,effect); CollisionTestAccess::propScene(jet);
+            auto shot = jet.propDynamics.makeBody(jet,20,20,0);
+            const int32_t along[3] = {4096,0,0};
+            jet.propDynamics.damage(jet,shot,20,7,along);
+            check(GameTestAccess::explosions(jet) == 1 && GameTestAccess::explosionType(jet) == 11,
+                  "a hotdog cart finished off by a little damage opens its type-11 gas jet");
+            jet.muzzleFlashes.beginTick(); GameTestAccess::processExplosions(jet);
+            check(jet.muzzleFlashes.count() == 1, "the gas jet draws its type-1 flame every frame");
+            int frames = 1;
+            while (GameTestAccess::explosionState(jet) == 0 && frames < 100) { GameTestAccess::processExplosions(jet); ++frames; }
+            check(frames == 64, "the gas jet burns for sixty-three frames before it bursts");
         }
         for (int effect : {10,41}) {
             Game glass; PropTestAccess::furniture(glass,effect); PropTestAccess::allowUproot(glass);

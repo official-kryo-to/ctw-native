@@ -21,8 +21,11 @@ compatibility with the original.
   motion and the burnt palette. Explosive destruction can tear off the five supported panels.
 - **Explosion effects:** the reference flash's two counter-rotating layers and the generic/ordinary-vehicle
   cloud's birth, motion, darkening, frame-dependent fade and secondary smoke. Generic prop smash effect 28
-  queues a unit-scale blast at its jittered centre; hotdog-cart effects 23 and 30 struck by vehicles queue a
-  smaller blast. Generic type-0/type-4 flash, sound and cloud start on the third Process call and retain the
+  queues a unit-scale blast at its jittered centre. Hotdog carts (effects 23 and 30) catch fire; a vehicle or a
+  hard hit bursts them at once with a smaller blast, while a soft finishing hit opens a gas jet (cExplosionHotDog:
+  a flame and a hiss for 63 frames) that then bursts with a push that does no damage. Molotov and hotdog blasts
+  set people, vehicles and inflammable props within seven units alight (AffectEntities' fire radius,
+  cDynamicProp::SetOnFire). Generic type-0/type-4 flash, sound and cloud start on the third Process call and retain the
   eleven-call final state. Type-4 debris uses the reference five horizontal fragments, launch, colour, gravity,
   damping and lifetime; its trails are still missing. Nearby explosions shake the active on-foot or driving
   camera with the original random stream, amplitude and decay. Fire, flash and explosion clouds use the
@@ -115,8 +118,7 @@ compatibility with the original.
   death-cause and chain scheduling still need full parity, and debris trails are missing.
   The generic vehicle impulse is consumed after integration to avoid losing it to parked-car settling, an
   adaptation pending the native entity scheduler. Prop health resets at the port's existing cleanup distance,
-  not the native sector/entity lifetime. Hotdog-cart gas jets for nonvehicle
-  damage, other specialised explosions, and the original shared particle-pool capacity/update ordering remain
+  not the native sector/entity lifetime. Other specialised explosions, and the original shared particle-pool capacity/update ordering remain
   incomplete. Secondary smoke currently uses one emitter per burst.
 - Other debris, buoyancy and splashes. Gate slats retain the original zero-height
   floor test; this does not fix the remaining waterfront mesh/collision clipping reports.

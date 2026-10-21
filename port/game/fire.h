@@ -32,7 +32,7 @@ class Vehicle;
 
 class Fires {
 public:
-    enum Attach { None = 0, Ped = 1, Player = 2, Car = 3 };
+    enum Attach { None = 0, Ped = 1, Player = 2, Car = 3, Prop = 4 };   // Prop: uid is PropDynamics::key
     struct Flame { int16_t off[3], w, h; uint32_t abgr; int16_t age, rate; };   // cFire +0x100, stride 0x14
     struct Fire {
         int32_t pos[3];

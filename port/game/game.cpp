@@ -6,6 +6,7 @@
 #include "hud.h"
 #include "particles.h"
 #include "explosions.h"
+#include "fixedmath.h"
 #include "sound.h"
 #include "skidmarks.h"
 #include "plugins.h"
@@ -635,10 +636,12 @@ void Game::processVehicleDeaths() {
     // newborn explosions until the next tick; never retain a vector reference across a callback.
     const size_t count = explosions_.size();
     for (size_t i = 0; i < count; ++i) {
-        if ((explosions_[i].type == 6 || explosions_[i].type == 7) && !explosions_[i].fired) {
-            Explosion big = explosions_[i];   // its blast may queue more explosions
-            processBigExplosion(big);
-            explosions_[i] = big;
+        if ((explosions_[i].type == 6 || explosions_[i].type == 7 || explosions_[i].type == 11) &&
+            !explosions_[i].fired) {
+            Explosion special = explosions_[i];   // its blast may queue more explosions
+            if (special.type == 11) processHotDogExplosion(special);
+            else processBigExplosion(special);
+            explosions_[i] = special;
             continue;
         }
         if (explosions_[i].fired) { // generic explosion remains in its final state for eleven Process calls
@@ -711,6 +714,52 @@ void Game::processBigExplosion(Explosion& e) {   // cExplosionBigVehicle::Proces
     }
     ++e.state;
     e.counter = 0;
+}
+
+void Game::addHotDogExplosion(const int32_t at[3], const int32_t velocity[3]) {
+    Explosion e{{at[0],at[1],at[2]},0,11,false,0x1000};
+    int32_t dir[3] = {velocity[0], velocity[1], velocity[2]};
+    if ((int64_t)dir[0] * dir[0] + (int64_t)dir[1] * dir[1] + (int64_t)dir[2] * dir[2] > 0x63F) Normalise3(dir);
+    else { dir[0] = dir[1] = 0; dir[2] = 0x1000; }
+    for (int k = 0; k < 3; ++k) e.dir[k] = (int16_t)dir[k];
+    queueExplosion(e);
+}
+
+void Game::processHotDogExplosion(Explosion& e) {   // cExplosionHotDog::Process
+    e.counter += 2;
+    if (e.state == 0) {
+        const int32_t length2 = e.dir[0] * e.dir[0] + e.dir[1] * e.dir[1] + e.dir[2] * e.dir[2];
+        if (length2 >= 1 && e.counter <= 0x7F) {
+            // the gas jet: a type-1 muzzle flash two units back along the jet, pointing along it, and a hiss
+            int32_t at[3] = {e.pos[0] - (int16_t)(e.dir[0] * 2), e.pos[1] - (int16_t)(e.dir[1] * 2),
+                             e.pos[2] - (int16_t)(e.dir[2] * 2)};
+            const int angle = std::clamp((int)(atan2f((float)(int16_t)e.dir[0], (float)(int16_t)-e.dir[1]) * 10430.378f),
+                                         -32768, 32767);
+            muzzleFlashes.add(at, (int16_t)-angle, 1, 0x1000);
+            if (e.sfx == -1) e.sfx = TheSound().loopingScriptSfx(e.pos, 0x2A3, 127, 500);
+            else TheSound().scriptLoop(e.sfx, e.pos, 127);
+            return;
+        }
+        if (e.sfx != -1) TheSound().stopScriptSfx(e.sfx);
+        e.sfx = -1;
+        e.counter = 0;
+        e.state = 1;
+        return;
+    }
+    if (e.state == 1) {
+        // AffectEntities(0, 7, 320, 0, 0, 7): a push with no damage that sets what is close alight
+        ExplosionBlast blast(e.pos, 11, 0, 0x7000, 0, 0);
+        blast.fireRadius = 0x7000;
+        affectBlast(blast);
+        TheParticles().add<ExplosionCloud>(e.pos, 11, (unsigned)e.state, (int16_t)0x8CC, 0, 0,
+                                           explosionParticleCount(e.pos));
+        TheSound().explosion(*this, e.pos);   // PlayScriptSfx(0x1D2, 127, pos, 1900)
+        e.counter = 0;
+        e.state = 2;
+        return;
+    }
+    if (e.state == 2) { e.counter = 0; e.state = 6; return; }
+    if (e.counter >= 0x15) { e.fired = true; e.delay = 11; }   // Destroy
 }
 
 void Game::addWeaponExplosion(const int32_t at[3], int type, int16_t scale) {

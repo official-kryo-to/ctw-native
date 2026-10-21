@@ -49,6 +49,7 @@ public:
         bool planar = false;              // kind +7: keep the object upright
         bool bulletDamage = false;        // kind +3: allow damage kinds 1 and 2
         bool meleeDamage = false;         // kind +4: allow damage kinds 0, 11 and 12
+        bool inflammable = false;         // kind +5: cDynamicProp::IsInflammable
     };
     const Kind* kind(int k) const { return k >= 0 && k < (int)kinds_.size() ? &kinds_[k] : nullptr; }
     const Kind* kindForProp(int prop) const {
