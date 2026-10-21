@@ -6,6 +6,8 @@
 #include "fixedmath.h"
 #include "random.h"
 #include "weapons.h"
+#include "particles.h"
+#include "sound.h"
 #include <algorithm>
 #include <cmath>
 
@@ -71,7 +73,8 @@ int ExplosionBlast::vehicleDamage(int32_t distance, int32_t bound, bool occupied
     if (!damageRadius || distance > damageRadius + bound) return 0;
     if (distance > damageRadius) distance = std::max(0, distance - bound);
     int32_t amount = (int32_t)(((int64_t)falloff((int64_t)distance * distance, damageRadius) * damageQ12) >> 12);
-    amount = (int32_t)(((int64_t)amount * (type == 4 || !occupiedByPlayer ? 0x1400 : 0x800)) >> 12);
+    // types 4 and 6 ((type | 2) == 6) hit every vehicle x1.25; others only those without the player in them
+    amount = (int32_t)(((int64_t)amount * ((type | 2) == 6 || !occupiedByPlayer ? 0x1400 : 0x800)) >> 12);
     return amount >> 12;
 }
 
@@ -116,6 +119,10 @@ void Game::affectExplosion(const Explosion& explosion) {
     const ExplosionBlast blast = explosion.type == 2
         ? ExplosionBlast(explosion.pos, 2, 24576, 40960, (molotov << 11) & ~0xFFF, molotov << 12)
         : ExplosionBlast(explosion.pos, explosion.type, explosion.scale, Weapons_Info(20).damage);
+    affectBlast(blast);
+}
+
+void Game::affectBlast(const ExplosionBlast& blast) {
     int damage;
     if (playerCar < 0 && !player.dead && !player.hidden && !player.attached && blast.pedHit(player.pos, true, damage)) {
         int32_t direction[3]; for (int k = 0; k < 3; ++k) direction[k] = player.pos[k] - blast.pos[k];

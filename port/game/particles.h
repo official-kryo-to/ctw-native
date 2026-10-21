@@ -184,8 +184,8 @@ protected:
 
 class ExplosionCloud : public Emitter {
 public:
-    // cParticleEmitterComplexExplsn for generic/ordinary vehicle blasts (types 0/4).
-    // Phase zero is the main cloud; other phases are random bursts. Big-vehicle circles remain unported.
+    // cParticleEmitterComplexExplsn. Phase zero is the main cloud; other phases are random bursts, or for the
+    // big-vehicle types 6 and 7 a ring of puffs (AddCircleParticle's spacing) drifting along (vx, vy).
     ExplosionCloud(const int32_t pos[3], int type = 4, unsigned phase = 1, int16_t scale = 4096,
                    int32_t vx = 0, int32_t vy = 0, unsigned count = 8);
     void process(uint32_t hours = 12u << 12) override;
@@ -199,8 +199,33 @@ private:
 class ExplosionDebris : public Emitter {
 public:
     explicit ExplosionDebris(const int32_t pos[3], int type = 4);
+    ~ExplosionDebris() override { if (counted_) alive_count_ = 0; }
+    // cParticleEmitterExplosionDebris::CreateExplosionDebris: only one debris emitter exists at a time
+    // (mNumDebrisEmitters); nullptr while another is still flying
+    static ExplosionDebris* create(const int32_t pos[3], int type);
 protected:
     void updateParticle(Particle& p) override;
+private:
+    static int alive_count_;
+    bool counted_ = false;   // made by create (the reference only constructs them there)
+};
+
+// cParticleEmitterExplosionTwirls: the big-vehicle blast's yellow flecks. Up to `count` are born, one on seven
+// frames in eight, at random points within six units that fall back towards the centre while they fade in and
+// shrink; the angle new flecks start with turns by the cross product of the fleck and the camera's view axis.
+class ExplosionTwirls : public Emitter {
+public:
+    ExplosionTwirls(const int32_t pos[3], int count);
+    void process(uint32_t hours = 12u << 12) override;
+    static void setViewAxis(int32_t x, int32_t y);   // cBaseCam's matrix row 2 (+0xAC, +0xB0)
+protected:
+    void updateParticle(Particle& p) override;
+private:
+    void addParticle();   // AddParticle
+    Particle std_{};
+    bool init_ = false;
+    uint8_t pending_ = 0;   // +0x108: bit 0 adding, bits 1..7 how many are left
+    static int32_t viewAxis_[2];
 };
 
 // cParticleEmitterRain: the local player's rain (cGeneralParticleController, 63 drops, range 7, attached to the

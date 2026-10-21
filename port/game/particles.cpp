@@ -14,6 +14,7 @@ static Particles g_particles;
 Particles& TheParticles() { return g_particles; }
 
 static uint32_t randNC(uint32_t n) { return Rand32NonCritical(n); }
+static int fastsin(int a) { return (int)(sinf((float)a * 9.587378e-05f) * 4096.f); }
 
 // cParticleEmitterWaterSplash, type 1 (CWaterCannon's nozzle spray).
 WaterSplashEmitter::WaterSplashEmitter(const int32_t at[3], const int32_t velocity[3], uint16_t colour)
@@ -320,6 +321,8 @@ void ExplosionFlash::updateParticle(Particle& p) {
     if (p.v[0] == 0x1000 && p.grow > 0) p.grow = (int16_t)((p.grow * 0xE66) >> 12);
 }
 
+// cParticleEmitterComplexExplsn::cParticleEmitterComplexExplsn, with its AddMainCloudParticle and the
+// conversion cParticleEmitterComplexExplsn::AddParticle applies to each birth
 ExplosionCloud::ExplosionCloud(const int32_t at[3], int type, unsigned phase, int16_t scale,
                                int32_t vx, int32_t vy, unsigned count)
     : Emitter(at, (int)count, 0x4000, 7, true), scale_(scale) {
@@ -332,6 +335,30 @@ ExplosionCloud::ExplosionCloud(const int32_t at[3], int type, unsigned phase, in
         p.v[1] = (int16_t)(((int16_t)vy*inv_) >> 12);
         p.v[2] = (int16_t)(0x1000*inv_ >> 12);
         addFromData(p);
+    } else if ((type & ~1) == 6) {
+        // the big-vehicle ring: puffs spaced 0x4304 apart with a little jitter, half a unit out along the ring
+        // plus the drift, rising 0.65 a frame and growing by (phase / 5) / 2 x 0.1
+        const int32_t fifth = (int32_t)(((int64_t)phase << 12) / 5);
+        const int32_t half = (int32_t)((uint32_t)(fifth >> 1) << 17) >> 17;   // SBFX #1, #15
+        const int16_t grow = (int16_t)((uint32_t)(half * 0x199) >> 12);
+        for (unsigned i = 0; i < count; ++i) {
+            const int angle = (int)((i * 0x4304 + Rand16NonCritical(10) + 0x4304) & 0xFFFF);
+            const int sn = fastsin(angle), cs = fastsin(angle + 0x4000);
+            const int32_t ax = (int32_t)(int16_t)(sn - cs) * 2048 + vx * 4096;
+            const int32_t ay = (int32_t)(int16_t)(cs + sn) * 2048 + vy * 4096;
+            p.v[0] = (int16_t)(((int64_t)scale * ax) >> 24);
+            p.v[1] = (int16_t)(((int64_t)scale * ay) >> 24);
+            p.v[2] = 0xA66;
+            p.size = (int16_t)((uint32_t)(scale * (int32_t)(randNC(0x800) + 0x3800)) >> 12);
+            p.grow = grow;
+            p.p[2] = (int16_t)(p.p[2]+(p.size >> 1));   // AddParticle, as for the bursts below
+            for (int k = 0; k < 3; ++k) {
+                p.p[k] = (int16_t)((p.p[k]*inv_) >> 12);
+                p.v[k] = (int16_t)((p.v[k]*inv_) >> 12);
+            }
+            p.size = (int16_t)((p.size*inv_) >> 12); p.grow = (int16_t)((p.grow*inv_) >> 12);
+            addFromData(p);
+        }
     } else for (unsigned i = 0; i < count; ++i) {
         // AddParticle converts the standard data in place. Its height survives between births.
         const int spread = type == 0 ? 0x1998 : 0x1000, bias = type == 0 ? 0xCCC : 0x800;
@@ -361,7 +388,7 @@ void ExplosionCloud::process(uint32_t hours) {
     }
 }
 
-void ExplosionCloud::updateParticle(Particle& p) {
+void ExplosionCloud::updateParticle(Particle& p) {   // cParticleEmitterComplexExplsn::UpdateParticle
     for (int k = 0; k < 3; ++k) {
         p.p[k] = (int16_t)(p.p[k] + p.v[k]);
         p.v[k] = (int16_t)(p.v[k]-((p.v[k]*0x199) >> 12));
@@ -384,6 +411,16 @@ void ExplosionCloud::updateParticle(Particle& p) {
     smoke.grow = (int16_t)((((int64_t)scale_*0x33300000 >> 32)*0x333) >> 13);
     smoke.alpha = 30; smoke.life = 20;
     smoke_.push_back(smoke);
+}
+
+int ExplosionDebris::alive_count_ = 0;
+
+ExplosionDebris* ExplosionDebris::create(const int32_t at[3], int type) {
+    if (alive_count_) return nullptr;
+    alive_count_ = 1;
+    ExplosionDebris* debris = TheParticles().add<ExplosionDebris>(at, type);
+    debris->counted_ = true;
+    return debris;
 }
 
 ExplosionDebris::ExplosionDebris(const int32_t at[3], int type) : Emitter(at,5,0x4000,19,false) {
@@ -422,6 +459,62 @@ void ExplosionDebris::updateParticle(Particle& p) {
     }
     p.angle = (uint16_t)(p.angle+p.spin); p.size = (int16_t)(p.size+p.grow); p.life -= 2;
     if (p.size < 1 || (p.alpha == 0 && p.life <= 10)) p.life = 0;
+}
+
+int32_t ExplosionTwirls::viewAxis_[2] = {0, 0};
+
+void ExplosionTwirls::setViewAxis(int32_t x, int32_t y) { viewAxis_[0] = x; viewAxis_[1] = y; }
+
+// cParticleEmitterExplosionTwirls::cParticleEmitterExplosionTwirls
+ExplosionTwirls::ExplosionTwirls(const int32_t at[3], int count)
+    : Emitter(at, 10, 0x4000, 0x11, true) {
+    additive_ = true;
+    pending_ = (uint8_t)((count << 1) | 1);
+    addParticle();
+    dying = true;
+}
+
+void ExplosionTwirls::addParticle() {   // cParticleEmitterExplosionTwirls::AddParticle
+    if (!init_) {
+        init_ = true;
+        std_ = Particle{};
+        std_.v[2] = 0xCCC; std_.angle = 0;
+        std_.grow = (int16_t)0xF4CD;
+        std_.alpha = 1; std_.alphaStep = 5;
+        std_.colour = 0x03FF; std_.size = 0x7000;
+        std_.life = 10;   // SetStandardDataLifeTime(10)
+        std_.size = (int16_t)((std_.size * inv_) >> 12);
+        std_.grow = (int16_t)((std_.grow * inv_) >> 12);
+        for (int k = 0; k < 3; ++k) std_.v[k] = (int16_t)((std_.v[k] * inv_) >> 12);
+    }
+    const int16_t x = (int16_t)(randNC(0xC000) - 0x6000), y = (int16_t)(randNC(0xC000) - 0x6000);
+    const int16_t z = (int16_t)(randNC(0xC000) - 0x6000);
+    // each fleck heads back towards the centre at half its offset a frame
+    std_.p[0] = (int16_t)((inv_ * x) >> 12);
+    std_.p[1] = (int16_t)((inv_ * y) >> 12);
+    std_.p[2] = (int16_t)((inv_ * z) >> 12);
+    std_.v[0] = (int16_t)((inv_ * ((int16_t)-x >> 1)) >> 12);
+    std_.v[1] = (int16_t)((inv_ * ((int16_t)-y >> 1)) >> 12);
+    addFromData(std_);
+    const int left = ((pending_ >> 1) - 1) & 0x7F;
+    pending_ = left ? (uint8_t)((pending_ & 1) | (left << 1)) : 0;
+}
+
+void ExplosionTwirls::process(uint32_t hours) {   // cParticleEmitterExplosionTwirls::Process
+    Emitter::process(hours);
+    if ((pending_ & 1) && (frame_ & 7)) addParticle();
+}
+
+void ExplosionTwirls::updateParticle(Particle& p) {   // cParticleEmitterExplosionTwirls::UpdateParticle
+    Emitter::updateParticle(p);
+    if (p.life <= 4 && p.alphaStep >= 1) p.alphaStep = -4;
+    const int32_t sum = (int32_t)((uint32_t)(p.p[0] * p.p[0]) + (uint32_t)(p.p[1] * p.p[1]) + (uint32_t)(p.p[2] * p.p[2]));
+    const uint32_t distance = (uint32_t)std::sqrt((double)(uint64_t)((int64_t)sum << 24));
+    p.v[0] = (int16_t)(p.v[0] >> 2);
+    p.v[1] = (int16_t)(p.v[1] >> 2);
+    const int32_t cross = (int32_t)(((int64_t)p.p[1] * viewAxis_[0] - (int64_t)p.p[0] * viewAxis_[1]) >> 12);
+    const int32_t turn = (int32_t)(int16_t)(distance >> 12) * cross;
+    std_.angle = (uint16_t)(std_.angle - (turn >> 15));
 }
 
 Emitter::Emitter(const int32_t p[3], int count, int32_t range, uint8_t sprite, bool billboard)

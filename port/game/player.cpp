@@ -307,6 +307,19 @@ bool Player::explosionHit(int damage, const int32_t direction[3]) {
     return true;
 }
 
+bool Player::waterHit(const int32_t direction[3]) {
+    if (dead || attached || hidden || reacting()) return false;   // FindTask(cAnimation) refuses a second one
+    reactionAge_ = 0;
+    // ApplyDamageResponse: +0x348 bit 4 is set when the jet points along the facing
+    reactionForward_ = (int64_t)direction[0]*fwd[0] + (int64_t)direction[1]*fwd[1] + (int64_t)direction[2]*fwd[2] > 0;
+    // eEffect 3 resolves to state 14 (cAnimation's qword_481F40), the low knockdown of a slow vehicle hit:
+    // its physical effect lifts the body two units without setting a velocity
+    pos[2] += 2 * 4096;
+    onGround_ = false; airFrames_ = 1;
+    reactionPose(14);
+    return true;
+}
+
 void Player::reactionPose(int state) {
     reaction_ = state; reactionTicks_ = 0;
     if (state == 5) recoveryAge_ = 0;

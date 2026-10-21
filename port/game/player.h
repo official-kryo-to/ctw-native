@@ -71,6 +71,9 @@ public:
     unsigned damagePercentScale() const { return damagePercentScale_; }
     void resetDamageState(); // health / armour part of cPlayer::Reset, including reward state
     bool explosionHit(int damage, const int32_t direction[3]); // effect 2: health first, then a high knockdown
+    // cPed::Damage for a water jet (sDamageInfo type 13, no damage, eEffect 3): ApplyDamageResponse's state-14
+    // knockdown, unless a reaction is already playing. True when it started one.
+    bool waterHit(const int32_t direction[3]);
     bool reacting() const { return reaction_ >= 0; }
     void actReaction(const PedSprites* sprites, bool vehicleAbove = false);
     void resetReaction();

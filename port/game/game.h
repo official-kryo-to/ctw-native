@@ -145,6 +145,9 @@ public:
     // Explosion::AddExplosion for the weapons: 0 grenade, 1 mine, 3 rocket (all cExplosionGeneric),
     // 2 cExplosionMolotov, 5 cExplosionFlashBang
     void addWeaponExplosion(const int32_t pos[3], int type, int16_t scale = 4096);
+    // Explosion::AddExplosion for types 6 (big vehicles) and 7 (petrol pumps): a cExplosionBigVehicle, whose
+    // clouds drift along the velocity when it is faster than about 0.6 units a second
+    void addBigExplosion(const int32_t pos[3], int type, int16_t scale, const int32_t velocity[3]);
     void enableExplosionRadiusCheck(bool enable) { explosionRadiusCheck_ = enable; } // native script switch; off at Reset
     struct FreeCamera { bool on = false; WorldCamera cam; } freeCam;   // mods: replaces the game camera
     bool uiPaused = false;               // a full-screen app (the radio) has paused the game
@@ -185,12 +188,18 @@ public:
 private:
     std::map<int, std::unique_ptr<Model>> models_;
     RestartTables restart_;
-    struct Explosion { int32_t pos[3]; int delay; int type = 4; bool fired = false; int16_t scale = 4096; };
+    struct Explosion {
+        int32_t pos[3]; int delay; int type = 4; bool fired = false; int16_t scale = 4096;
+        // cExplosionBigVehicle (types 6 and 7): +0xA0 counter, +0xA4 state, +0xAC heading, +0xAE moving
+        int32_t counter = 0; uint8_t state = 0; int16_t heading = 0; bool moving = false;
+    };
     std::vector<Explosion> explosions_;
     bool explosionRadiusCheck_ = false;
     bool queueExplosion(const Explosion& explosion);
     void processVehicleDeaths();
     void affectExplosion(const Explosion& explosion);
+    void affectBlast(const struct ExplosionBlast& blast);   // cBaseExplosion::AffectEntities
+    void processBigExplosion(Explosion& explosion);         // cExplosionBigVehicle::Process
     unsigned explosionParticleCount(const int32_t pos[3]) const;
     void finishShortFrame();             // the effects, sound and plugin updates of a frame that ends early
     void processTimeCycle();

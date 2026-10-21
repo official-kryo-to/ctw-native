@@ -460,6 +460,7 @@ struct ParticlesTestAccess {
     static int sprite(const Emitter& e) { return e.sprite_; }
     static int active(const Emitter& e) { return e.alive_; }
     static void step(Emitter& e, Particle& p, uint32_t frame) { e.frame_ = frame; e.updateParticle(p); }
+    static void clear() { TheParticles().emitters_.clear(); }
 };
 
 struct GameTestAccess {
@@ -467,6 +468,8 @@ struct GameTestAccess {
     static size_t explosions(const Game& g) { return g.explosions_.size(); }
     static void blastPosition(const Game& g, int32_t out[3]) { std::copy(g.explosions_.front().pos,g.explosions_.front().pos+3,out); }
     static void processExplosions(Game& g) { g.processVehicleDeaths(); }
+    static int explosionType(const Game& g) { return g.explosions_.front().type; }
+    static int explosionState(const Game& g) { return g.explosions_.front().state; }
     static unsigned cloudCount(const Game& g, const int32_t at[3]) { return g.explosionParticleCount(at); }
 };
 
@@ -503,6 +506,14 @@ struct PropDynamicsTestAccess {
               "newsstand breakage dispatches both wooden fragments and its distinct four-paper burst");
         newsstand.propDynamics.applyForce(newsstand,news,newsAt,force);
         check(ParticlesTestAccess::count() == firstEmitter+2, "hitting a broken prop cannot replay its smash burst");
+        // Smash3's petrol pump: a type-7 big-vehicle explosion at its jittered centre and a petrol fire
+        Game pump; PropTestAccess::furniture(pump,21); CollisionTestAccess::propScene(pump);
+        auto pumpBody = pump.propDynamics.makeBody(pump,20,20,0);
+        pump.propDynamics.applyForce(pump,pumpBody,newsAt,force);
+        check(GameTestAccess::explosions(pump) == 1 && GameTestAccess::explosionType(pump) == 7 &&
+              pump.fires.list().size() == 1 && pump.fires.list()[0].petrol && pump.fires.list()[0].life == 900,
+              "a smashed petrol pump queues a type-7 explosion and starts a 900-frame petrol fire");
+        pump.fires.clear();
         Game explosive; PropTestAccess::furniture(explosive,28); PropTestAccess::allowUproot(explosive);
         CollisionTestAccess::propScene(explosive);
         auto barrel = explosive.propDynamics.makeBody(explosive,20,20,0);
@@ -1029,6 +1040,7 @@ static void explosionsAndShake() {
     check(GameTestAccess::cloudCount(game,close) == 1 && GameTestAccess::cloudCount(game,far) == 8,
           "generic explosion cloud count follows the original one-to-eight camera-distance rule");
     Game exploding; exploding.cars.emplace_back(); exploding.cars.back().justDied = true;
+    ParticlesTestAccess::clear();   // only one explosion-debris emitter may exist at a time
     const size_t before = ParticlesTestAccess::count(); RandInit(0);
     GameTestAccess::processExplosions(exploding); GameTestAccess::processExplosions(exploding);
     check(ParticlesTestAccess::count() == before && Rand32Critical(0) == 0x269EC3,
@@ -1038,6 +1050,31 @@ static void explosionsAndShake() {
           "type-four flash, debris and cloud start together on the third Process call");
     for (int i=0;i<11;++i) GameTestAccess::processExplosions(exploding);
     check(!GameTestAccess::explosions(exploding), "type-four generic explosion retains its eleven-call final state");
+
+    // cVehicle::Damage: vehicle 7 blows up as a type-6 cExplosionBigVehicle
+    Game bus; bus.cars.emplace_back(); bus.cars.back().infoId = 7; bus.cars.back().justDied = true;
+    Pedestrians::Ped bystander; bystander.uid = 3; bystander.body.playerControlled = false;
+    bystander.body.pos[0] = 12 * 4096; bystander.body.health = 127;
+    bus.peds.peds.push_back(bystander);
+    bus.player.pos[0] = 100 * 4096;
+    ParticlesTestAccess::clear();
+    GameTestAccess::processExplosions(bus);
+    check(GameTestAccess::explosions(bus) == 1 && GameTestAccess::explosionType(bus) == 6 &&
+          GameTestAccess::explosionState(bus) == 1 && ParticlesTestAccess::count() == 2 &&
+          dynamic_cast<const ExplosionFlash*>(ParticlesTestAccess::at(0)) &&
+          dynamic_cast<const ExplosionTwirls*>(ParticlesTestAccess::at(1)),
+          "a big vehicle's blast flashes, spawns its twirls and hits at once on its first Process");
+    check(bus.peds.peds[0].body.health < 127 && bus.peds.peds[0].deadFrames == 0,
+          "the big-vehicle blast's fifteen-unit damage radius reaches a pedestrian twelve units away");
+    int waited = 0;
+    while (GameTestAccess::explosionState(bus) == 1 && waited < 20) { GameTestAccess::processExplosions(bus); ++waited; }
+    check(waited >= 5 && waited <= 10 && ParticlesTestAccess::count() == 5,
+          "the big-vehicle clouds and debris follow five to ten Process calls later");
+    const auto* ring = dynamic_cast<const ExplosionCloud*>(ParticlesTestAccess::at(3));
+    check(ring && ParticlesTestAccess::particle(*ring).v[2] == (int16_t)((0xA66 * 0x400) >> 12),
+          "the big-vehicle ring rises at the reference 0.65 units a frame");
+    for (int i = 0; i < 11 && GameTestAccess::explosions(bus); ++i) GameTestAccess::processExplosions(bus);
+    check(!GameTestAccess::explosions(bus), "the big-vehicle explosion destroys itself after its final wait");
 }
 
 static void fireAndCamera() {

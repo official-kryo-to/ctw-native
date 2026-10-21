@@ -5,6 +5,7 @@
 #include "weaponhud.h"
 #include "hud.h"
 #include "particles.h"
+#include "explosions.h"
 #include "sound.h"
 #include "skidmarks.h"
 #include "plugins.h"
@@ -215,7 +216,7 @@ void Game::updateWorldObjects() {   // once per game frame, after the vehicles m
     }
     updateCityEmitters();
     for (auto& kv : fountains)
-        for (auto& f : kv.second) f->tick(frame);
+        for (auto& f : kv.second) f->process(*this);
     propDynamics.update(*this);
 }
 
@@ -311,6 +312,7 @@ void Game::updateView() {   // the game camera (not a mod's free camera), as cBa
         pitch = camera.pitch();
     }
     view.set(eye, yaw, pitch, (int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());
+    ExplosionTwirls::setViewAxis(view.m[6], view.m[7]);
 }
 
 void Game::updateSectors() {
@@ -618,19 +620,33 @@ void Game::processVehicleDeaths() {
         car.explosionDebris(carModel(car.infoId));
         peds.releaseOccupants(*this,car,true);
         Plugins_EmitEvent(CTW_EVENT_VEHICLE_DESTROYED, car.uid, car.infoId);
-        Explosion explosion{{car.pos[0],car.pos[1],car.pos[2]},3}; // ordinary type-4 generic explosion
-        if (queueExplosion(explosion)) shakeNearExplosion(car.pos);
+        // cVehicle::Damage: vehicles 7, 15 and 53 blow up as a type-6 cExplosionBigVehicle, the rest as an
+        // ordinary type-4 generic explosion
+        if (car.infoId == 7 || car.infoId == 15 || car.infoId == 53) {
+            const int32_t still[3] = {0, 0, 0};
+            addBigExplosion(car.pos, 6, 0x1000, still);
+        } else {
+            Explosion explosion{{car.pos[0],car.pos[1],car.pos[2]},3};
+            if (queueExplosion(explosion)) shakeNearExplosion(car.pos);
+        }
         if (playerCar >= 0 && &car == &cars[playerCar]) killInVehicle(car);
     }
     // Blast callbacks can smash explosive props and append to this queue. Copy the firing entry and defer
     // newborn explosions until the next tick; never retain a vector reference across a callback.
     const size_t count = explosions_.size();
     for (size_t i = 0; i < count; ++i) {
+        if ((explosions_[i].type == 6 || explosions_[i].type == 7) && !explosions_[i].fired) {
+            Explosion big = explosions_[i];   // its blast may queue more explosions
+            processBigExplosion(big);
+            explosions_[i] = big;
+            continue;
+        }
         if (explosions_[i].fired) { // generic explosion remains in its final state for eleven Process calls
             ++explosions_[i].delay;
             if (explosions_[i].type == 2 && explosions_[i].delay == 1) {   // cExplosionMolotov state 2: the blast
                 const Explosion explosion = explosions_[i];
                 affectExplosion(explosion);
+                ExplosionDebris::create(explosion.pos, 2);
                 TheParticles().add<ExplosionCloud>(explosion.pos,2,2,explosion.scale,0,0,5u);
             }
             continue;
@@ -645,13 +661,56 @@ void Game::processVehicleDeaths() {
         // cExplosionMolotov's blast is the next Process (above); the flash bang's DazeEntities is not ported
         if (explosion.type == 2 || explosion.type == 5) continue;
         affectExplosion(explosion);
-        if (explosion.type == 4) {
-            TheParticles().add<ExplosionDebris>(explosion.pos);
-        }
+        if (explosion.type == 4) ExplosionDebris::create(explosion.pos, 4);
         TheParticles().add<ExplosionCloud>(explosion.pos,explosion.type,1,explosion.scale,0,0,explosionParticleCount(explosion.pos));
     }
     explosions_.erase(std::remove_if(explosions_.begin(), explosions_.end(),
         [](const Explosion& e) { return e.fired && e.delay >= 11; }), explosions_.end());
+}
+
+void Game::addBigExplosion(const int32_t at[3], int type, int16_t scale, const int32_t velocity[3]) {
+    Explosion e{{at[0],at[1],at[2]},0,type,false,scale};
+    // cExplosionBigVehicle's constructor (inlined in AddExplosion): the heading of the velocity (-ATan2(-x, y))
+    // and whether it moves
+    const int angle = std::clamp((int)(atan2f((float)-velocity[0], (float)velocity[1]) * 10430.378f), -32768, 32767);
+    e.heading = (int16_t)-angle;
+    e.moving = (int64_t)velocity[0] * velocity[0] + (int64_t)velocity[1] * velocity[1] +
+               (int64_t)velocity[2] * velocity[2] > 0x28000;
+    // AddExplosion's duplicate check only applies to stationary explosions
+    if (e.moving) { explosions_.push_back(e); stats.incExplosions(); }
+    else queueExplosion(e);
+}
+
+void Game::processBigExplosion(Explosion& e) {   // cExplosionBigVehicle::Process
+    const int32_t before = e.counter;
+    e.counter += 2;
+    if (e.state == 0) {
+        if ((uint32_t)before > 0xFFFFFFFDu) return;
+        shakeNearExplosion(e.pos);   // ShakePlayersCameras
+        TheParticles().add<ExplosionFlash>(e.pos, 6, 0x1000);
+        // AffectEntities(15, 22, 320, half, whole, 0) with the grenade's damage, whatever the scale
+        const int damage = Weapons_Info(20).damage;
+        affectBlast(ExplosionBlast(e.pos, e.type, 0xF000, 0x16000, (int32_t)(((uint32_t)damage << 11) & 0xFFFFF000u),
+                                   (int32_t)((uint32_t)damage << 12)));
+        TheParticles().add<ExplosionTwirls>(e.pos, 15);
+    } else if (e.state == 1) {
+        if (e.counter < (int)Rand16Critical(10) + 10) return;
+        TheSound().explosion(*this, e.pos);   // PlayScriptSfx(0x1D2, 127, pos, 1900)
+        ExplosionDebris::create(e.pos, 6);
+        const unsigned count = explosionParticleCount(e.pos);
+        int32_t dir[2] = {0, 0};
+        if (e.moving) {
+            dir[0] = (int32_t)(sinf((float)e.heading * 9.587378e-05f) * 4096.f);
+            dir[1] = (int32_t)(sinf((float)(e.heading + 0x4000) * 9.587378e-05f) * 4096.f);
+        }
+        TheParticles().add<ExplosionCloud>(e.pos, 6, (unsigned)e.state, e.scale, dir[0], dir[1], count);   // the ring
+        TheParticles().add<ExplosionCloud>(e.pos, 6, 0u, e.scale, dir[0], dir[1], count);   // the main cloud
+    } else {
+        if (e.counter >= 0x15) { e.fired = true; e.delay = 11; }   // Destroy
+        return;
+    }
+    ++e.state;
+    e.counter = 0;
 }
 
 void Game::addWeaponExplosion(const int32_t at[3], int type, int16_t scale) {

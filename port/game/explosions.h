@@ -19,4 +19,6 @@ struct ExplosionBlast {
     bool pedHit(const int32_t point[3], bool player, int& damage) const;
     int vehicleDamage(int32_t distance, int32_t bound, bool occupiedByPlayer) const;
     int32_t force(int64_t distanceSquared) const;
+    // the sDamageInfo type AffectEntities hands out (qword_481768): 6 for types 4 and 6 to 11, otherwise 7
+    int damageKind() const { return type >= 4 && type <= 11 && type != 5 ? 6 : 7; }
 };

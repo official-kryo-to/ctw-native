@@ -17,6 +17,8 @@
 // A new fire takes one of three looping fire sounds (resident sample 0x1ED, squared radius 500), or the one of the
 // farthest fire if that is farther than the new one; sounds fade in and out by 10 volume steps a frame.
 //
+// Water jets (CWaterCannon::PutOutFires) wear down a fire's health; at zero it goes out.
+//
 // Not ported yet: the burnt colours, style 5's smoke and the scripted fire styles.
 #pragma once
 #include <cstdint>
@@ -39,6 +41,7 @@ public:
         int32_t offset[3] = {0, 0, 0};   // AttachToWithOwner: in the vehicle's frame
         bool byPlayer = false;           // +0x148: the player started it (the damage source)
         int16_t life = 0;                // +0x13C
+        uint8_t health = 0x7F;           // +0xEB (cObject health): water wears it down
         int16_t fade = 0;                // +0x13E
         int16_t sx = 0, sy = 0;          // +0x140 / +0x142: half sizes
         uint8_t style = 0;               // +0x150 low nibble (eFireStyle)
@@ -63,6 +66,9 @@ public:
     void render(const WorldCamera& cam) const;   // cFire::ManagedRender
     bool burning(Attach attach, uint32_t uid) const;   // cPed / cVehicle::IsOnFire
     void extinguish(Attach attach, uint32_t uid);      // cPed::ExtingushFire / cVehicle::ExtinguishFire
+    // cFire::HitByWater: cObject::ReduceHealth by amount; at zero the fire dies, and a burning vehicle it was
+    // attached to (health 1 to 29) is brought back to 31 so it stops burning
+    void hitByWater(Game& g, size_t index, uint8_t amount);
     void clear();
     const std::vector<Fire>& list() const { return fires_; }
 private:

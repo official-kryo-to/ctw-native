@@ -17,6 +17,8 @@ class PropDynamics {
 public:
     void checkImpacts(Game& game);
     void explosion(Game& game, const struct ExplosionBlast& blast);
+    // cFountainStream::OnCollision for knocked-over props in the water: ApplyWorldForce(base, 4 x jet, type 1)
+    void waterJet(Game& game, const Fountain& fountain);
     void update(Game& game);
     void render(Game& game) const;   // between the last two ticks when game.interpolate is on
     int looseCount() const { return (int)loose_.size(); }   // the debug overlay

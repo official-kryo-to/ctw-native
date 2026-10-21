@@ -49,6 +49,14 @@ void PropDynamics::smashParticles(Game& g, Loose& l, const int32_t point[3], con
         l.fountain.emplace(at,velocity);
         return;
     }
+    if (effect == 21) { // Smash3: a petrol pump blows up (a type-7 cExplosionBigVehicle) and leaves a petrol fire
+        // (the player-state and PDA-app guards and the takedown signal for a vehicle that hit it are not ported)
+        int32_t blast[3]; l.body.worldCG(blast);
+        for (int k = 0; k < 3; ++k) blast[k] += (int32_t)Rand32Critical(0x332)-0x199;
+        g.addBigExplosion(blast, 7, 0x1000, force);
+        g.fires.start(g, at, Fires::None, 0, 900, 0, true, false, nullptr, true);
+        return;
+    }
     if (effect == 17) { l.broken = false; return; } // Smash1 clears success; movable does not imply broken
     if (effect == 28) {
         int32_t blast[3]; l.body.worldCG(blast);
@@ -369,7 +377,7 @@ void PropDynamics::explosion(Game& g, const ExplosionBlast& blast) {
         applyForce(g, l, point, force, nullptr, nullptr, false, 16);
         if (squared <= (int64_t)blast.damageRadius * blast.damageRadius) {
             const int amount = (int)(((int64_t)ExplosionBlast::falloff(squared,blast.damageRadius) * blast.damageQ12) >> 24);
-            damage(g,l,amount,blast.type == 4 ? 6 : 7,force);
+            damage(g,l,amount,blast.damageKind(),force);
         }
     };
     for (Loose& l : loose_) affect(l);
@@ -385,6 +393,22 @@ void PropDynamics::explosion(Game& g, const ExplosionBlast& blast) {
                 if (l.broken || l.uprooted) loose_.push_back(std::move(l));
             }
         }
+}
+
+void PropDynamics::waterJet(Game& g, const Fountain& fountain) {
+    for (Loose& l : loose_) {
+        if (!l.collidable || (!l.body.hx && !l.body.hy && !l.body.hz)) continue;
+        int32_t spheres[6][4]; int n = 0;
+        l.body.spheres(spheres, n);
+        bool hit = false;
+        for (int i = 0; i < n && !hit; ++i) hit = fountain.touches(spheres[i], spheres[i][3]);
+        if (!hit) continue;
+        int32_t force[3], base[3];
+        fountain.jet(force, 4);
+        fountain.base(base);
+        applyForce(g, l, base, force, nullptr, nullptr, false, 1);
+        l.sleepCounter = 15;
+    }
 }
 
 const Model* PropDynamics::drawnModel(Game& g,const Loose& l) {
@@ -425,7 +449,7 @@ void PropDynamics::update(Game& g) {
             damaged_.erase({l.cx*100+l.cy,l.index});
             it=loose_.erase(it); continue;
         }
-        if(l.fountain) l.fountain->tick(g.frame);
+        if(l.fountain) l.fountain->process(g);
         if(l.lampTimer) {
             float M[16]; l.body.matrix(M);
             if(l.lampTimer >= 53) {

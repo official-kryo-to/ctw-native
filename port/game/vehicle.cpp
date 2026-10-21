@@ -1454,6 +1454,11 @@ void Vehicle::damage(int amount) {   // cVehicle::Damage (collision damage, 100 
     if (health_ < 0x1E && playerDriving_) health_ = 0x1E;
 }
 
+void Vehicle::setHealthBelowSmoke(unsigned health) {
+    health_ = (uint8_t)std::min(health, 0xBEu);
+    if (health_ >= 0x1F) burnTimer_ = 0x1E0;
+}
+
 bool Vehicle::repair() {
     if (dead_) return false;
     health_ = 0xFF;

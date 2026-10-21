@@ -25,6 +25,10 @@ struct CollisionTestAccess {
     }
 };
 
+struct VehicleTestAccess {
+    static int32_t pendingLift(Vehicle& c) { c.recalcKinematics(); return c.vel[2]; }
+};
+
 static void reset(Game& g, bool water) {
     g.fires.clear();
     g.peds.clear();
@@ -98,6 +102,53 @@ int main() {
     g.fires.start(g, at, Fires::Car, 9, 300, 2, false, true);
     g.fires.process(g);
     check(!g.fires.burning(Fires::Car, 9), "a vehicle fire is extinguished over water");
+
+    // cFountainStream::OnCollision: a person in the jet is knocked into state 14 and given the reference
+    // velocity (the fixed 7-unit diagonal and four times the upward jet); no health is lost.
+    {
+        reset(g, false);
+        g.player.pos[0] = 0x1000 + Player::kRadius + 1;   // just clear of the 1 x 1 box
+        addPed(g, 11);
+        const int16_t up[3] = {0, 0, 0x2000};
+        Fountain fountain(at, up);
+        fountain.process(g);
+        const Pedestrians::Ped& p = g.peds.peds[0];
+        check(p.body.reacting() && p.deadFrames == 0, "a fountain jet knocks a standing pedestrian down");
+        check(p.body.vel[0] == 0x7000 && p.body.vel[1] == 0x7000 && p.body.vel[2] == 0x8000,
+              "a fountain jet sets the reference push velocity");
+        check(p.body.health == 127, "a fountain jet does no damage");
+        check(!g.player.reacting() && g.player.vel[0] == 0, "a fountain does not reach a player clear of its box");
+        g.player.pos[0] = 0x1000 + Player::kRadius;
+        fountain.process(g);
+        check(g.player.reacting(), "a fountain reaches the player touching its box");
+    }
+    // Vehicles over the jet receive eight times its velocity as a type-1 force at the fountain's base.
+    {
+        reset(g, false);
+        g.player.pos[0] = 50 * 4096;
+        addCar(g, 12);
+        const int16_t up[3] = {0, 0, 0x2000};
+        Fountain fountain(at, up);
+        fountain.process(g);
+        check(VehicleTestAccess::pendingLift(g.cars[0]) > 0, "a fountain jet lifts a vehicle standing over it");
+    }
+    // CWaterCannon::PutOutFires: a fire under the stream loses two health a frame and goes out at zero.
+    {
+        reset(g, false);
+        g.player.pos[0] = 50 * 4096;
+        const int32_t beside[3] = {0x800, 0, 0};
+        g.fires.start(g, beside, Fires::None, 0, -1, 0, false, false);
+        const int16_t up[3] = {0, 0, 0x2000};
+        Fountain fountain(at, up);
+        int frames = 0;
+        for (; frames < 100 && !g.fires.list().empty(); ++frames) {
+            fountain.process(g);
+            g.fires.process(g);
+            ++g.frame;
+        }
+        check(g.fires.list().empty() && frames > 60 && frames < 70,
+              "a fire beside a fountain is put out after its 127 health is worn down two at a time");
+    }
 
     g.fires.clear();
     SDL_Quit();

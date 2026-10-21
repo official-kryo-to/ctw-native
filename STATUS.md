@@ -31,12 +31,21 @@ compatibility with the original.
   forces and health damage to street furniture. Vehicle and explosive-prop chain reactions queue delayed
   secondary blasts. The optional generic stationary-blast duplicate check follows the reference's cell and
   3D distance gates; it stays off by default, matching Reset.
+  Tankers, ammo trucks (and the Rhino, once tanks exist) and smashed petrol pumps blow up as cExplosionBigVehicle:
+  a wider blast (15-unit damage, 22-unit force), yellow twirls, then five to ten frames later the explosion
+  sound, debris, a ring of cloud puffs that drifts along the pump's impact and the main cloud. A petrol pump also
+  leaves a 900-frame petrol fire. Only one explosion-debris emitter exists at a time, as in the original, and
+  molotov blasts now throw their debris. Explosion damage kinds and the x1.25 vehicle damage follow the
+  reference tables for every type.
 - **Street furniture:** the original mass, inertia, force thresholds and rigid-body integration. Loose props tumble,
   collide with the world, cars and other props, and settle; anchored broken remnants keep their placement. Paper,
   wood, glass, garbage and gate slats use the original emitters; a knocked-over bin spills rubbish while it rolls.
   Gate and barrier smash effects 26 and 27 emit six rotating strips with the reference launch, damping,
   floor-stop and fade. Reactive props no longer also block vehicles as immovable scenery. Hydrants tilt about
-  their fixed base and emit a water stream, nozzle spray and positional looping water sound. Partial blast
+  their fixed base and emit a water stream, nozzle spray and positional looping water sound. The jet is a solid
+  1 x 1 x 10 column (cFountainStream::OnCollision): people in it are knocked down and shoved, vehicles are lifted
+  by eight times its velocity and loose props by four, and it puts out fires it reaches (CWaterCannon::PutOutFires,
+  saving a burning car); park fountains behave the same way. Partial blast
   damage retains standing models and collisions; lethal health can smash anchored props without uprooting them.
 - **Traffic:** parked cars and cars driving the roads, stopping for pedestrians in their path. Generated traffic
   owns pedestrian drivers; they animate out when the player takes the seat and are released on destruction.
@@ -106,12 +115,12 @@ compatibility with the original.
   death-cause and chain scheduling still need full parity, and debris trails are missing.
   The generic vehicle impulse is consumed after integration to avoid losing it to parked-car settling, an
   adaptation pending the native entity scheduler. Prop health resets at the port's existing cleanup distance,
-  not the native sector/entity lifetime. Big-vehicle multi-stage clouds, hotdog-cart gas jets for nonvehicle
+  not the native sector/entity lifetime. Hotdog-cart gas jets for nonvehicle
   damage, other specialised explosions, and the original shared particle-pool capacity/update ordering remain
   incomplete. Secondary smoke currently uses one emitter per burst.
 - Other debris, buoyancy and splashes. Gate slats retain the original zero-height
   floor test; this does not fix the remaining waterfront mesh/collision clipping reports.
-  Specialised prop smash branches, water-stream contact/extinguishing, the shared vehicle-fragment pool,
+  Specialised prop smash branches, the fire truck's water cannon, the shared vehicle-fragment pool,
   complete carjacking reactions and specialised traffic/task branches remain incomplete.
 - Scripted, aiming and specialised cameras, shake through camera-mode/death transitions, and the hidden-player
   visibility aid.

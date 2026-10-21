@@ -70,6 +70,9 @@ public:
     int32_t mass() const { return mass_; }        // cPhysical::GetMass (+0x1A8)        // +0x99D: 255 = new; smoke below 190, burning below 31
     bool dead() const { return dead_; }
     void damage(int amount);                      // cVehicle::Damage (collision damage)
+    // SetHealth(health, false) below full health: at 31 or more the burn timer restarts (190 or more would also
+    // release the smoke, 255 close the flaps and 0 kill the vehicle; no caller needs those yet)
+    void setHealthBelowSmoke(unsigned health);
     void explosionHit(const struct ExplosionBlast& blast, bool occupiedByPlayer);
     bool repair();                               // mod API: restore a living vehicle, without resurrecting wrecks
     void teleport(const int32_t pos[3], int16_t heading); // rebuild the physics transform, upright and stationary
@@ -280,4 +283,5 @@ private:
     friend struct VehicleTestAccess;
     friend class PropDynamics;
     friend class AIDriving;
+    friend class Fountain;   // cFountainStream::OnCollision applies its jet as a world force
 };

@@ -326,6 +326,19 @@ void Fires::extinguish(Attach attach, uint32_t uid) {
     for (Fire& f : fires_) if (f.attach == attach && f.uid == uid) f.out = true;
 }
 
+void Fires::hitByWater(Game& g, size_t index, uint8_t amount) {   // cFire::HitByWater
+    if (index >= fires_.size()) return;
+    Fire& f = fires_[index];
+    if (f.out || !f.health) return;   // a dead fire is no longer active (+0x77 bit 2)
+    f.health = amount >= f.health ? 0 : (uint8_t)(f.health - amount);   // cObject::ReduceHealth
+    if (f.health) return;
+    f.life = -1;   // SetDead
+    f.out = true;
+    if (f.attach != Car) return;
+    for (Vehicle& c : g.cars)
+        if (c.uid == f.uid && c.health() >= 1 && c.health() <= 0x1D) { c.setHealthBelowSmoke(0x1F); break; }
+}
+
 void Fires::clear() {
     for (Fire& f : fires_) {
         if (f.emitter && TheParticles().contains(f.emitter)) f.emitter->dying = true;
