@@ -122,6 +122,10 @@ public:
     void collectSectors();                   // cWorld::GarbageCollection: deletes what is in unloaded sectors
     int pedPopulation() const;               // cPlayer::GetPopulation(network 1)
     int carPopulation() const;               // cPlayer::GetPopulation(network 0)
+    // cPlayer::GetPopulation(network 0) as sPopStats: the vehicles by their driver's ped type (cVehicle +0x964; 1
+    // for a car without one). Returns the total.
+    int carPopulationByType(int out[20]) const;
+    bool forceFreeVehicle();                 // cGlobalPopulationManager::ForceFreeVehicle(false, false)
     uint16_t cameraYaw() const;
     uint32_t nextUid = 1;
     bool canSee(const int32_t pos[3], float radius) const;   // the drawn camera's frustum (rendering only)

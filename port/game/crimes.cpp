@@ -19,9 +19,11 @@ void Game::updateWanted() {
     // bit 27 flag) belongs to the cop AI, which is not ported: no cop counts as pursuing yet.
     int32_t at[3];
     focus(at);
-    for (const Vehicle& car : cars)
-        if (!car.dead() && view.canSee(car.pos, car.boundRadius()) && isCopCar(*this, car))
-            wanted.setCopInView(frame, at, false);
+    for (Vehicle& car : cars) {
+        const bool onScreen = view.canSee(car.pos, car.boundRadius());
+        car.screenTimer = onScreen ? 0xFF : car.screenTimer ? (uint8_t)(car.screenTimer - 1) : 0;   // +0x99C
+        if (!car.dead() && onScreen && isCopCar(*this, car)) wanted.setCopInView(frame, at, false);
+    }
     wanted.process(frame, at, playerCar >= 0);   // cPlayer::Process -> cWantedManager::Process
 }
 

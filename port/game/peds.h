@@ -180,7 +180,7 @@ public:
     // create the ped at the next cLocalAreaKnowledge pavement crossing of the 60-unit circle
     void generate(Game& g, const Traffic::ZoneInfo& z);
     void collect(Game& g);   // cWorld::GarbageCollection: peds in unloaded sectors are deleted
-    bool createDriver(Game& g, Vehicle& car, int type, const Traffic::ZoneInfo& zone);
+    bool createDriver(Game& g, Vehicle& car, int type, const Traffic::ZoneInfo& zone, int subtype = -1);
     bool exitOccupant(Game& g, Vehicle& car, int seat); // true when the seat is free
     // cPed::HandleReaction in a vehicle for fleeing (cFleeOnFoot from the threat): out of the vehicle, then flee
     // from `from` (following fromCar while it exists)
@@ -196,7 +196,7 @@ private:
     uint32_t nextUid_ = 1;
 
     void spawn(Game& g, int type, const Traffic::ZoneInfo& z);
-    bool appearance(Game& g, Ped& p, int type, const Traffic::ZoneInfo& z);
+    bool appearance(Game& g, Ped& p, int type, const Traffic::ZoneInfo& z, int subtype = -1);
     void updateOccupant(Game& g, Ped& p);
     void wander(Game& g, Ped& p);
     bool rejoin(Game& g, Ped& p);

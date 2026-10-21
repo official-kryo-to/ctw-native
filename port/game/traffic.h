@@ -57,6 +57,15 @@ public:
     const DrivingProps& drivingProps() const { return drivingProps_; }
     // the vehicle part of cPopulationManager::Update (Game::updatePopulation): room = below the cap
     void generateRandom(Game& g, const ZoneInfo& z, bool room);
+    // cPopulationManager::GetCopSubType: the cop unit by wanted level (0 police; 3, 2 and 1 from three stars on)
+    static int copSubType(const Game& g);
+    // cPopulationManager::GetCopsVehicleId (the helicopter is taken as loaded: the port cannot spawn it, so a roll
+    // for it spawns nothing)
+    int copsVehicleId(const Game& g, int subtype, int limit);
+    // cPopulationManager::WantedModifier for the vehicle network: more cops with the wanted level (fewer while a
+    // star is dimmed), capped per level, the rest of the cap shared out; the result is what is still missing of
+    // each type. current: the population by type (Game::carPopulationByType).
+    void wantedModifier(const Game& g, int fields[20], const int current[20], int cap) const;
     const ZoneInfo& zoneOrDefault(int32_t x, int32_t y, bool night) const;   // cPopulationZones::Info
     // popinfo.bin ped makeups: weighted pedinfo.bin record indices (cPopInfoManager::GetSubType)
     const std::vector<std::pair<uint16_t, uint16_t>>* pedMakeup(int makeup) const {
@@ -97,12 +106,15 @@ private:
     std::vector<std::vector<std::pair<uint16_t, uint16_t>>> pedMakeups_;
     uint32_t linkCursor_ = 0;
     uint8_t spawnFallback_ = 0; // ordinary population spawn retry state (+0x5A)
+    bool heliActive_ = false;   // +0x58: a police helicopter exists (never in the port)
+    uint32_t heliTimer_ = 0;    // +0x5C: frames before another helicopter roll
     DrivingProps drivingProps_;
     TrafficAvoidance avoidance_;
 
     int vehicleFromMakeup(const Game& g, int makeup, int limit) const;   // cPopInfoManager::GetVehicleId
     bool createPos(Game& g, int network, int& a, int& b, int32_t pos[3], int& lane, int32_t& ratio);
     void generate(Game& g, int pedType, const ZoneInfo& z);
+    friend struct WantedPopulationTestAccess;
     void proximity(Game& g);
     void wander(Game& g, Vehicle& v, Driver& d);
     void forwardSpeed(Game& g, Vehicle& v, Driver& d);

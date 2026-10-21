@@ -381,13 +381,14 @@ void Pedestrians::spawn(Game& g, int type, const Traffic::ZoneInfo& z) {
     peds.push_back(std::move(p));
 }
 
-bool Pedestrians::appearance(Game& g, Ped& p, int type, const Traffic::ZoneInfo& z) {
+bool Pedestrians::appearance(Game& g, Ped& p, int type, const Traffic::ZoneInfo& z, int subtype) {
     p.uid = nextUid_++;
     p.type = type;
     p.subtype = 0;
     // CreateRandomPed: gangs and other ped types in mask 0xC99A9 use subtype 1; civilians roll one from the zone's
     // ped makeup (cPopInfoManager::GetSubType -> cPedInfoManager::ResolveId); cops use GetCopSubType (0 when not wanted)
     if (type >= 0 && type <= 0x13 && (0xC99A9u >> type & 1)) p.subtype = 1;
+    else if (type == 10) p.subtype = subtype >= 0 ? subtype : Traffic::copSubType(g);
     else if (type == 1) {
         if (const auto* makeup = g.traffic.pedMakeup(z.pedMakeup)) {
             int total = 0;
@@ -411,10 +412,10 @@ bool Pedestrians::appearance(Game& g, Ped& p, int type, const Traffic::ZoneInfo&
     return true;
 }
 
-bool Pedestrians::createDriver(Game& g, Vehicle& car, int type, const Traffic::ZoneInfo& zone) {
+bool Pedestrians::createDriver(Game& g, Vehicle& car, int type, const Traffic::ZoneInfo& zone, int subtype) {
     if (!car.uid || car.dead() || car.seatUser[0] != -1) return false;
     Ped p;
-    if (!appearance(g,p,type,zone)) return false;
+    if (!appearance(g,p,type,zone,subtype)) return false;
     p.vehicle=car.uid; p.seat=0;
     car.seatOffset(0,p.seatPosition);
     car.localToWorld(p.seatPosition,p.body.pos);

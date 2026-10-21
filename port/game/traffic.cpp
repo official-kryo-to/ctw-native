@@ -247,6 +247,7 @@ bool Traffic::createPos(Game& g, int network, int& a, int& b, int32_t pos[3], in
 }
 
 void Traffic::generate(Game& g, int pedType, const ZoneInfo& z) {   // cPopulationManager::GenerateRandomVehicle
+    const int subtype = pedType == 10 ? copSubType(g) : -1;   // before anything else for a cop
     int limit = 0;   // eRandVehicleLimit: 0 land, 1 sea, 2 either
     if (pedType == 1 && z.vehMakeup >= 0 && z.vehMakeup < (int)makeups_.size()) {
         const Makeup& m = makeups_[z.vehMakeup];   // cPopInfoManager::GetRandVehicleLimitStatus
@@ -264,7 +265,7 @@ void Traffic::generate(Game& g, int pedType, const ZoneInfo& z) {   // cPopulati
     limit = g.roads.node(a).z < -4 ? 1 : 0;
     int vid = 0x7F;
     if (pedType == 1) vid = vehicleFromMakeup(g, z.vehMakeup, limit);
-    else if (pedType == 10 && limit == 0) vid = 0x12;   // GetCopsVehicleId at no wanted level: police
+    else if (pedType == 10) vid = copsVehicleId(g, subtype, limit);
     if (tdbg()) printf("traffic: type %d vehicle %d at %.1f %.1f link %d->%d lane %d ratio %d\n", pedType, vid, pos[0] / 4096.f, pos[1] / 4096.f, a, b, lane, ratio);
     if (vid == 0x7F || vid >= (int)g.vehicleInfos.size() || g.vehicleInfos[vid].type() != 0) {
         if (tdbg()) printf("traffic: unsupported vehicle %d (type %d)\n",vid,vid>=0 && vid<(int)g.vehicleInfos.size() ? g.vehicleInfos[vid].type() : -1);
@@ -286,7 +287,7 @@ void Traffic::generate(Game& g, int pedType, const ZoneInfo& z) {   // cPopulati
     int32_t p[2], dir[2];
     d.spline.getPosAndDir(g.roads, p, dir);
     v.placeOnRail(p[0], p[1], d.spline.z(), dir, d.speed);
-    if (!g.peds.createDriver(g,v,pedType,z)) { if (tdbg()) printf("traffic: driver appearance failed (ped type %d)\n",pedType);g.removeCar(idx);return; }
+    if (!g.peds.createDriver(g,v,pedType,z,subtype)) { if (tdbg()) printf("traffic: driver appearance failed (ped type %d)\n",pedType);g.removeCar(idx);return; }
     drivers_[v.uid] = d;
     if (spawnFallback_) --spawnFallback_;
     if (tdbg()) printf("traffic: created uid %u at %.1f %.1f loaded %d\n",v.uid,v.pos[0]/4096.f,v.pos[1]/4096.f,g.sectors.loadedAt(v.pos[0],v.pos[1]));
@@ -672,19 +673,101 @@ void Traffic::wanderUnderPhysics(Game& g, Vehicle& v, Driver& d) {   // cWanderR
     d.lastFrame = g.frame;
 }
 
-// cPopulationManager::Update when the vehicle schedule fired: roll a ped type from the zone's profile, then
-// generate a vehicle for it if there is room (GenerateRandomVehicle)
-void Traffic::generateRandom(Game& g, const ZoneInfo& z, bool room) {
-    if (!g.roads.ok()) return;
+int Traffic::copSubType(const Game& g) {   // cPopulationManager::GetCopSubType
+    switch (g.wanted.level()) {
+    case 3: return Rand16Critical(100) < 21 ? 3 : 0;
+    case 4: { const uint32_t r = Rand16Critical(100); return r < 31 ? 3 : r < 41 ? 2 : 0; }
+    case 5: { const uint32_t r = Rand16Critical(100); return r < 41 ? 3 : r < 56 ? 2 : 0; }
+    case 6: { const uint32_t r = Rand16Critical(100); return r < 41 ? 3 : r < 61 ? 2 : r > 70 ? 1 : 0; }
+    default: return 0;
+    }
+}
+
+int Traffic::copsVehicleId(const Game& g, int subtype, int limit) {   // cPopulationManager::GetCopsVehicleId
+    if (limit == 1) return 0x25;   // the police boat
+    if (g.wanted.level() >= 3 && !heliActive_ && !heliTimer_ && !(g.wanted.actualLevel() > 0 && g.wanted.starsLit() < 2)) {
+        heliTimer_ = 60;
+        if (Rand16Critical(100) <= 49) return 3;   // "Helictoper spawned in"
+        return 0x12;
+    }
+    switch (subtype) {
+    case 1: return 7;
+    case 2: return 0x22;
+    case 3: return 4;
+    default: return 0x12;
+    }
+}
+
+void Traffic::wantedModifier(const Game& g, int fields[20], const int current[20], int cap) const {
+    // cPopulationManager::WantedModifier(stats, population, cap, true)
+    const WantedManager& w = g.wanted;
+    const int level = w.level();
+    if (!level) return;
+    const WantedTables& t = w.tables();
+    const bool inCar = g.playerCar >= 0;
+    bool copVehicle = false;   // the player drives a police vehicle
+    if (inCar)
+        for (int id : {0x12, 0x22, 4, 7, 3, 0x25}) copVehicle |= g.cars[g.playerCar].infoId == id;
+    uint32_t cops = (uint32_t)(((uint64_t)((uint32_t)t.copMultiplierInCar[level] * (uint32_t)fields[10]) * 0xCCCCCCCDull) >> 35);
+    cops = (uint32_t)(((uint64_t)(cops * 100u) * 0x51EB851Full) >> 37);   // the population manager's cop percentage (+0x43: 100)
+    if (w.actualLevel() > 0 && w.starsLit() < 2)   // IsOnOneStarDimmedProbationary
+        cops = (uint32_t)(((uint64_t)((uint32_t)t.probationaryHidePercent[level] * cops) * 0x51EB851Full) >> 37);
+    if (copVehicle) ++cops;
+    if (cops >= 21) {   // too many: everything scaled to twenty cops
+        for (int i = 0; i < 20; ++i) fields[i] = (int)((uint32_t)(fields[i] * 20) / cops) & 0x7F;
+        fields[10] = 20;
+    } else fields[10] = (int)cops & 0x7F;
     int total = 0;
-    for (int v : z.fields) total += v;
-    if (!total) return;
+    for (int i = 0; i < 20; ++i) total += fields[i];
+    const uint32_t half = (uint32_t)total >> 1;
+    uint32_t shared = 0;
+    int last = 1, excess = 0;
+    for (int i = 0; i < 20; ++i) {
+        const uint32_t v = (uint32_t)fields[i] * (uint32_t)cap;
+        const uint32_t q = total ? v / (uint32_t)total : 0;
+        if ((uint32_t)total > v && i != 10 && v) last = i;
+        const uint32_t rounded = q + (v - q * (uint32_t)total >= half ? 1u : 0u);
+        uint32_t target = rounded;
+        if (i == 10) {   // never more cop cars than the level allows
+            uint32_t most = (uint32_t)(inCar ? t.copMaxCarsInCar[level] : t.copMaxCarsOnFoot[level]) + (copVehicle ? 1 : 0);
+            if (most >= 4) most = (most - 3) * (uint32_t)w.starsLit() / (uint32_t)std::max(1, w.actualLevel()) + 3;
+            if (rounded > most) { excess = (int)(rounded - most); target = most; }
+        }
+        shared += rounded;
+        fields[i] = std::max(0, (int)target - current[i]) & 0x7F;
+    }
+    if ((uint32_t)cap > shared) fields[last] = (fields[last] + (int)((uint32_t)cap - shared)) & 0x7F;
+    if (excess) fields[1] = (fields[1] + excess) & 0x7F;   // the cops over the limit become civilians
+}
+
+// The vehicle part of cPopulationManager::Update when the vehicle schedule fired: the zone's profile through
+// WantedModifier (ScaleForIndividualSettings' per-type percentages are all 100: no change), then from two stars on
+// a cop (freeing a vehicle when full), otherwise a ped type rolled from the stats, generated if there is room (a
+// cop frees one) (GenerateRandomVehicle).
+void Traffic::generateRandom(Game& g, const ZoneInfo& z, bool room) {
+    (void)room;
+    if (!g.roads.ok()) return;
+    if (heliTimer_) --heliTimer_;   // (the top of Update)
+    int fields[20], current[20];
+    std::copy(z.fields, z.fields + 20, fields);
+    int population = g.carPopulationByType(current);
+    wantedModifier(g, fields, current, maxCars);
+    const WantedManager& w = g.wanted;
+    if (w.level() >= 2 && !(w.actualLevel() > 0 && w.starsLit() < 2) && fields[10]) {
+        if (population >= maxCars && !g.forceFreeVehicle()) return;
+        generate(g, 10, z);
+        return;
+    }
+    int total = 0;
+    for (int v : fields) total += v;
+    if (!total) return;   // (Rand32Critical(0) is not made)
     int r = (int)Rand32Critical(total), type = -1;
     for (int i = 0; i < 20; ++i) {
-        if (r < z.fields[i]) { type = i; break; }
-        r -= z.fields[i];
+        if (r < fields[i]) { type = i; break; }
+        r -= fields[i];
     }
-    if (tdbg()) printf("traffic: roll type %d (count %d max %d room %d)\n", type, count(), maxCars, room);
-    if (type < 0 || !room) return;
-    generate(g, type, z);
+    if (tdbg()) printf("traffic: roll type %d (count %d max %d)\n", type, population, maxCars);
+    if (type < 0) return;   // (type 20, a vehicle without a driver type, is not ported)
+    if (population < maxCars) generate(g, type, z);
+    else if (type == 10 && g.forceFreeVehicle()) generate(g, 10, z);
 }

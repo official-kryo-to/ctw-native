@@ -390,6 +390,44 @@ void Game::updatePopulation() {
     traffic.generateRandom(*this, z, carCount < carCap);
 }
 
+int Game::carPopulationByType(int out[20]) const {
+    std::fill(out, out + 20, 0);
+    int total = 0;
+    for (const Vehicle& c : cars) {
+        if (!sectors.loadedAt(c.pos[0], c.pos[1]) || !WorldSectors::inBox(player.pos, 327680, c.pos[0], c.pos[1])) continue;
+        int type = 1;   // the cVehicle constructor's +0x964
+        for (const Pedestrians::Ped& p : peds.peds)
+            if (p.vehicle == c.uid && p.seat == 0) { type = p.type; break; }
+        if (type >= 0 && type < 20) ++out[type];
+        ++total;
+    }
+    return total;
+}
+
+bool Game::forceFreeVehicle() {   // cGlobalPopulationManager::ForceFreeVehicle(false, false)
+    // the generated vehicle off screen the longest (the lowest +0x99C), never a cop's, the player's or one with
+    // someone getting in or out
+    int best = -1, bestTimer = 0x100;
+    for (int i = 0; i < (int)cars.size(); ++i) {
+        const Vehicle& c = cars[i];
+        if (!c.generated || i == playerCar || i == task.car || c.keep) continue;
+        bool cop = false, attached = false;
+        for (const Pedestrians::Ped& p : peds.peds) {
+            if (p.vehicle != c.uid) continue;
+            if (p.seat == 0 && p.type == 10) cop = true;
+            if (p.exiting) attached = true;
+        }
+        if (cop || attached || c.screenTimer >= bestTimer) continue;
+        best = i;
+        bestTimer = c.screenTimer;
+        if (!bestTimer) break;
+    }
+    if (best < 0) return false;
+    peds.discardOccupants(cars[best]);
+    removeCar(best);
+    return true;
+}
+
 void Game::collectSectors() {   // cWorld::GarbageCollection (cGame::Render): cWorldSector::Reset deletes the entities
     sectors.collect();
     peds.collect(*this);

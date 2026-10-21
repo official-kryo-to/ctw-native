@@ -113,6 +113,7 @@ public:
     void renderLights(const struct WorldCamera& cam, uint32_t frame, bool night, Collision* col) const;                        // the car is being removed: let its smoke fade out                        // set on the frame it blew up (the game ejects / kills occupants)
     int seatUser[4] = {-1, -1, -1, -1};
     bool generated = false;   // cVehicle::SetIsGeneratedCar
+    uint8_t screenTimer = 0xFF;   // +0x99C: 255 while on screen, counting down off screen (cVehicle::ProcessAlways)
     uint32_t uid = 0;         // stable id (the game's entity id byte +0x63 = uid & 0xFF)
     int radioStation = -1;    // station selection stays with the vehicle
     // traffic (cVehicle +0x95C, +0xE9, +0x9C8): VehicleSimpleProximityProcess's nearest obstacle ahead
