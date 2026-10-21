@@ -529,7 +529,10 @@ void Pedestrians::runOver(Game& g, Ped& p) {
         const bool wasDead = p.body.dead;
         const int health = p.body.health;
         const bool impact = p.body.vehicleImpact(v, normal, false);
-        if (p.body.health != health) g.addBlood(p.body.pos, 1);   // run-over damage (types 8/9): one drop
+        if (p.body.health != health) {
+            g.addBlood(p.body.pos, 1);   // run-over damage (types 8/9): one drop
+            if (g.playerCar >= 0 && &g.cars[g.playerCar] == &v) g.pedCrime(p, 8);
+        }
         if (impact) {
             p.deadFrames = 0;
             p.rollFrames = -1;

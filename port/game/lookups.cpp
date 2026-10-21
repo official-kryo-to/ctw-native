@@ -132,6 +132,25 @@ bool RadioTables::load(const std::string& path) {
     return true;
 }
 
+bool WantedTables::load(const std::string& path) {
+    auto file = openTable(path);
+    WantedTables next;
+    if (!magic(file, "CTWWANT1") || !read(file, next.levels, sizeof next.levels) ||
+        !read(file, next.crimes, sizeof next.crimes) || !read(file, next.copCarCrimes, sizeof next.copCarCrimes))
+        return false;
+    for (int32_t* table : {next.takeDownsPerCopCar, next.ratingToSubtractOnReachingMaxLevel, next.takeDownHealth,
+                           next.copMaxCarsInCar, next.copMaxCarsOnFoot, next.copMultiplierInCar,
+                           next.copMultiplierOnFoot, next.ramBlockPercent, next.flipPercent, next.targetSpeedMult,
+                           next.probationaryHidePercent, next.arrivalOffsetMultiplier})
+        if (!read(file, table, 7 * sizeof(int32_t))) return false;
+    if (!read(file, &next.failedProbationFramesPerMinusTakedown, 4) || !end(file)) return false;
+    for (int l = 1; l < 8; ++l) if (next.levels[l].threshold <= next.levels[l - 1].threshold) return false;
+    for (int32_t c : next.copCarCrimes) if (c < 0 || c >= 26) return false;
+    for (int32_t t : next.takeDownsPerCopCar) if (t < 0 || t > 50) return false;
+    *this = next;
+    return true;
+}
+
 bool WeatherTables::load(const std::string& path) {
     auto file = openTable(path);
     WeatherTables next;

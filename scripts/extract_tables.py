@@ -220,6 +220,25 @@ class GameBinary:
         # cTimeCycle::msWeatherChanceTable (8 weathers x 8 percentages) and UpdateLightning's five thunder sounds.
         return b'CTWWTHR1' + self.read(0x48702c, 64) + self.read(0x48706c, 20)
 
+    def wanted(self):
+        # cWantedRating's level table (8 x {u16 threshold, u8 roadblock %, u8 stinger %}), the 26 crime records,
+        # cVehicle::HandlePlayerCrime's 13 crime types, cCopProperties' seven-level tables and the failed-probation
+        # frames per lost takedown.
+        cop = b''.join(self.symbol_data(name, 28) for name in ('_ZN14cCopProperties19mTakeDownsPerCopCarE',
+                                                        '_ZN14cCopProperties35mRatingToSubtractOnReachingMaxLevelE',
+                                                        '_ZN14cCopProperties15mTakeDownHealthE',
+                                                        '_ZN14cCopProperties24mCopMaximumCarsWhenInCarE',
+                                                        '_ZN14cCopProperties25mCopMaximumCarsWhenOnFootE',
+                                                        '_ZN14cCopProperties26mCopMultiplierTimes10InCarE',
+                                                        '_ZN14cCopProperties27mCopMultiplierTimes10OnFootE',
+                                                        '_ZN14cCopProperties19mPercentageRamBlockE',
+                                                        '_ZN14cCopProperties24mnChanceOfFlipPercentageE',
+                                                        '_ZN14cCopProperties16mTargetSpeedMultE',
+                                                        '_ZN14cCopProperties27mProbationaryHidePercentageE',
+                                                        '_ZN14cCopProperties41mCarToPlayerOnFootArrivalOffsetMultiplierE'))
+        return (b'CTWWANT1' + self.read(0x481568, 32) + self.read(0x48785e, 26 * 2) + self.read(0x4871f4, 13 * 4) +
+                cop + self.symbol_data('_ZN14cCopProperties38mFailedProbationFramesPerMinusTakedownE', 4))
+
     def weapons(self):
         # cWeaponInfo::msWeaponInfos (28 records of 60 bytes), cWeaponManager::GetDefaultWeaponAmmo's table and
         # cBulletTraces::AddTrace's three trace lifetimes.
@@ -232,4 +251,5 @@ def extract_tables(binary):
             'render_tables.bin': game.render(), 'gameplay_tables.bin': game.gameplay(),
             'radio_tables.bin': game.radio(), 'restart_tables.bin': game.restart(),
             'weather_tables.bin': game.weather(), 'weapon_tables.bin': game.weapons(),
+            'wanted_tables.bin': game.wanted(),
             'driving_props.bin': game.driving(), 'ped_comments.bin': game.ped_comments()}

@@ -505,6 +505,7 @@ void traceAndFlash(Game& g, Weapon& w, const int32_t origin[3], int32_t dir[3], 
         if (best.kind == 1) {
             const int32_t from[3] = {g.player.pos[0], g.player.pos[1], g.player.pos[2]};
             g.peds.bulletHit(g, g.peds.peds[best.index], damage, dir, info.effect, from, w.type == 15 ? 2 : 1);
+            g.pedCrime(g.peds.peds[best.index], w.type == 15 ? 2 : 1);
         } else {
             Vehicle& c = g.cars[best.index];
             // cVehicle::Damage, sDamageInfo type 1: a quarter of the damage (doors, sparks and the takedown logic
@@ -576,6 +577,7 @@ void hitStuff(Game& g, Weapon& w, int16_t angle, int pedDamage, int vehicleDamag
         const int16_t diff = (int16_t)(facing - to);
         if (diff >= angle || diff <= -angle) continue;
         g.peds.meleeHit(g, p, pedDamage, type, a, Weapons_Info(w.type).effect);
+        g.pedCrime(p, type);
         hitPed = true;
     }
     for (Vehicle& c : g.cars) {

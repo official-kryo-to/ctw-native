@@ -30,6 +30,7 @@ bool reactionCheck(int reaction, bool first) {
 
 void Game::vehicleReaction(Vehicle& car, int type, int damage, uint32_t sourceCar, const int32_t at[3]) {
     if (car.dead()) return;
+    copCarCrime(car, type, damage, sourceCar);   // cVehicle::HandlePlayerCrime comes first in Damage
     if (type == 8 && damage < 12) return;   // gAggBigHit
     const int action = vehicleAction(type);
     Pedestrians::Ped* driver = nullptr;

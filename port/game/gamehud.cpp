@@ -70,7 +70,7 @@ void GameplayHud::shutdown() {
     map_ = RadarMap{};
 }
 
-void GameplayHud::sprite(int index, float x, float y, float scale, float angle) const {
+void GameplayHud::sprite(int index, float x, float y, float scale, float angle, float alpha) const {
     if (index < 0 || index >= (int)sprites_.sprites().size()) return;
     const SpriteDef& d = sprites_.sprites()[index];
     const float w = d.w + 1.f, h = d.h + 1.f; // cSprite::CalculateVerts includes the last stored pixel.
@@ -82,7 +82,7 @@ void GameplayHud::sprite(int index, float x, float y, float scale, float angle) 
     const float v[4] = {d.y * 2.f, d.y * 2.f, (d.y + h) * 2.f, (d.y + h) * 2.f};
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texture_);
-    glColor4f(1, 1, 1, 1);
+    glColor4f(1, 1, 1, alpha);
     glBegin(GL_QUADS);
     for (int i = 0; i < 4; ++i) {
         glTexCoord2f(u[i] / textureWidth_, v[i] / textureHeight_);
@@ -165,5 +165,41 @@ void GameplayHud::render(const Game& game, int width, int height) const {
     float nx, ny;
     projection.worldOffset(north, pos, nx, ny, diameter * .5f);
     sprite(107, cx + nx * k, cy + ny * k, k);
+    renderWantedStars(game, k, width, height);
     glPopAttrib();
+}
+
+void GameplayHud::renderWantedStars(const Game& game, float k, int width, int height) const {
+    const WantedManager& w = game.wanted;
+    if (!w.ok()) return;
+    // once per game frame: cMiniHud::ProcessWantedRating's scales and the stars' flashing (cSprite::RefreshSprite)
+    if (game.frame != starFrame_) {
+        starFrame_ = game.frame;
+        for (float& s : starScale_) {
+            if (s > 1.f) s = std::max(s - 0x199 / 4096.f, 1.f);
+            else if (s < 1.f) s = std::max(s, 0x199 / 4096.f) - 0x199 / 4096.f;
+        }
+        const int level = w.actualLevel();   // GetStarDisplayLevel
+        if (level != starLevel_) {
+            for (int i = 0; i < level && i < 6; ++i) starScale_[i] = i < starLevel_ ? 1.f : 2.f;
+            for (int i = level; i < 6; ++i) if (starScale_[i] != 0.f) starScale_[i] = 0xE66 / 4096.f;
+            starLevel_ = level;
+        }
+        const bool flashing = w.starsFlashing();
+        if (flashing && !wasFlashing_) { flashCount_ = 0; flashOn_ = true; }   // SetFlashing(true)
+        else if (flashing && flashCount_++ > 5) { flashCount_ = 0; flashOn_ = !flashOn_; }
+        wasFlashing_ = flashing;
+    }
+    // WANTED_STARS_POS_X from cMiniHud::Init, in the 768-high HUD space; 22 apart at y 12
+    const int virtualWidth = height ? 3 * width * 256 / height : 1024;
+    const int extra = (virtualWidth - 0x400) >> 1;
+    const float x0 = (float)(extra + 0x37C) - 0.125f * (float)(extra + extra + 0x400);
+    const bool lit = !w.onProbation();   // (cTakedownHud's extra lit star is not ported)
+    const int litCount = w.starsLit(), display = w.actualLevel();
+    for (int i = 0; i < 6; ++i) {
+        if (i >= display) continue;
+        if (w.starsFlashing() && !flashOn_) continue;
+        const float alpha = lit && i >= litCount && i != 0 ? 0.5f : 1.f;   // stars taken down are dimmed
+        sprite(lit ? 124 : 125, (x0 + 22.f * i) * k, 12.f * k, k * starScale_[i], 0.f, alpha);
+    }
 }

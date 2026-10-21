@@ -90,4 +90,4 @@ private:
 bool Fires_PedOnFire(const Game& g, uint32_t pedUid);
 bool Fires_VehicleOnFire(const Game& g, uint32_t carUid);
 void Fires_SetPedOnFire(Game& g, uint32_t pedUid);
-void Fires_SetVehicleOnFire(Game& g, Vehicle& car);
+void Fires_SetVehicleOnFire(Game& g, Vehicle& car, bool byPlayer = true);   // byPlayer: a crime (22)

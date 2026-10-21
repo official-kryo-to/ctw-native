@@ -70,6 +70,21 @@ struct RadioTables {
     bool load(const std::string& path);
 };
 
+// cWantedRating / cWantedManager / cCopProperties (wanted.h)
+struct WantedTables {
+    struct Level { uint16_t threshold; uint8_t roadBlock, stinger; };   // rating needed, % chances every 128 frames
+    Level levels[8]{};              // wanted levels 0..6 and the level-7 ceiling
+    uint16_t crimes[26]{};          // eCrimeType: rating points (bits 0-12) and the instant-level class (bits 14-15)
+    int32_t copCarCrimes[13]{};     // cVehicle::HandlePlayerCrime: the crime for each damage type
+    // cCopProperties, by wanted level 0..6
+    int32_t takeDownsPerCopCar[7]{}, ratingToSubtractOnReachingMaxLevel[7]{}, takeDownHealth[7]{};
+    int32_t copMaxCarsInCar[7]{}, copMaxCarsOnFoot[7]{}, copMultiplierInCar[7]{}, copMultiplierOnFoot[7]{};
+    int32_t ramBlockPercent[7]{}, flipPercent[7]{}, targetSpeedMult[7]{}, probationaryHidePercent[7]{};
+    int32_t arrivalOffsetMultiplier[7]{};
+    int32_t failedProbationFramesPerMinusTakedown = 0;
+    bool load(const std::string& path);
+};
+
 struct WeatherTables {
     uint8_t chance[8][8]{};         // cTimeCycle::msWeatherChanceTable: percentages of the next weather
     uint32_t thunder[5]{};          // UpdateLightning: resident-bank samples

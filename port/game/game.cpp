@@ -63,6 +63,8 @@ bool Game::init(const std::string& data, const std::string& mods) {
     if (!Weapons_Init(dataDir))
         fprintf(stderr, "weapon_tables.bin missing or invalid: no weapons or blast health damage (run scripts/setup_game.py)\n");
     else if (!WeaponHud_Init(dataDir)) fprintf(stderr, "SS_Weapons / SS_Hud / SS_AlwaysLoaded missing: no weapon HUD\n");
+    if (!wanted.init(dataDir))
+        fprintf(stderr, "wanted_tables.bin missing or invalid: no wanted level (run scripts/setup_game.py)\n");
     if (!weather.init(dataDir))
         fprintf(stderr, "weather_tables.bin missing or invalid: the weather does not change (run scripts/setup_game.py)\n");
     weather.reset(*this, 0);
@@ -353,6 +355,7 @@ int Game::carPopulation() const {   // cWorldSector::GetPopulation(0): every veh
 // the wanted level (WantedModifier; when full, a cop roll frees a vehicle: cGlobalPopulationManager::ForceFreeVehicle)
 // and the minimal-AI caps (4 and 4).
 void Game::updatePopulation() {
+    updateWanted();
     const uint32_t t = world.timeCycle().time();
     const Traffic::ZoneInfo& z = traffic.zoneOrDefault(player.pos[0], player.pos[1], t - 0x14000u < 0xFFFF3000u);
     const int pedCount = pedPopulation();
@@ -518,6 +521,7 @@ bool Game::tickTask(bool stickHeld, int16_t stickHeading) {
     case CarTask::OpenDoor: {
         place();
         if (!player.stepOneShot(&pedSprites)) return true;
+        if (c.seatUser[task.seat] >= 0 && !task.jacked) { task.jacked = true; jackCrime(c); }
         if (!peds.exitOccupant(*this,c,task.seat)) return true;
         // op 8: AddSlideIntoSeatAnim - facing forward, slide from the door to the seat while sinking 0.8
         task.heading = 0;
@@ -624,8 +628,10 @@ void Game::processVehicleReactions() {
     for (Vehicle& car : cars) {
         if (!car.hitBy.pending) continue;
         car.hitBy.pending = false;
-        for (const Vehicle& other : cars)
-            if (other.uid == car.hitBy.uid) { vehicleReaction(car, 8, car.hitBy.damage, other.uid, other.pos); break; }
+        const Vehicle* other = nullptr;
+        for (const Vehicle& c : cars) if (c.uid == car.hitBy.uid) { other = &c; break; }
+        if (other) vehicleReaction(car, 8, car.hitBy.damage, other->uid, other->pos);
+        car.hitBy.damage = 0;
     }
 }
 
@@ -858,6 +864,7 @@ void Game::addWeaponExplosion(const int32_t at[3], int type, int16_t scale) {
     // Process, the flash bang on its first.
     const int delay = type == 5 ? 1 : 3;
     if (!queueExplosion({{at[0],at[1],at[2]},delay,type,false,scale})) return;
+    wanted.registerCrime(WantedManager::Explosion, frame);   // RegisterExplosionAsCrime: the player's weapon
     if (type == 1 || type == 3 || type == 5 || (type == 0 && scale >= 0xCCD)) shakeNearExplosion(at);
 }
 
@@ -947,6 +954,7 @@ void Game::updateDeath() {
         player.dead = false;
         player.health = 127;
         player.resetReaction();
+        wanted.reset();   // a new life starts unwanted
         camera.reset(player.pos, player.heading());
         world.loadAllNow(player.pos[0] / 4096.f, player.pos[1] / 4096.f);
         const uint32_t before = world.timeCycle().time();

@@ -449,6 +449,34 @@ impl<'a> GameBinary<'a> {
         Ok(out)
     }
 
+    /// cWantedRating's level table (8 x {u16 threshold, u8 roadblock %, u8 stinger %}), the 26 crime records,
+    /// cVehicle::HandlePlayerCrime's 13 crime types, cCopProperties' seven-level tables and the failed-probation
+    /// frames per lost takedown.
+    pub fn wanted(&self) -> Result<Vec<u8>, TableError> {
+        let mut out = b"CTWWANT1".to_vec();
+        out.extend(self.read(0x481568, 32)?);
+        out.extend(self.read(0x48785e, 26 * 2)?);
+        out.extend(self.read(0x4871f4, 13 * 4)?);
+        for name in [
+            "_ZN14cCopProperties19mTakeDownsPerCopCarE",
+            "_ZN14cCopProperties35mRatingToSubtractOnReachingMaxLevelE",
+            "_ZN14cCopProperties15mTakeDownHealthE",
+            "_ZN14cCopProperties24mCopMaximumCarsWhenInCarE",
+            "_ZN14cCopProperties25mCopMaximumCarsWhenOnFootE",
+            "_ZN14cCopProperties26mCopMultiplierTimes10InCarE",
+            "_ZN14cCopProperties27mCopMultiplierTimes10OnFootE",
+            "_ZN14cCopProperties19mPercentageRamBlockE",
+            "_ZN14cCopProperties24mnChanceOfFlipPercentageE",
+            "_ZN14cCopProperties16mTargetSpeedMultE",
+            "_ZN14cCopProperties27mProbationaryHidePercentageE",
+            "_ZN14cCopProperties41mCarToPlayerOnFootArrivalOffsetMultiplierE",
+        ] {
+            out.extend(self.symbol_data(name, 28)?);
+        }
+        out.extend(self.symbol_data("_ZN14cCopProperties38mFailedProbationFramesPerMinusTakedownE", 4)?);
+        Ok(out)
+    }
+
     /// cWeaponInfo::msWeaponInfos (28 records of 60 bytes), cWeaponManager::GetDefaultWeaponAmmo's table and
     /// cBulletTraces::AddTrace's three trace lifetimes.
     pub fn weapons(&self) -> Result<Vec<u8>, TableError> {
@@ -503,6 +531,7 @@ pub fn extract_tables(binary: &[u8]) -> Result<Vec<(&'static str, Vec<u8>)>, Tab
         ("restart_tables.bin", game.restart()?),
         ("weather_tables.bin", game.weather()?),
         ("weapon_tables.bin", game.weapons()?),
+        ("wanted_tables.bin", game.wanted()?),
         ("driving_props.bin", game.driving()?),
         ("ped_comments.bin", game.ped_comments()?),
     ])

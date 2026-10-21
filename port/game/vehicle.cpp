@@ -1507,7 +1507,8 @@ void Vehicle::onCollision(const int32_t F[3], const Vehicle* other) {
     int64_t k = (int64_t)((double)invMass_ * invMass_ * s / 16777216.0 / 4096.0);   // (dv)^2
     int64_t dmg = otherIsVehicle ? k - 0x1000 : ((k - 0xA000) * 0x333) >> 12;
     if (dmg <= 0) return;
-    if (other && (int)(dmg >> 12) >= 12) hitBy = {true, other->uid, (int)(dmg >> 12)};   // gAggBigHit
+    if (other && (int)(dmg >> 12) > 0 && (int)(dmg >> 12) >= hitBy.damage)
+        hitBy = {true, other->uid, (int)(dmg >> 12)};
     damage((int)(dmg >> 12));
 }
 

@@ -77,6 +77,12 @@ compatibility with the original.
   and run; drivers of slow vehicles always run. Attacking drivers (cKill) still flee instead.
   Spawns use the loaded road-link cache and the original retry/fallback state. Dynamic/mission networks and
   the full task graph still need parity work.
+- **Wanted level:** cWantedRating / cWantedManager from the extracted wanted tables. Shooting, beating, tasering,
+  burning, running over or killing peds and cops, damaging cop cars, jacking, and explosions from the player's
+  weapons are crimes with the original points and instant-star rules. One lit star decays while no cop car is on
+  screen (faster further from where a cop last saw him); two or more need cop cars taken down; a lost star stays
+  dimmed through the 300-frame no-crime probation. The HUD shows the six stars (lit, half-alpha when taken down,
+  probation sprite, flashing and popping in as cMiniHud does). Cops do not chase yet.
 - **Pedestrians:** civilians and cops walk the pavement network of each world sector, using the original zone
   population, spawn schedule, spawn ring, cleanup distance and `pedinfo.bin` looks (gender, body, colours).
   Joggers run, and everyone hurries in the rain. Nearby player vehicles retain the task's run-speed limit;
@@ -124,7 +130,8 @@ compatibility with the original.
 
 ## Not there yet
 
-- Missions, save games, full combat, wanted levels and the rest of the original gameplay HUD.
+- Missions, save games, full combat, the police response to a wanted level (cop pursuit, road blocks, arrests) and
+  the rest of the original gameplay HUD.
 - Radar GPS routes, mission/location blips, a control for the rotating-map setting (the rotation itself is ported), armour pickups, HUD fades,
   cash and the full pause/PDA layout. The radar work is a subset of the HUD, not complete UI parity.
 - Pedestrians do not talk, fight, or use building doors or attractors.

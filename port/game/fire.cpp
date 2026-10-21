@@ -163,7 +163,7 @@ void Fires::ignite(Game& g, const Fire& f) {
             touches(p.body.pos, Player::kRadius))
             start(g, p.body.pos, Ped, p.uid, -1, 1, true, copy.byPlayer);
     for (Vehicle& c : g.cars)
-        if (!c.dead() && !burning(Car, c.uid) && touches(c.pos, c.boundRadius())) Fires_SetVehicleOnFire(g, c);
+        if (!c.dead() && !burning(Car, c.uid) && touches(c.pos, c.boundRadius())) Fires_SetVehicleOnFire(g, c, copy.byPlayer);
 }
 
 void Fires::processFire(Game& g, Fire& f) {   // cFire::Process
@@ -362,12 +362,14 @@ void Fires_SetPedOnFire(Game& g, uint32_t uid) {   // cPed::SetOnFire(the player
         if (p.uid != uid || p.vehicle || g.fires.burning(Fires::Ped, uid)) continue;
         // a ped set on fire by someone burns until it dies (lifetime -1); a style-1 fire with an emitter
         g.fires.start(g, p.body.pos, Fires::Ped, uid, -1, 1, true, true);
+        g.wanted.registerCrime(p.type == 10 ? WantedManager::BurnCop : WantedManager::BurnPed, g.frame);
         return;
     }
 }
 
-void Fires_SetVehicleOnFire(Game& g, Vehicle& car) {   // cVehicle::SetOnFire -> AttachFire(true, 300)
+void Fires_SetVehicleOnFire(Game& g, Vehicle& car, bool byPlayer) {   // cVehicle::SetOnFire -> AttachFire(true, 300)
     if (g.fires.burning(Fires::Car, car.uid)) return;
+    if (byPlayer) g.wanted.registerCrime(WantedManager::BurnVehicle, g.frame);
     const int type = car.infoId >= 0 && car.infoId < (int)g.vehicleInfos.size() ? g.vehicleInfos[car.infoId].type() : 0;
     const int style = (type & 0xFFFE) == 4 ? 4 : 2;
     // 0.45 x the half length towards the engine (cVehicle +0x94C bit 4: at the back) and 0.25 up

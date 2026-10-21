@@ -73,6 +73,7 @@ bool Tazer_CartridgeHitPed(Game& g, uint32_t uid, const int32_t velocity[3]) {
     // the first jolt: type 3, the weapon's damage, along the dart's velocity (effect response 6, effect 0x13)
     (void)velocity;
     g.peds.fireHit(g, *p, Weapons_Info(19).damage, g.player.pos);
+    g.pedCrime(*p, 3);
     w->tazer.shockFrames = shockLength(g);
     return true;
 }
@@ -116,6 +117,7 @@ void Tazer_Update(Game& g, Weapon& w, bool held) {   // cTazer::Update
                 if (held && !inWater && t.charge > 1 &&
                     dx * dx + dy * dy + dz * dz <= ((((int64_t)r * r) << 20) >> 20 & ~0xFFFLL)) {
                     g.peds.fireHit(g, *ped, info.damage, g.player.pos);   // type 3, effect 0x13
+                    g.pedCrime(*ped, 3);
                     t.shockFrames = shockLength(g);
                     if ((t.flags & 0x78) < 0x38) t.flags = (uint8_t)(((t.flags + 8) & 0x78) | (t.flags & 0x87));
                     if ((t.flags & 0x78) == 0x30) Fires_SetPedOnFire(g, ped->uid);   // the sixth shock
@@ -123,6 +125,7 @@ void Tazer_Update(Game& g, Weapon& w, bool held) {   // cTazer::Update
                     keep = true;
                 } else {   // let go: a zero-damage type-3 hit releases him
                     g.peds.fireHit(g, *ped, 0, g.player.pos);
+                    g.pedCrime(*ped, 3);
                 }
             }
         }

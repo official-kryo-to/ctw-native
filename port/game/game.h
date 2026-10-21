@@ -23,6 +23,7 @@
 #include "propdynamics.h"
 #include "watercannon.h"
 #include "weather.h"
+#include "wanted.h"
 #include "weapons.h"
 #include "particles.h"
 #include "fire.h"
@@ -93,6 +94,15 @@ public:
     Fires fires;                             // cFire
     SniperScope scope;                       // cPlayerAsSniper / cSniperCam
     Stats stats;                             // gStatsManager (cStatsManager)
+    WantedManager wanted;                    // the player's wanted level (cPlayer +0x400, wanted.h)
+    static constexpr uint32_t kPlayerOnFoot = 0xFFFFFFFFu;   // Vehicle::lastDamagedBy: the player himself
+    // crimes.cpp: cops seeing the player and cWantedManager::Process (from updatePopulation, as cPlayer::Process
+    // runs it just before cPopulationManager::Update); the player's crimes against a ped (sDamageInfo type, after
+    // the damage), against a cop car (cVehicle::HandlePlayerCrime; sourceCar 0 = the player on foot) and jacking
+    void updateWanted();
+    void pedCrime(const Pedestrians::Ped& victim, int damageType);
+    void copCarCrime(Vehicle& car, int damageType, int damage, uint32_t sourceCar);
+    void jackCrime(const Vehicle& car);
     PlayerTargeting targeting;               // the player's auto-aim (cPlayerSensorCone, targeting.cpp)
     Projectiles projectiles;                 // grenades, molotovs, flashbangs, mines and rockets (projectiles.cpp)
     int weaponCycle = 0;                     // input: -1 previous / +1 next weapon this frame
@@ -130,6 +140,7 @@ public:
         int16_t heading = 0;            // attached heading (relative to the car)
         int16_t vel[3] = {0, 0, 0};     // cOneShotAnimationTask::AddConstantVelocity, per frame
         int32_t end[3] = {0, 0, 0};     // get out: where the ped ends up (car space)
+        bool jacked = false;            // the jack crime has been registered (cNewGetInVehicle::HandleJackCrime)
     } task;
     void startEnter(int target = -1);
     void startExit();

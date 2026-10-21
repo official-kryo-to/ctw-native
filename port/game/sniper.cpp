@@ -121,6 +121,7 @@ void Sniper_CreateBullet(Game& g, Weapon& w) {
     for (Pedestrians::Ped& p : g.peds.peds) {
         if (p.vehicle || p.deadFrames >= 0 || p.body.dead || !under(p.body.pos, Player::kRadius)) continue;
         g.peds.bulletHit(g, p, info.damage, dir, info.effect, g.player.pos, 1);
+        g.pedCrime(p, 1);
         return;
     }
     for (size_t i = 0; i < g.cars.size(); ++i) {
