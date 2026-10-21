@@ -509,6 +509,10 @@ void PropDynamics::update(Game& g) {
         }
         if(l.body.active()) {
             l.body.process(g.collision);
+            if (l.body.takeEnteredWater()) {   // cDynamicProp::OnEnteringWater: a type-9 splash where it went in
+                const int32_t still[3] = {0, 0, 0};
+                g.addWaterSplash(l.body.pos, 9, still, l.body.mass_);
+            }
             if(l.sleepCounter) --l.sleepCounter;
             if(!l.lampTimer && !l.sleepCounter && l.body.contact() && std::abs(l.body.vel[0]) <= 0x3FF &&
                std::abs(l.body.vel[1]) <= 0x3FF && std::abs(l.body.vel[2]) < 0x2000) l.body.setToPhysics(false);

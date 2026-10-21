@@ -3,6 +3,7 @@
 // See LICENSE in the repository root.
 #include "particles.h"
 #include "trails.h"
+#include <array>
 #include "random.h"
 #include "gfx/assets.h"
 #include "world/worldrenderer.h"
@@ -17,33 +18,99 @@ Particles& TheParticles() { return g_particles; }
 static uint32_t randNC(uint32_t n) { return Rand32NonCritical(n); }
 static int fastsin(int a) { return (int)(sinf((float)a * 9.587378e-05f) * 4096.f); }
 
-// cParticleEmitterWaterSplash, type 1 (CWaterCannon's nozzle spray).
-WaterSplashEmitter::WaterSplashEmitter(const int32_t at[3], const int32_t velocity[3], uint16_t colour)
-    : Emitter(at,20,0x4000,15,false) {
-    pos[2]+=0x199;
-    tmpl_.colour=colour; tmpl_.life=80; tmpl_.alpha=30;
-    tmpl_.size=tmpl_.grow=(int16_t)(((0x999/2)*0x199)>>12);
-    tmpl_.angle=(uint16_t)((Rand16NonCritical(0x2000)-0x39)&0xFF);
-    direction(velocity);
+int WaterSplashEmitter::alive_count_ = 0;
+
+// cParticleEmitterWaterSplash::cParticleEmitterWaterSplash
+WaterSplashEmitter::WaterSplashEmitter(const int32_t at[3], const int16_t dir[3], int16_t scale, int type, bool emit,
+                                       uint16_t colour)
+    : Emitter(at, 20, 0x4000, 15, false), type_((uint8_t)type), emit_(emit) {
+    pos[2] += 0x199;
+    ++alive_count_;
+    tmpl_.colour = colour;
+    tmpl_.alpha = 31;   // the base emitter's standard data
+    tmpl_.life = 40;    // SetStandardDataLifeTime(0x28)
+    if (type == 0) {
+        sprite_ = 14;
+        tmpl_.size = (int16_t)((uint32_t)(scale * 0xB33) >> 12);
+        tmpl_.grow = (int16_t)((uint32_t)(scale * 0x199) >> 12);
+        tmpl_.alpha = 15; tmpl_.alphaStep = 0;
+    } else if (type == 1) {
+        tmpl_.life = 80;
+        sprite_ = 15;
+        period_ = 5;
+        for (int k = 0; k < 3; ++k) {
+            int32_t v = (dir[k] * 0x13330) >> 16;
+            if (k == 2 && emit) v += 0x800;
+            tmpl_.v[k] = (int16_t)((uint32_t)(inv_ * v) >> 12);
+        }
+        scale = (int16_t)(scale >> 1);
+        tmpl_.size = (int16_t)((uint32_t)(scale * 0x199) >> 12);
+        tmpl_.grow = tmpl_.size;
+        tmpl_.alpha = 30;
+        if (emit) tmpl_.alphaStep = -1;
+        tmpl_.angle = (uint16_t)((Rand16NonCritical(0x2000) - 0x39) & 0xFF);
+    } else if (type == 2) {
+        period_ = 3;
+        sprite_ = 8;
+        tmpl_.size = (int16_t)((uint32_t)(scale * 0x666) >> 12);
+        tmpl_.alphaStep = 0;
+        tmpl_.grow = (int16_t)((uint32_t)(scale * 0x7A) >> 12);
+    }
     addParticle();
+    dying = true;
 }
 
-void WaterSplashEmitter::direction(const int32_t velocity[3]) {
-    for(int k=0;k<3;++k) {
-        int32_t v=(int16_t)(((int32_t)(int16_t)velocity[k]*0x1333)>>12);
-        if(k==2) v+=0x800;
-        tmpl_.v[k]=(int16_t)(((int64_t)v*inv_)>>12);
+WaterSplashEmitter::WaterSplashEmitter(const int32_t at[3], const int32_t velocity[3], uint16_t colour)
+    : WaterSplashEmitter(at, std::array<int16_t, 3>{(int16_t)velocity[0], (int16_t)velocity[1], (int16_t)velocity[2]}.data(),
+                         (int16_t)0x999, 1, false, colour) {
+    dying = false;   // CWaterCannon::Update_NewInput keeps feeding it
+}
+
+void WaterSplashEmitter::direction(const int32_t velocity[3]) {   // cParticleEmitterWaterSplash::SetDir
+    for (int k = 0; k < 3; ++k) {
+        int32_t v = (int16_t)(((int32_t)(int16_t)velocity[k] * 0x1333) >> 12);
+        if (k == 2 && emit_) v += 0x800;
+        tmpl_.v[k] = (int16_t)((uint32_t)(inv_ * v) >> 12);
     }
 }
 
-void WaterSplashEmitter::updateParticle(Particle& p) {
-    for(int k=0;k<3;++k) p.v[k]=(int16_t)(((int32_t)p.v[k]*0xE66)>>12);
-    p.v[2]=(int16_t)(p.v[2]-((0x10B*inv_)>>12));
-    if(p.life<=9 && p.alpha>=6) p.alpha-=5;
-    else if(!(frame_&1) && p.alpha) --p.alpha;
-    for(int k=0;k<3;++k) if(p.p[k] < -0x5000 || p.p[k]>0x5000) {
-        p.life=0; p.active=0; --alive_; return;
+void WaterSplashEmitter::addParticle() {   // cParticleEmitterWaterSplash::AddParticle
+    Particle p = tmpl_;
+    if (type_ == 2) {   // a plume: 50 steps at alpha 8, a random angle, black one time in two
+        p.life = 0x32;
+        p.angle = (uint16_t)(Rand32NonCritical(0x16C000) - 0x6000);
+        if (Rand16NonCritical(2) == 0) p.colour = 0;
+        p.alpha = 8;
     }
+    addFromData(p);
+}
+
+void WaterSplashEmitter::process(uint32_t hours) {   // cParticleEmitterWaterSplash::Process
+    if (emit_) {
+        if ((type_ == 1 || type_ == 2) && period_ && counter_ % period_ == 0) {
+            if (alive_ >= 4) emit_ = false;
+            counter_ = 1;
+            addParticle();
+        }
+        ++counter_;
+    }
+    Emitter::process(hours);
+}
+
+void WaterSplashEmitter::updateParticle(Particle& p) {   // cParticleEmitterWaterSplash::UpdateParticle
+    if (type_ == 0) {
+        p.grow = (int16_t)((uint32_t)(p.grow * 0xCCC) >> 12);
+        if (!(frame_ & 3)) --p.alpha;
+    } else if (type_ == 2) {
+        if (!(frame_ & 3)) --p.alpha;
+    } else {
+        for (int k = 0; k < 3; ++k) p.v[k] = (int16_t)((uint32_t)(p.v[k] * 0xE66) >> 12);
+        p.v[2] = (int16_t)(p.v[2] - (int32_t)((uint32_t)(inv_ * 0x10B) >> 12));
+        if (p.life <= 9 && (int8_t)p.alpha >= 6) p.alpha -= 5;
+        else if (!(frame_ & 1)) --p.alpha;
+    }
+    // out of range: the particle ends (its life is zeroed before the base update, so it goes next loop)
+    for (int k = 0; k < 3; ++k) if (p.p[k] < -0x5000 || p.p[k] > 0x5000) { p.life = 0; return; }
     Emitter::updateParticle(p);
 }
 

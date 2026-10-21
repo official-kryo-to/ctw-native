@@ -54,17 +54,29 @@ protected:
     int32_t smokeOrigin_[3]{};
 };
 
-// cParticleEmitterWaterSplash, type 1: the horizontal spray at a water stream's source.
+// cParticleEmitterWaterSplash (20 particles, range 4, 0.1 above pos, flat). Type 0: a ring of sprite 14 that
+// spreads (0.7 x scale wide, growing 0.1 x scale slowing by 0.8 a frame) and fades every fourth frame; type 1:
+// droplets of sprite 15 thrown along 1.2 x dir (0.5 more upwards when "emit" is set), falling and damped, for 80
+// steps; type 2: plumes of sprite 8, 0.4 x scale wide, for 50 steps at alpha 8. With "emit", types 1 and 2 add a
+// particle every fourth / second frame until four are alive. A CWaterCannon's
+// nozzle spray is a type-1 emitter with scale 0.6 that the cannon feeds itself.
 class WaterSplashEmitter : public Emitter {
 public:
-    WaterSplashEmitter(const int32_t pos[3], const int32_t velocity[3], uint16_t colour);
-    void direction(const int32_t velocity[3]);
-    void addParticle() { addFromData(tmpl_); }
+    WaterSplashEmitter(const int32_t pos[3], const int16_t dir[3], int16_t scale, int type, bool emit, uint16_t colour);
+    WaterSplashEmitter(const int32_t pos[3], const int32_t velocity[3], uint16_t colour);   // the cannon's spray
+    ~WaterSplashEmitter() override { --alive_count_; }
+    void direction(const int32_t velocity[3]);   // SetDir
+    void addParticle();                          // AddParticle
     void tick(uint32_t frame) { frame_=frame; Emitter::process(); }
+    void process(uint32_t hours = 12u << 12) override;
+    static int aliveCount() { return alive_count_; }   // Explosion::sNumWaterSplashExplosions
 protected:
     void updateParticle(Particle& particle) override;
 private:
     Particle tmpl_{};
+    uint8_t type_ = 1, period_ = 0, counter_ = 0;   // +0x10A, +0x10C, +0x10D
+    bool emit_ = false;                               // +0x10B
+    static int alive_count_;
 };
 
 // cParticleEmitterSmoke: range 20, sprite 1, billboard; colours by vehicle damage 0 light .. 3 black

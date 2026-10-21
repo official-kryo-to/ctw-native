@@ -223,7 +223,7 @@ void RigidBody::process(Collision& col) {
     if(!physics_) return;
     recalcKinematics();
     collided_=frozen_=false;
-    if(col.ok()) { fullCollision(&col,true); fullSprings(&col); }
+    if(col.ok() && !ignoreStatics_) { fullCollision(&col,true); fullSprings(&col); }
     else integrateStep(0x1000);
 }
 
@@ -311,7 +311,10 @@ void RigidBody::fullCollision(Collision* col, bool) {   // cPhysicalIntegrator::
         int64_t tt = (iters <= 3 && best <= 3) ? 4 : best;
         int32_t step = (int32_t)((tt * frac) >> 12);
         integrateStep(step);
-        for (const Rec& rc : recs) calcImpactEnv(rc, iters > 3 || best > 3);
+        for (const Rec& rc : recs) {
+            calcImpactEnv(rc, iters > 3 || best > 3);
+            if (rc.surface == 2 && !inWater_) inWater_ = enteredWater_ = ignoreStatics_ = true;   // SetInWater
+        }
         --iters;
         frac -= step;
         if (iters == 0) {

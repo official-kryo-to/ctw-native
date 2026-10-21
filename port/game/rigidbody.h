@@ -29,6 +29,10 @@ public:
     void setToPhysics(bool active);
     void setLocalCG(const int32_t centre[3]);
     bool active() const { return physics_; }
+    // cDynamicProp::OnCollision: a contact with water (surface 2) puts it in the water once; OnEnteringWater then
+    // clears its collisions with the static world (ClearCollideAgainstFlags(0xF00)) so it sinks
+    bool takeEnteredWater() { const bool e = enteredWater_; enteredWater_ = false; return e; }
+    bool inWater() const { return inWater_; }
     bool contact() const { return collided_; }
     int32_t pos[3]{}, vel[3]{}, angVel[3]{};
     int32_t mass_ = 0, invMass_ = 0;
@@ -47,5 +51,6 @@ private:
     int32_t sphereFirst_[3]{}, sphereStep_[3]{}, sphereR_ = 2048;
     int sphereCount_ = 2;
     bool physics_ = false, planar_ = false, collided_ = false, frozen_ = false;
+    bool inWater_ = false, enteredWater_ = false, ignoreStatics_ = false;
     friend struct PropDynamicsTestAccess;
 };

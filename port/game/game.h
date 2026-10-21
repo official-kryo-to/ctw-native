@@ -153,6 +153,10 @@ public:
     // Explosion::AddExplosion for type 11: a cExplosionHotDog, a gas jet along the (normalised) velocity, or
     // straight up when the velocity is tiny, that bursts after about two seconds
     void addHotDogExplosion(const int32_t pos[3], const int32_t velocity[3]);
+    // Explosion::AddExplosion for types 8 and 9: a cExplosionWaterSplashPed. sourceMass: the mass of the physical
+    // entity that fell in (scale 4 x mass, at most 3), or -1 for none (scale 2 for type 8, 1 for type 9). Nothing
+    // happens while ten splash emitters are alive.
+    void addWaterSplash(const int32_t pos[3], int type, const int32_t velocity[3], int32_t sourceMass);
     void enableExplosionRadiusCheck(bool enable) { explosionRadiusCheck_ = enable; } // native script switch; off at Reset
     struct FreeCamera { bool on = false; WorldCamera cam; } freeCam;   // mods: replaces the game camera
     bool uiPaused = false;               // a full-screen app (the radio) has paused the game
@@ -210,6 +214,7 @@ private:
     void affectBlast(const struct ExplosionBlast& blast);   // cBaseExplosion::AffectEntities
     void processBigExplosion(Explosion& explosion);         // cExplosionBigVehicle::Process
     void processHotDogExplosion(Explosion& explosion);      // cExplosionHotDog::Process
+    void processSplashExplosion(Explosion& explosion);      // cExplosionWaterSplashPed::Process
     unsigned explosionParticleCount(const int32_t pos[3]) const;
     void finishShortFrame();             // the effects, sound and plugin updates of a frame that ends early
     void processTimeCycle();

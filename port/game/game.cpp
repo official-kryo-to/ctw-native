@@ -672,10 +672,11 @@ void Game::processVehicleDeaths() {
     // newborn explosions until the next tick; never retain a vector reference across a callback.
     const size_t count = explosions_.size();
     for (size_t i = 0; i < count; ++i) {
-        if ((explosions_[i].type == 6 || explosions_[i].type == 7 || explosions_[i].type == 11) &&
-            !explosions_[i].fired) {
+        const int kind = explosions_[i].type;
+        if ((kind == 6 || kind == 7 || kind == 8 || kind == 9 || kind == 11) && !explosions_[i].fired) {
             Explosion special = explosions_[i];   // its blast may queue more explosions
             if (special.type == 11) processHotDogExplosion(special);
+            else if (special.type == 8 || special.type == 9) processSplashExplosion(special);
             else processBigExplosion(special);
             explosions_[i] = special;
             continue;
@@ -744,6 +745,50 @@ void Game::processBigExplosion(Explosion& e) {   // cExplosionBigVehicle::Proces
         }
         TheParticles().add<ExplosionCloud>(e.pos, 6, (unsigned)e.state, e.scale, dir[0], dir[1], count);   // the ring
         TheParticles().add<ExplosionCloud>(e.pos, 6, 0u, e.scale, dir[0], dir[1], count);   // the main cloud
+    } else {
+        if (e.counter >= 0x15) { e.fired = true; e.delay = 11; }   // Destroy
+        return;
+    }
+    ++e.state;
+    e.counter = 0;
+}
+
+void Game::addWaterSplash(const int32_t at[3], int type, const int32_t velocity[3], int32_t sourceMass) {
+    if (WaterSplashEmitter::aliveCount() > 9) return;   // sNumWaterSplashExplosions
+    Explosion e{{at[0],at[1],at[2]},0,type,false,0x1000};
+    // the splash's direction: the faller's velocity, a quarter of it (and upwards) once normalised when it is fast
+    int32_t d[3] = {0, 0, 0};
+    if (sourceMass >= 0) {
+        int32_t v[3] = {velocity[0], velocity[1], velocity[2]};
+        int32_t z = v[2];
+        if ((int64_t)v[0] * v[0] + (int64_t)v[1] * v[1] + (int64_t)v[2] * v[2] > 0x28000) {
+            Normalise3(v);
+            v[0] >>= 2; v[1] >>= 2;
+            z = -(v[2] >> 2);
+        }
+        d[0] = v[0]; d[1] = v[1]; d[2] = z >> 1;
+        e.scale = (int16_t)std::min(sourceMass * 4, 0x3000);
+    } else e.scale = type == 8 ? 0x2000 : 0x1000;
+    for (int k = 0; k < 3; ++k) e.dir[k] = (int16_t)d[k];
+    queueExplosion(e);
+}
+
+void Game::processSplashExplosion(Explosion& e) {   // cExplosionWaterSplashPed::Process
+    e.counter += 2;
+    if (e.state == 0) {   // the splash sound, louder with the scale
+        if (e.counter < 3) return;
+        const int volume = std::min((int)(((int64_t)e.scale * 100) >> 12) * 100, 0x7F);
+        TheSound().scriptSfx(e.pos, 0x313, volume, 0x6A4);
+    } else if (e.state == 1) {   // droplets thrown along the fall
+        TheParticles().add<WaterSplashEmitter>(e.pos, e.dir, e.scale, 1, true, (uint16_t)0x7F39);
+    } else if (e.state == 2) {   // the ring, the plumes and for a big splash a column of droplets
+        if (e.counter < 3) return;
+        TheParticles().add<WaterSplashEmitter>(e.pos, e.dir, e.scale, 0, false, (uint16_t)0x7F39);
+        TheParticles().add<WaterSplashEmitter>(e.pos, e.dir, e.scale, 2, true, (uint16_t)0x7F39);
+        if (e.scale >= 0x1000) {
+            const int16_t up[3] = {0, 0, (int16_t)(e.dir[2] << 3)};
+            TheParticles().add<WaterSplashEmitter>(e.pos, up, (int16_t)(e.scale >> 1), 1, true, (uint16_t)0x7F39);
+        }
     } else {
         if (e.counter >= 0x15) { e.fired = true; e.delay = 11; }   // Destroy
         return;

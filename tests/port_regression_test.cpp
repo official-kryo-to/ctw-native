@@ -1145,6 +1145,22 @@ static void explosionsAndShake() {
           "the big-vehicle ring rises at the reference 0.65 units a frame");
     for (int i = 0; i < 11 && GameTestAccess::explosions(bus); ++i) GameTestAccess::processExplosions(bus);
     check(!GameTestAccess::explosions(bus), "the big-vehicle explosion destroys itself after its final wait");
+
+    // cExplosionWaterSplashPed: a prop of mass 0.25 falling in: the sound, droplets, then ring, plumes and column
+    Game splash; ParticlesTestAccess::clear();
+    const int32_t into[3] = {0, 0, 0};
+    splash.addWaterSplash(into, 9, still, 0x400);
+    check(GameTestAccess::explosions(splash) == 1 && GameTestAccess::explosionType(splash) == 9,
+          "a prop entering the water queues a type-9 splash");
+    GameTestAccess::processExplosions(splash); GameTestAccess::processExplosions(splash);
+    check(ParticlesTestAccess::count() == 0 && GameTestAccess::explosionState(splash) == 1,
+          "the splash first plays its sound on the second Process");
+    GameTestAccess::processExplosions(splash);
+    check(ParticlesTestAccess::count() == 1 && dynamic_cast<const WaterSplashEmitter*>(ParticlesTestAccess::at(0)),
+          "the splash throws its droplets next");
+    GameTestAccess::processExplosions(splash); GameTestAccess::processExplosions(splash);
+    check(ParticlesTestAccess::count() == 4, "a splash of scale 1 adds its ring, plumes and a column of droplets");
+    ParticlesTestAccess::clear();
 }
 
 static void fireAndCamera() {

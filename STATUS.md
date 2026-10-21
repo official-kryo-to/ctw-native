@@ -61,7 +61,9 @@ compatibility with the original.
   their fixed base and emit a water stream, nozzle spray and positional looping water sound. The jet is a solid
   1 x 1 x 10 column (cFountainStream::OnCollision): people in it are knocked down and shoved, vehicles are lifted
   by eight times its velocity and loose props by four, and it puts out fires it reaches (CWaterCannon::PutOutFires,
-  saving a burning car); park fountains behave the same way. Partial blast
+  saving a burning car); park fountains behave the same way. Street furniture knocked into the water splashes
+  (cExplosionWaterSplashPed with all three cParticleEmitterWaterSplash types: droplets, a spreading ring, plumes
+  and for big splashes a column) and sinks; the water cannon's nozzle spray no longer gets an invented upward push. Partial blast
   damage retains standing models and collisions; lethal health can smash anchored props without uprooting them.
 - **Traffic:** parked cars and cars driving the roads, stopping for pedestrians in their path. Generated traffic
   owns pedestrian drivers; they animate out when the player takes the seat and are released on destruction.
@@ -133,7 +135,7 @@ compatibility with the original.
   adaptation pending the native entity scheduler. Prop health resets at the port's existing cleanup distance,
   not the native sector/entity lifetime. Other specialised explosions, and the original shared particle-pool capacity/update ordering remain
   incomplete. Secondary smoke currently uses one emitter per burst.
-- Other debris, buoyancy and splashes. Gate slats retain the original zero-height
+- Buoyancy, people and vehicles going into water (drowning, sinking cars) and other debris. Gate slats retain the original zero-height
   floor test; this does not fix the remaining waterfront mesh/collision clipping reports.
   Specialised prop smash branches, the fire truck's water cannon, the shared vehicle-fragment pool,
   complete carjacking reactions and specialised traffic/task branches remain incomplete.
