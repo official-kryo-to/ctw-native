@@ -54,6 +54,7 @@ int main(int argc, char** argv) {
     std::vector<XC> extraCars;
     float hour = -1;
     int forceWeather = -1;
+    int forceWanted = -1;
     const char* giveWeapons = nullptr;
     int fireFrom = -1, throwFrom = -1, throwTo = -1;
     for (int i = 1; i < argc; ++i) {
@@ -67,7 +68,7 @@ int main(int argc, char** argv) {
         else if (strcmp(option, "--data") && strcmp(option, "--mods") && strcmp(option, "--shot") &&
                  strcmp(option, "--frames") && strcmp(option, "--keys") && strcmp(option, "--export-textures") && strcmp(option, "--ui") && strcmp(option, "--state") &&
                  strcmp(option, "--enter") && strcmp(option, "--handbrake") && strcmp(option, "--burnout") && strcmp(option, "--hour") &&
-                 strcmp(option, "--weather") && strcmp(option, "--weapon") && strcmp(option, "--fire") && strcmp(option, "--throw") &&
+                 strcmp(option, "--weather") && strcmp(option, "--weapon") && strcmp(option, "--fire") && strcmp(option, "--throw") && strcmp(option, "--wanted") &&
                  strcmp(option, "--shot-every")) {
             fprintf(stderr, "Unknown option: %s\n", option);
             return 4;
@@ -111,6 +112,7 @@ int main(int argc, char** argv) {
             extraCars.push_back({(float)atof(argv[i + 2]), (float)atof(argv[i + 3]), (float)atof(argv[i + 4]), atoi(argv[i + 1])});
         if (!strcmp(argv[i], "--hour")) hour = (float)atof(argv[i + 1]);   // testing: start at this time of day
         if (!strcmp(argv[i], "--weather")) forceWeather = atoi(argv[i + 1]);   // testing: ForceWeather(0..7)
+        if (!strcmp(argv[i], "--wanted")) forceWanted = atoi(argv[i + 1]);     // testing: SetLevel(0..6)
         if (!strcmp(argv[i], "--weapon")) giveWeapons = argv[i + 1];   // testing: give these weapon types (comma-separated)
         if (!strcmp(argv[i], "--throw")) {   // testing: hold the throw button over frames A:B
             if (sscanf(argv[i + 1], "%d:%d", &throwFrom, &throwTo) != 2) throwTo = throwFrom + 1;
@@ -160,6 +162,7 @@ int main(int argc, char** argv) {
         game.world.timeCycle().evaluate();
     }
     if (forceWeather >= 0) game.weather.force(game, forceWeather & 7);
+    if (forceWanted >= 0) game.wanted.setLevel(forceWanted, false, false);
     for (const char* p = giveWeapons; p && *p;) {
         const int type = atoi(p);
         game.playerWeapons.give(type, Weapons_DefaultAmmo(type), true);
