@@ -715,6 +715,7 @@ void Pedestrians::bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], i
     (void)effect;   // ApplyDamageResponse for the weapon's effect (+0x30) is not ported yet
     if (p.vehicle || p.deadFrames >= 0 || p.body.dead) return;   // CanBeHit: alive, not in a closed vehicle
     g.stats.incBulletsThatHit();   // the player's bullets (types 1 and 2)
+    TheSound().bulletHitPed(g, p.uid);   // cPed::Damage: cAudioManager::AddBulletHitPed
     const int d = damage && 100 * damage < 100 ? 1 : 100 * damage / 100;   // FixDamageForArmour (cPed::Reset: 100)
     const bool killed = p.body.takeDamage(d);
     g.addBlood(p.body.pos, bloodDrops(type, d, effect));

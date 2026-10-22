@@ -78,7 +78,9 @@ public:
     // units a second along direction (one time in eight with a hop of up to 14 units a second). True when it started.
     bool knockedOff(const int32_t direction[3]);
     bool reacting() const { return reaction_ >= 0; }
-    void actReaction(const PedSprites* sprites, bool vehicleAbove = false);
+    // true while a thrown ped (state 7) is on the ground past its held frame: cAnimation::HandleFrameResets calls
+    // cAudioManager::PedThrownBackSfx then
+    bool actReaction(const PedSprites* sprites, bool vehicleAbove = false);
     void resetReaction();
     int health = 127, armour = 0; // cPed::Reset / cPlayer::Reset; each bar has a maximum of 127
     // the current weapon as cPed::AnimateWalkRunCycleWeapons sees it (cWeapon Type / +0xC state / +0x10 flags)

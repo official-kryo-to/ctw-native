@@ -1272,7 +1272,8 @@ void Game::tick() {
     // Prepare movement before dynamic contacts; the shared integration below advances it once.
     if (!busy) player.act(in, &pedSprites);
     else if (player.dead) player.stepOneShot(&pedSprites);
-    else if (player.reacting()) player.actReaction(&pedSprites,Pedestrians::vehicleAbove(*this,player));
+    else if (player.reacting() && player.actReaction(&pedSprites,Pedestrians::vehicleAbove(*this,player)))
+        TheSound().pedThrownBack(player.pos);   // cAnimation::HandleFrameResets
     traffic.update(*this);
     for (Vehicle& c : cars) c.act(traffic.controls(c.uid), false, &collision);
     const bool wasDead = player.dead;

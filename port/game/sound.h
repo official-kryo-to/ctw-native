@@ -36,6 +36,10 @@ public:
     void playResident(int sample, int volume);                     // cAudioManager::PlaySfx: not positional
     void playHud(int sample, int volume);                          // resident HUD channel, independent of world pause
     void conversation(Game& game, uint32_t uid);                    // native comment type 5, on-foot civilian speech
+    void bulletHitPed(Game& game, uint32_t uid);                    // cAudioManager::AddBulletHitPed: a pain comment
+    // cAudioManager::PedThrownBackSfx: the player lands after being thrown (event 0x82, volume 0x1E, radius 200),
+    // at most every 55 frames
+    void pedThrownBack(const int32_t pos[3]);
     void waterStream(uint32_t id, const int32_t pos[3], int volume); // cannon event 0x6C, refreshed each tick
     void playerEvent(int event, int volume, int radius);           // AddSoundEvent on the player ped (weapons)
     void scriptSfx(const int32_t pos[3], int sample, int volume, int radius);   // cAudioManager::PlayScriptSfx
@@ -83,6 +87,9 @@ private:
     std::map<uint32_t,CommentHistory> commentHistory_;
     int smallCommentCursor_=0,largeCommentCursor_=0;
     bool conversationAt(Game& game,uint32_t uid,uint32_t now);
+    bool commentAt(Game& game,uint32_t uid,int type,int volume,int radius,uint32_t now);   // cPedComment::Add
+    uint8_t bulletHitFrames_=0;      // cAudioManager +0x30A9
+    uint8_t thrownBackFrames_=0;     // +0x30C8
     void updatePedComments(Game& game);
     uint32_t ticks_ = 0;
     uint32_t lastCollision_ = 0;

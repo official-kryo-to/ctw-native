@@ -484,6 +484,13 @@ void Sound::playerEvent(int event, int volume, int radius) {
     if (ok()) addEvent(ped_, event, volume, radius, -1);
 }
 
+void Sound::pedThrownBack(const int32_t pos[3]) {
+    if (!ok() || thrownBackFrames_) return;
+    for (int k = 0; k < 3; ++k) ped_.pos[k] = pos[k];
+    thrownBackFrames_ = 0x37;
+    addEvent(ped_, 0x82, 0x1E, 0xC8, -1);
+}
+
 void Sound::playerPed(Game& g) {
     const Player& player = g.player;
     for (int k = 0; k < 3; ++k) ped_.pos[k] = player.pos[k];
@@ -587,6 +594,8 @@ void Sound::update(Game& g) {
     if (!ok()) return;
     updatePedComments(g);
     ++ticks_;
+    if (bulletHitFrames_) --bulletHitFrames_;   // the per-frame countdowns of cAudioManager::DoProcess
+    if (thrownBackFrames_) --thrownBackFrames_;
     for(auto it=water_.begin();it!=water_.end();) {
         if(!it->second.seen) { stopSlots(it->second); it=water_.erase(it); continue; }
         processEntity(g,it->second,false);

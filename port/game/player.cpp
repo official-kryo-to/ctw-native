@@ -356,16 +356,27 @@ void Player::reactionPose(int state) {
     playOneShot(upper, upper + 1, false);
 }
 
-void Player::actReaction(const PedSprites* sprites, bool vehicleAbove) {
-    if (!reacting()) return;
+bool Player::actReaction(const PedSprites* sprites, bool vehicleAbove) {
+    if (!reacting()) return false;
     ++reactionTicks_;
     if (reactionAge_ < UINT32_MAX) ++reactionAge_;
     if ((reaction_ == 5 || reaction_ == 1) && recoveryAge_ < UINT32_MAX) ++recoveryAge_;
     const bool done = stepOneShot(sprites);
+    // cAnimation::HandleFrameResets, state 7: while the thrown ped is in the air its sprite does not get past frame
+    // 7 (thrown forwards, 0x2C: back four frames) or 5 (backwards, 0x2E: held there); once it is down again the
+    // landing sound plays
+    bool landed = false;
+    if (reaction_ == 7) {
+        const int last = reactionForward_ ? 0x700 : 0x500;
+        if (frameUpper_ > last) {
+            if (!onGround_) frameUpper_ = reactionForward_ ? frameUpper_ - 0x400 : 0x500;
+            else landed = true;
+        }
+    }
     if ((reaction_ == 6 || reaction_ == 7 || reaction_ == 14) && done) reactionPose(2);   // NextState
     else if (reaction_ == 2 && reactionTicks_ >= 30 && !dead && onGround_ && vel[2] <= 0 && !vehicleAbove) reactionPose(5);
     else if (reaction_ == 5 && done) reactionPose(dead ? 2 : 1);
-    else if (reaction_ == 1 && done) { if (dead) reactionPose(2); else { resetReaction(); return; } }
+    else if (reaction_ == 1 && done) { if (dead) reactionPose(2); else { resetReaction(); return landed; } }
     // cAnimation::ApplyPhysics: low fallen sprites use flat drag. Airborne
     // impacts use quadratic drag (4 in the air, 40 on the ground).
     const int64_t v2 = (int64_t)vel[0]*vel[0] + (int64_t)vel[1]*vel[1];
@@ -378,6 +389,7 @@ void Player::actReaction(const PedSprites* sprites, bool vehicleAbove) {
         const int64_t k = std::clamp((((s * 17) >> 9) * (onGround_ ? 40 : 4)) >> 12, (int64_t)0x28, (int64_t)0xFAE);
         for (int i = 0; i < 2; ++i) vel[i] = mulq(vel[i], 4096 - k);
     }
+    return landed;
 }
 
 void Player::resetReaction() {

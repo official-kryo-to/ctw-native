@@ -13,12 +13,25 @@ void Sound::conversation(Game& game,uint32_t uid) {
 }
 
 bool Sound::conversationAt(Game& game,uint32_t uid,uint32_t now) {
-    // Comment-type-5 branches of 0x6b40b8 / 0x6b45a8. Other comment remapping/eligibility is not implemented here.
-    if(!ok() || !commentTables_.loaded)return false;
+    return commentAt(game,uid,5,70,600,now);
+}
+
+void Sound::bulletHitPed(Game& game,uint32_t uid) {
+    // cAudioManager::AddBulletHitPed: at most one pain comment every 5 to 34 frames (+0x30A9), comment type 0x19 at
+    // volume 0x50, radius 900 (heard within 30 units)
+    if(!ok() || bulletHitFrames_)return;
+    bulletHitFrames_=(uint8_t)(Rand32NonCritical(30)+5);
+    commentAt(game,uid,0x19,0x50,0x384,(uint32_t)(OS_TimeAccurate()*1000.0));
+}
+
+bool Sound::commentAt(Game& game,uint32_t uid,int type,int volume,int radius,uint32_t now) {
+    // cPedComment::Add (0x6b40b8) and GetComment (0x6b45a8) for a ped. Types 3 and 0x15 (remapped by ethnicity and
+    // refused by cops and some peds) and 0x16 (only near the player) are not handled here.
+    if(!ok() || !commentTables_.loaded || type<0 || type>=26 || type==3 || type==0x15 || type==0x16)return false;
     const Pedestrians::Ped* speaker=nullptr;
     for(const auto& ped:game.peds.peds)if(ped.uid==uid){speaker=&ped;break;}
-    if(!speaker || speaker->body.dead || speaker->body.hidden || speaker->vehicle || (speaker->type|4)==6)return false;
-    constexpr int type=5;
+    if(!speaker || speaker->body.dead || speaker->body.hidden || (speaker->type|4)==6)return false;
+    if(speaker->vehicle && type!=7 && type!=8)return false;   // only types 7 and 8 are said in a vehicle
     auto& timing=commentTables_.timing[type];
     const auto& range=commentTables_.samples[speaker->body.bodySet==0][type];
     auto& history=commentHistory_[uid];
@@ -33,7 +46,7 @@ bool Sound::conversationAt(Game& game,uint32_t uid,uint32_t now) {
     for(auto& candidate:comments_)if(!candidate.active){voice=&candidate;break;}
     if(!voice)return false;
     auto& entity=people_[uid];std::copy_n(speaker->body.pos,3,entity.pos);
-    const int slot=addEvent(entity,60,70,600,sample); // assembly at 0x6b42a0 / 0x6b42f4
+    const int slot=addEvent(entity,60,volume,radius,sample); // assembly at 0x6b42a0 / 0x6b42f4
     if(slot<0)return false;
     *voice={true,uid,slot,sample,(uint64_t)now+2000};
     timing.nextAllowed=(uint64_t)now+timing.peerGap+Rand32NonCritical(timing.randomGap);
