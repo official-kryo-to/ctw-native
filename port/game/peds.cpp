@@ -688,6 +688,8 @@ void Pedestrians::meleeHit(Game& g, Ped& p, int damage, int type, const int32_t 
     if (p.vehicle || p.deadFrames >= 0 || p.body.dead) return;   // CanBeHit: alive, not in a closed vehicle
     const int d = damage && 100 * damage < 100 ? 1 : 100 * damage / 100;   // FixDamageForArmour (cPed::Reset: 100)
     const bool killed = p.body.takeDamage(d);
+    // cMeleeBasedWeapon::HitStuffHelper: the victim grunts (cAudioManager::DoFightGrunt(ped, false, false))
+    TheSound().fightGrunt(p.uid, p.body.pos, p.body.bodySet != 0, false, false);
     // the hit animation (+0xEB: 2 / 16 or 102 / 116; the animation is not ported) comes before type 0's blood
     if (type == 0 && effect != 0x1D) Rand16Critical(2);
     g.addBlood(p.body.pos, bloodDrops(type, d, effect));

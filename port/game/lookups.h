@@ -42,6 +42,8 @@ struct SoundTables {
     HornStep hornPatterns[5][4]{};  // cHorn: gHornPatterns
     uint8_t hornFade[4]{};          // cHorn::LoopBeepFadeVal
     bool horns = false;             // the tables have them (an older CTWSND2 file does not)
+    uint16_t grunts[2][10]{};       // cAudioManager::DoFightGrunt: men's (body set 1), women's samples
+    bool hasGrunts = false;         // version 4
     bool load(const std::string& path);
 };
 

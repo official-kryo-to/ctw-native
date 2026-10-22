@@ -534,6 +534,26 @@ void Sound::soundHorn(Game& g, const Vehicle& v) {   // cAudioManager::SoundHorn
     }
 }
 
+void Sound::fightGrunt(uint32_t uid, const int32_t pos[3], bool male, bool force, bool loud) {
+    if (!ok() || !tables_.hasGrunts) return;   // cAudioManager::DoFightGrunt
+    const uint64_t now = (uint64_t)(OS_TimeAccurate() * 1000.0);
+    if (nextGruntMs_ >= now && !force) return;
+    nextGruntMs_ = now + Rand32NonCritical(1000) + 500;
+    int i = (int)Rand32NonCritical(10);
+    if (i == lastGrunt_) i = i + 1 > 9 ? 0 : i + 1;
+    lastGrunt_ = (int16_t)i;
+    const int sample = tables_.grunts[male ? 0 : 1][i];
+    const int volume = loud ? 0x7F : (int)Rand32NonCritical(80) + 30;
+    Entity& e = people_[uid];
+    for (int k = 0; k < 3; ++k) e.pos[k] = pos[k];
+    e.seen = true;
+    addEvent(e, 0x71, volume, 0x190, sample);
+}
+
+void Sound::startBurnout(const Vehicle& v) {   // cAudioManager::StartBurnout
+    if (ok()) addEvent(ents_[v.uid], 0x93, 0x50, 0x12C, -1);
+}
+
 void Sound::processHorns(Game& g) {   // cHorn::Process
     for (HornChannel& h : horns_) {
         if (h.step == -1) continue;
@@ -583,6 +603,12 @@ void Sound::update(Game& g) {
     playerPed(g);
     processEntity(g, ped_, false);
     for (Entity& e : script_) processEntity(g, e, false);
+    for (auto it = people_.begin(); it != people_.end();) {   // peds' one-off sounds (fight grunts)
+        processEntity(g, it->second, false);
+        bool busy = false;
+        for (const Slot& s : it->second.s) busy |= s.event != 0x9C;
+        it = busy ? std::next(it) : people_.erase(it);
+    }
     for (auto& [uid, e] : ents_) e.seen = false;
     processHorns(g);   // cAudioManager::DoProcess -> cHorn::Process
     for (int i = 0; i < (int)g.cars.size(); ++i) {

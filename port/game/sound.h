@@ -51,6 +51,10 @@ public:
     // cAudioManager::SoundHorn -> cHorn::SoundHorn: a traffic car honks (a pattern of beeps and blasts in one of
     // three channels); a police car with no wanted level gives its event 0x81 instead, at most every 5-10 s
     void soundHorn(Game& g, const Vehicle& v);
+    // cAudioManager::DoFightGrunt: a ped grunts (event 0x71, radius 400) with one of ten samples for its sex, never
+    // the same one twice running, at most once every 0.5 to 1.5 s unless forced; loud: full volume, else 30..109
+    void fightGrunt(uint32_t uid, const int32_t pos[3], bool male, bool force, bool loud);
+    void startBurnout(const Vehicle& v);   // cAudioManager::StartBurnout: event 0x93 as the burnout launches
     bool ok() const { return !res_.data.empty(); }
 
 private:
@@ -94,6 +98,8 @@ private:
         bool beep = false;           // +0x14: the step is a beep (event 0x46), not a blast (the event 0x47 loop)
     } horns_[3];
     uint32_t policeHornMs_ = 0;      // cHorn +0x54
+    uint64_t nextGruntMs_ = 0;       // cAudioManager +0x2F48
+    int16_t lastGrunt_ = 0;          // +0x2F50
     void processHorns(Game& g);      // cHorn::Process
     void processEntity(Game& g, Entity& e, bool persistent);              // ProcessStandardSfx
     void carEngine(Game& g, Vehicle& v, Entity& e);                       // ProcessEntityTypeCar

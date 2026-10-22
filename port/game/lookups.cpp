@@ -66,7 +66,8 @@ bool SoundTables::load(const std::string& path) {
     SoundTables next;
     char header[8];
     if (!read(file, header, sizeof header)) return false;
-    const bool v3 = std::memcmp(header, "CTWSND3", 8) == 0;
+    const bool v4 = std::memcmp(header, "CTWSND4", 8) == 0;
+    const bool v3 = v4 || std::memcmp(header, "CTWSND3", 8) == 0;
     if ((!v3 && std::memcmp(header, "CTWSND2", 8) != 0) || !read(file, next.events, sizeof next.events) ||
             !read(file, next.gears, sizeof next.gears) || !read(file, next.collisionLow, sizeof next.collisionLow) ||
             !read(file, next.collisionMed, sizeof next.collisionMed) || !read(file, next.collisionHigh, sizeof next.collisionHigh) ||
@@ -74,8 +75,10 @@ bool SoundTables::load(const std::string& path) {
             !read(file, next.propSfx, sizeof next.propSfx)) return false;
     if (v3 && (!read(file, next.hornPatterns, sizeof next.hornPatterns) || !read(file, next.hornFade, sizeof next.hornFade)))
         return false;
+    if (v4 && !read(file, next.grunts, sizeof next.grunts)) return false;
     if (!end(file)) return false;
     next.horns = v3;
+    next.hasGrunts = v4;
     for (const auto& prop : next.propSfx)
         if (prop.volume > 127) return false;
     for (const EventInfo& event : next.events)

@@ -388,8 +388,9 @@ void Vehicle::act(const Controls& yIn, bool playerDriving, Collision* col) {
     } else if (burnout_ == 1) {
         burnout_ = 2;   // let go: the launch window opens
     } else if (burnout_ == 2) {
-        if (y.throttle > 0) {   // launched: a 12-unit kick forward and flaming tyres (StartBurnout's sound is not ported)
+        if (y.throttle > 0) {   // launched: a 12-unit kick forward, flaming tyres and cAudioManager::StartBurnout
             for (int k = 0; k < 3; ++k) vel[k] += fwd[k] * 12;
+            TheSound().startBurnout(*this);
             burnout_ = 3;
             burnoutWindow_ = 0;
             tyre_[1].grip = tyre_[1].gripMax;

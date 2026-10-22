@@ -175,7 +175,7 @@ class GameBinary:
                 b''.join(struct.pack('<12i', *p) for p in profiles))
 
     def sound(self):
-        data = b'CTWSND3\0'
+        data = b'CTWSND4\0'
         for name, size in [('gEventInfo', 156 * 16), ('gGears', 20 * 48),
                            ('gCarCollisionEventsLow', 12), ('gCarCollisionEventsMed', 12),
                            ('gCarCollisionEventsHigh', 12)]:
@@ -183,7 +183,8 @@ class GameBinary:
         # The rev-after-shift table has no exported name in this supported version.
         # then cHorn's five four-step beep patterns and its LoopBeepFadeVal table
         return (data + self.read(0x480920, 16) + self.symbol_data('gPropSfx', 57 * 4) +
-                self.symbol_data('gHornPatterns', 80) + self.read(0x48036c, 4))
+                self.symbol_data('gHornPatterns', 80) + self.read(0x48036c, 4) +
+                self.read(0x4802e0, 20) + self.read(0x4802f4, 20))   # DoFightGrunt: men's, women's samples
 
     def render(self):
         angles = b''.join(self.read(a, 16) for a in (0x46a980, 0x469b00, 0x468600, 0x46a450))

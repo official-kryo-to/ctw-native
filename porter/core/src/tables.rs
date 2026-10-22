@@ -363,7 +363,7 @@ impl<'a> GameBinary<'a> {
     }
 
     pub fn sound(&self) -> Result<Vec<u8>, TableError> {
-        let mut data = b"CTWSND3\0".to_vec();
+        let mut data = b"CTWSND4\0".to_vec();
         for (name, size) in [
             ("gEventInfo", 156 * 16),
             ("gGears", 20 * 48),
@@ -379,6 +379,9 @@ impl<'a> GameBinary<'a> {
         // then cHorn's five four-step beep patterns and its LoopBeepFadeVal table
         data.extend(self.symbol_data("gHornPatterns", 80)?);
         data.extend(self.read(0x48036c, 4)?);
+        // DoFightGrunt's men's and women's samples
+        data.extend(self.read(0x4802e0, 20)?);
+        data.extend(self.read(0x4802f4, 20)?);
         Ok(data)
     }
 
