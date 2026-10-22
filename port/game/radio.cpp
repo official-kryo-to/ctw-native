@@ -525,7 +525,8 @@ void Radio::renderApp(int W, int H, Game& game) {
     // the PDA: the heading bar and its centred title, the back button
     drawPdaSprite(headingBar_, 8, -32);
     const std::string& heading = appHeading_.empty() ? std::string("Music Player") : appHeading_;
-    Hud_Text(240.f - Hud_TextWidth(heading, 1.f) * 0.5f, -30, 1.f, 0xFFFFFFFFu, heading);
+    // centred in the bar (the port's font draws its capitals about five units below y)
+    Hud_Text(240.f - Hud_TextWidth(heading, 1.f) * 0.5f, -34, 1.f, 0xFFFFFFFFu, heading);
     drawPdaSprite(backButton_, 8, kAppH - backButton_.def.h - 4);
     glPopMatrix();
 }
