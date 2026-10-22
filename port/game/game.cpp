@@ -712,13 +712,20 @@ void Game::processVehicleDeaths() {
         Plugins_EmitEvent(CTW_EVENT_VEHICLE_DESTROYED, car.uid, car.infoId);
         // cVehicle::Damage: vehicles 7, 15 and 53 blow up as a type-6 cExplosionBigVehicle, the rest as an
         // ordinary type-4 generic explosion
+        bool queued;
         if (car.infoId == 7 || car.infoId == 15 || car.infoId == 53) {
             const int32_t still[3] = {0, 0, 0};
-            addBigExplosion(car.pos, 6, 0x1000, still);
+            queued = addBigExplosion(car.pos, 6, 0x1000, still);
         } else {
             Explosion explosion{{car.pos[0],car.pos[1],car.pos[2]},3};
-            if (queueExplosion(explosion)) shakeNearExplosion(car.pos);
+            queued = queueExplosion(explosion);
+            if (queued) shakeNearExplosion(car.pos);
         }
+        // the culprit is the car's LastDamagedBy: when that is the player, AddExplosion registers the explosion as
+        // a crime (RegisterExplosionAsCrime for the generic blast, RegisterCrime(11) for the big one). A car he
+        // drives counts as him.
+        if (queued && (car.lastDamagedBy == kPlayerOnFoot || (playerCar >= 0 && car.lastDamagedBy == cars[playerCar].uid)))
+            wanted.registerCrime(WantedManager::Explosion, frame);
         if (playerCar >= 0 && &car == &cars[playerCar]) killInVehicle(car);
     }
     // Blast callbacks can smash explosive props and append to this queue. Copy the firing entry and defer
@@ -761,7 +768,7 @@ void Game::processVehicleDeaths() {
         [](const Explosion& e) { return e.fired && e.delay >= 11; }), explosions_.end());
 }
 
-void Game::addBigExplosion(const int32_t at[3], int type, int16_t scale, const int32_t velocity[3]) {
+bool Game::addBigExplosion(const int32_t at[3], int type, int16_t scale, const int32_t velocity[3]) {
     Explosion e{{at[0],at[1],at[2]},0,type,false,scale};
     // cExplosionBigVehicle's constructor (inlined in AddExplosion): the heading of the velocity (-ATan2(-x, y))
     // and whether it moves
@@ -770,8 +777,8 @@ void Game::addBigExplosion(const int32_t at[3], int type, int16_t scale, const i
     e.moving = (int64_t)velocity[0] * velocity[0] + (int64_t)velocity[1] * velocity[1] +
                (int64_t)velocity[2] * velocity[2] > 0x28000;
     // AddExplosion's duplicate check only applies to stationary explosions
-    if (e.moving) { explosions_.push_back(e); stats.incExplosions(); }
-    else queueExplosion(e);
+    if (e.moving) { explosions_.push_back(e); stats.incExplosions(); return true; }
+    return queueExplosion(e);
 }
 
 void Game::processBigExplosion(Explosion& e) {   // cExplosionBigVehicle::Process

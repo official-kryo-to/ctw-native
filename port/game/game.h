@@ -164,7 +164,7 @@ public:
     void addWeaponExplosion(const int32_t pos[3], int type, int16_t scale = 4096);
     // Explosion::AddExplosion for types 6 (big vehicles) and 7 (petrol pumps): a cExplosionBigVehicle, whose
     // clouds drift along the velocity when it is faster than about 0.6 units a second
-    void addBigExplosion(const int32_t pos[3], int type, int16_t scale, const int32_t velocity[3]);
+    bool addBigExplosion(const int32_t pos[3], int type, int16_t scale, const int32_t velocity[3]);   // false: a duplicate
     // Explosion::AddExplosion for type 11: a cExplosionHotDog, a gas jet along the (normalised) velocity, or
     // straight up when the velocity is tiny, that bursts after about two seconds
     void addHotDogExplosion(const int32_t pos[3], const int32_t velocity[3]);

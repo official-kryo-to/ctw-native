@@ -466,7 +466,9 @@ void traceAndFlash(Game& g, Weapon& w, const int32_t origin[3], int32_t dir[3], 
         const int16_t dir2[2] = {(int16_t)d2[0], (int16_t)d2[1]};
         for (size_t i = 0; i < g.peds.peds.size(); ++i) {
             const Pedestrians::Ped& p = g.peds.peds[i];
-            if (p.deadFrames >= 0 || !WorldSectors::inBox(g.player.pos, reach, p.body.pos[0], p.body.pos[1]) ||
+            // cPed::CanBeHit: a ped in a closed vehicle cannot be hit (the bullet goes on to the vehicle). Riders of
+            // open-top vehicles can, but their damage on a vehicle is not ported, so they are skipped as well.
+            if (p.vehicle || p.deadFrames >= 0 || !WorldSectors::inBox(g.player.pos, reach, p.body.pos[0], p.body.pos[1]) ||
                 !g.sectors.loadedAt(p.body.pos[0], p.body.pos[1])) continue;
             const int64_t d = cylinderDistance(p.body.pos, Player::kRadius, start, dir2, reach2);
             if (d >= 0 && closest > d) { closest = d; best = {1, (int)i, d}; }

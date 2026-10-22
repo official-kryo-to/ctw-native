@@ -29,8 +29,11 @@ bool reactionCheck(int reaction, bool first) {
 }   // namespace
 
 void Game::vehicleReaction(Vehicle& car, int type, int damage, uint32_t sourceCar, const int32_t at[3]) {
+    // cVehicle::HandlePlayerCrime comes first in Damage, before the damage itself: the shot that wrecks a car still
+    // makes the crime and leaves its LastDamagedBy (the culprit of the explosion)
+    if (car.dead() && !car.justDied) return;
+    copCarCrime(car, type, damage, sourceCar);
     if (car.dead()) return;
-    copCarCrime(car, type, damage, sourceCar);   // cVehicle::HandlePlayerCrime comes first in Damage
     if (type == 8 && damage < 12) return;   // gAggBigHit
     const int action = vehicleAction(type);
     Pedestrians::Ped* driver = nullptr;
