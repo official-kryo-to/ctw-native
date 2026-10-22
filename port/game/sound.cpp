@@ -178,7 +178,7 @@ void Sound::processEntity(Game& g, Entity& e, bool persistent) {   // cAudioMana
             const Bank& b = ei.bank == 0 ? res_ : activeCarBank_ ? *activeCarBank_ : car_;
             const uint8_t* pcm;
             uint32_t len, rate;
-            if (!b.sample(sfx, pcm, len, rate)) { s.event = 0x9C; continue; }
+            if (!b.sample(sfx, pcm, len, rate)) { if (getenv("CTW_SNDDBG")) printf("sfx: event 0x%X sample %d (bank %d) missing\n", s.event, sfx, ei.bank); s.event = 0x9C; continue; }
             s.rate = rate;
             s.voice = Audio_SfxPlay(pcm, len, (int)rate, vol / 127.f, fpan, ei.mode == 1);
             if (getenv("CTW_SNDDBG")) printf("sfx: event 0x%X sample %d (bank %d) vol %d pan %d loop %d -> voice %d\n", s.event, sfx, ei.bank, vol, pan, ei.mode == 1, s.voice);
@@ -292,6 +292,8 @@ void Sound::pedDeath(const int32_t pos[3], bool male, bool inWater) {
 }
 
 void Sound::carEngine(Game& g, Vehicle& v, Entity& e) {   // cSoundEvents::ProcessEntityTypeCar
+    // a siren vehicle with its siren on: event 0xA (the fire truck's 0x85) at volume 0x20, radius 1500
+    if (v.hasSiren() && v.siren) addEvent(e, v.infoId == 6 ? 0x85 : 0xA, 0x20, 0x5DC, -1);
     if (!v.engineOn || v.dead()) return;
     const GearSound& gs = tables_.gears[std::min<int>(g.vehicleInfos[v.infoId].raw[0x8C], 19)];
     int32_t sp = v.speed();
@@ -317,6 +319,8 @@ void Sound::playerCar(Game& g, Vehicle& v, Entity& e) {   // cSoundEvents::Proce
         damageClank_ = 0; skidTimer_ = skidCount_ = 0; hornHeld_ = -1; lastMs_ = 0;
         playerUid_ = v.uid;
     }
+    // the siren, as for other cars but over radius 400
+    if ((flags & 1) && v.siren) addEvent(e, v.infoId == 6 ? 0x85 : 0xA, 0x20, 0x190, -1);
     // the horn (event 0x47): full volume while held, one more at half volume when let go
     if (horn && !(flags & 1)) { addEvent(e, 0x47, gs.volume, 300, gs.horn); hornHeld_ = 1; }
     else if (hornHeld_ >= 0) { addEvent(e, 0x47, gs.volume >> 1, 300, gs.horn); hornHeld_ = -1; }

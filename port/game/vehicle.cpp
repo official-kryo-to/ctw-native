@@ -110,6 +110,7 @@ void Vehicle::init(const VehicleInfo& info, int id, const int32_t p[3], int16_t 
     doorNode_[4] = (int8_t)info.raw[0x110];
     infoFlags8e_ = (uint16_t)info.s16(0x8E);
     numSeats_ = info.s32(0x10C);
+    siren = false;
     for (Door& d : doors_) d = Door{};
     for (Debris& d : debris_) d = Debris{};
     std::fill(std::begin(pendingDebris_),std::end(pendingDebris_),0);

@@ -551,6 +551,10 @@ bool Game::doorClear(const Vehicle& c, int seat) {
 }
 
 void Game::finishEnter(Vehicle& c) {   // RunPostEnterSeat: in the seat; the door shuts
+    // cNewGetInVehicle::HandleRoofLights: the player silences any vehicle but the emergency ones
+    bool emergency = false;
+    for (int id : {0x12, 0x22, 4, 7, 3, 0x25, 8, 6}) emergency |= c.infoId == id;
+    if (!emergency) c.siren = false;
     if (!c.isBike()) c.closeDoor(task.seat);
     else c.bikeMounted = 1;
     c.seatUser[0] = -2;
@@ -1463,6 +1467,13 @@ bool Game::key(int k) {
     // PC: the phone game cycles weapons by tapping the HUD weapon icon (sVirtYoke +0x67 / +0x68)
     if (scope.active && k == SDL_SCANCODE_Z) { scope.zoomPressed = true; return true; }   // the scope's zoom button
     if (playerCar < 0 && (k == SDL_SCANCODE_Q || k == SDL_SCANCODE_E)) { weaponCycle = k == SDL_SCANCODE_E ? 1 : -1; return true; }
+    // in a siren vehicle the HUD's weapon icon is the siren button (cHudWeaponSelect::ToggleWeaponSelect: +0x98A and
+    // PlayHudSfx(0x146, 0x7F))
+    if (playerCar >= 0 && (k == SDL_SCANCODE_Q || k == SDL_SCANCODE_E) && cars[playerCar].hasSiren()) {
+        cars[playerCar].siren = !cars[playerCar].siren;
+        TheSound().playHud(0x146, 0x7F);
+        return true;
+    }
     return false;
 }
 

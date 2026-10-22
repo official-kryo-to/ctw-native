@@ -66,6 +66,8 @@ public:
     void seatOffset(int seat, int32_t out[3]) const;       // cVehicle::GetSeatOffsetLocalSpace
     void localToWorld(const int32_t local[3], int32_t out[3]) const;   // TransformCoords with the entity matrix
     int numSeats() const { return numSeats_; }
+    bool hasSiren() const { return infoFlags8e_ & 1; }   // info +0x8E bit 0
+    bool siren = false;                                  // +0x98A: the siren is sounding
 
     // damage (cVehicle::DoOnCollisionWorking / Damage / SetHealth / Process / SetDead)
     int health() const { return health_; }
