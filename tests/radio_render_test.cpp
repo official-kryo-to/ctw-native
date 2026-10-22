@@ -67,6 +67,10 @@ struct RadioTestAccess {
         game.playerCar = 0; radio.update(game);
         check(radio.station() == 2, "switching back restores the previous car's tuning");
         const CtwHostApi& api = Plugins_HostApi();
+        SDL_Event focus{}; focus.type = SDL_WINDOWEVENT; focus.window.event = SDL_WINDOWEVENT_FOCUS_GAINED;
+        focus.window.windowID = SDL_GetWindowID(SDL_GL_GetCurrentWindow());
+        SDL_PushEvent(&focus); Host_PumpEvents(); api.set_mouse_captured(1);
+        check(SDL_GetRelativeMouseMode(), "the gameplay camera's pending capture reaches SDL before opening radio");
         check(api.radio_station_count() == 3 && !api.radio_station_available(1) && !api.set_radio_station(1),
               "radio API exposes station availability");
         check(api.set_radio_station(0) && api.get_radio_station() == 0 &&
@@ -75,6 +79,9 @@ struct RadioTestAccess {
         // The radio app: Tab opens it full screen and pauses the game; A / D tune; Tab closes it again.
         api.set_radio_station(0);
         check(radio.key(SDL_SCANCODE_TAB, game) && radio.appOpen() && game.uiPaused, "Tab opens the radio app and pauses the game");
+        check(!SDL_GetRelativeMouseMode(), "opening the radio immediately releases the gameplay cursor");
+        api.set_mouse_captured(1);
+        check(!SDL_GetRelativeMouseMode(), "a camera callback cannot recapture the open radio's cursor");
         check(radio.key(SDL_SCANCODE_D, game) && radio.station() == 2, "the app tunes past unavailable stations");
         check(Audio_SfxPaused(), "changing station keeps the paused game's sounds silent");
         check(radio.key(SDL_SCANCODE_W, game) && radio.volumeLevel() == 5, "the app raises the volume");
@@ -86,6 +93,7 @@ struct RadioTestAccess {
               "the radio screen completely hides the world as in the original disabled renderer");
         check(radio.key(SDL_SCANCODE_TAB, game) && !radio.appOpen() && !game.uiPaused && !Audio_SfxPaused(),
               "Tab closes the app and resumes the game and its sounds");
+        check(SDL_GetRelativeMouseMode(), "closing the radio restores the gameplay camera's pending capture");
         radio.key(SDL_SCANCODE_TAB, game);
         // Logical app coordinates map into its centred 480 x 340 viewport.
         Host_TestMouse(387,370,1,0); draw();
@@ -94,6 +102,7 @@ struct RadioTestAccess {
         check(radio.volumeLevel() == 5, "the rendered minus control uses the same scaled hit region");
         Host_TestMouse(74,411,1,0); draw();
         check(!radio.appOpen() && !game.uiPaused && !Audio_SfxPaused(), "the rendered Back control restores simulation and sound");
+        check(SDL_GetRelativeMouseMode(), "closing radio by pointer also restores the gameplay camera's capture");
         glReadPixels(0,0,1,1,GL_RGBA,GL_UNSIGNED_BYTE,background);
         check(background[0] == 255 && background[1] == 0 && background[2] == 255,
               "closing the app by mouse reveals the already-drawn world without a black display frame");

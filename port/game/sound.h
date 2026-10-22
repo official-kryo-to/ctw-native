@@ -37,11 +37,13 @@ public:
     void playHud(int sample, int volume);                          // resident HUD channel, independent of world pause
     void conversation(Game& game, uint32_t uid);                    // native comment type 5, on-foot civilian speech
     void bulletHitPed(Game& game, uint32_t uid);                    // cAudioManager::AddBulletHitPed: a pain comment
+    void copWantsArrest(Game& game, uint32_t uid);
     // cAudioManager::PedThrownBackSfx: the player lands after being thrown (event 0x82, volume 0x1E, radius 200),
     // at most every 55 frames
     void pedThrownBack(const int32_t pos[3]);
     void waterStream(uint32_t id, const int32_t pos[3], int volume); // cannon event 0x6C, refreshed each tick
     void playerEvent(int event, int volume, int radius);           // AddSoundEvent on the player ped (weapons)
+    void pedEvent(uint32_t uid, const int32_t pos[3], int event, int volume, int radius);
     void scriptSfx(const int32_t pos[3], int sample, int volume, int radius);   // cAudioManager::PlayScriptSfx
     // cAudioManager::PlayLoopingScriptSfx: event 0x2E on a free script slot; the slot (or -1). scriptLoop keeps it
     // playing, moves it and sets its volume each frame; stopScriptSfx frees it (StopLoopingScriptSfx).

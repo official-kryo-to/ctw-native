@@ -117,9 +117,16 @@ void run(const std::filesystem::path& dir) {
     game.player.dead = false; game.uiPaused = true;
     check(!WeaponHud_Key(game, SDL_SCANCODE_TAB) && game.uiPaused, "a different paused UI keeps ownership of the pause");
     game.uiPaused = false;
+    SDL_Event focus{}; focus.type = SDL_WINDOWEVENT; focus.window.event = SDL_WINDOWEVENT_FOCUS_GAINED;
+    focus.window.windowID = SDL_GetWindowID(SDL_GL_GetCurrentWindow());
+    SDL_PushEvent(&focus); Host_PumpEvents(); Plugins_HostApi().set_mouse_captured(1);
+    check(SDL_GetRelativeMouseMode(), "the gameplay camera captures SDL before opening its weapon wheel");
     check(game.playerWeapons.give(5, 10, true), "the synthetic pistol is available in slot two");
     check(WeaponHud_Key(game, SDL_SCANCODE_TAB) && WeaponHud_WheelOpen() && game.uiPaused && Audio_SfxPaused(),
           "Tab pauses simulation and sound effects while the weapon wheel is open");
+    check(!SDL_GetRelativeMouseMode(), "opening the weapon wheel immediately releases the camera's cursor");
+    Plugins_HostApi().set_mouse_captured(1);
+    check(!SDL_GetRelativeMouseMode(), "a camera cannot recapture the weapon wheel's pointer");
     check(WeaponHud_Key(game, SDL_SCANCODE_Q), "weapon cycling is consumed while the panel pauses the world");
     draw();
     pixel(680, 320, 0, 255, 0, "the held weapon's slot background is fully lit");
@@ -127,6 +134,7 @@ void run(const std::filesystem::path& dir) {
     Host_TestMouse(512, 152, 1, 0); draw();
     check(game.playerWeapons.current()->type == 0 && !WeaponHud_WheelOpen() && !game.uiPaused && !Audio_SfxPaused(),
           "a full click between frames selects the pointed slot and restores simulation and sound");
+    check(SDL_GetRelativeMouseMode(), "selection by pointer immediately restores the requested camera capture");
     WeaponHud_Key(game, SDL_SCANCODE_TAB);
     Host_TestMouse(704, 344, 1, 0); draw();
     check(game.playerWeapons.current()->type == 5 && !WeaponHud_WheelOpen(), "a full click can also select the pistol");
@@ -137,7 +145,9 @@ void run(const std::filesystem::path& dir) {
     Plugins_HostApi().set_game_input(0);
     check(game.key(SDL_SCANCODE_ESCAPE) && !WeaponHud_WheelOpen() && !game.uiPaused && !Audio_SfxPaused(),
           "an open wheel receives Escape even when a plugin has disabled gameplay input");
+    check(!SDL_GetRelativeMouseMode(), "closing the wheel keeps capture released while the plugin still owns input");
     Plugins_HostApi().set_game_input(1);
+    check(SDL_GetRelativeMouseMode(), "returning plugin input restores the requested camera capture after the wheel closes");
     WeaponHud_Key(game, SDL_SCANCODE_TAB); game.player.dead = true; draw();
     check(!WeaponHud_WheelOpen() && !game.uiPaused && !Audio_SfxPaused(), "losing the player closes the panel and releases its pause");
     game.player.dead = false;

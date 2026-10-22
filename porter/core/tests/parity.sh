@@ -45,7 +45,7 @@ for opt in O1 O2 Os; do
     python3 "$here/parity.py" tables "$so" > "$work/py.txt"
     "$rust" tables "$so" > "$work/rs.txt"
     grep -q ERROR "$work/py.txt" && { echo "fixture $opt did not extract"; fail=1; }
-    for table in population sound render gameplay radio restart weather weapon; do
+    for table in population navigation sound render gameplay radio restart weather weapon; do
         grep -q "^${table}_tables.bin " "$work/py.txt"
         grep -q "^${table}_tables.bin " "$work/rs.txt"
     done
@@ -55,6 +55,14 @@ for opt in O1 O2 Os; do
     grep -q '^ped_comments.bin ' "$work/rs.txt"
     grep -q '^shard_tables.bin ' "$work/py.txt"
     grep -q '^shard_tables.bin ' "$work/rs.txt"
+    # Both implementations must retain the optimizer's final island tail call, not merely agree on its loss.
+    python3 - "$work/py.txt" <<'PY'
+import struct, sys
+row = next(line for line in open(sys.argv[1]) if line.startswith('navigation_tables.bin '))
+table = bytes.fromhex(row.split()[1])
+assert struct.unpack_from('<II', table, 8) == (3, 3)
+assert table[-12:] == struct.pack('<8sI', b'TAILEND', 2)
+PY
     compare "tables, fixture -$opt" "$work/py.txt" "$work/rs.txt"
 done
 for lib in libc.so.6 libm.so.6 libstdc++.so.6; do

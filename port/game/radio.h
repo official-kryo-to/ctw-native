@@ -4,6 +4,7 @@
 #pragma once
 #include "lookups.h"
 #include "gfx/spriteset.h"
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -11,7 +12,7 @@ class Game;
 class GameFs;
 class Radio {
 public:
-    bool init(const std::string& dataDir);
+    bool init(const std::string& dataDir, const std::function<bool()>& loadingFrame = {});
     void shutdown();
     void update(Game& game);
     bool key(int scancode, Game& game);

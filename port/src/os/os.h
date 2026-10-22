@@ -65,7 +65,7 @@ int  Host_PopWheel();                 // +1 / -1 per wheel notch, 0 when none
 int  Host_PopKey();       // SDL scancode of the next pressed key, or 0
 int  Host_PopClicks();                // mouse buttons pressed since the last call (bit 0 left, 1 middle, 2 right)
 std::string Host_PopText();           // UTF-8 typed since the last call; '\b' = backspace (repeats while held)
-void Host_SetRelativeMouse(bool on);  // hide and capture the cursor; movement comes from Host_PopMouseDelta
+void Host_SetRelativeMouse(bool on);  // request mouse look while focused; resumes on focus gain, deltas reset on changes
 void Host_PopMouseDelta(float* dx, float* dy);   // relative movement since the last call, drawable pixels
 void Host_TestMouse(int x, int y, int clicks, int wheel);   // testing (--shot): fake the mouse for the next frame
 // Game controllers (SDL GameController, the first one connected; plugged in or out at any time). Button presses

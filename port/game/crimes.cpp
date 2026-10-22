@@ -15,14 +15,14 @@ bool isCopCar(const Game& g, const Vehicle& car) {   // its driver is a cop (cVe
 }   // namespace
 
 void Game::updateWanted() {
-    // cVehicle::ProcessAlways: a cop car on screen sees the player (cPlayer::SetCopInView). Pursuit (the +0x948
-    // bit 27 flag) belongs to the cop AI, which is not ported: no cop counts as pursuing yet.
+    // cVehicle::ProcessAlways: a cop car on screen sees the player (cPlayer::SetCopInView). The enforcer task
+    // supplies the pursuit flag, so crimes and wanted decay distinguish chasing cars from ordinary patrols.
     int32_t at[3];
     focus(at);
     for (Vehicle& car : cars) {
         const bool onScreen = view.canSee(car.pos, car.boundRadius());
         car.screenTimer = onScreen ? 0xFF : car.screenTimer ? (uint8_t)(car.screenTimer - 1) : 0;   // +0x99C
-        if (!car.dead() && onScreen && isCopCar(*this, car)) wanted.setCopInView(frame, at, false);
+        if (!car.dead() && onScreen && isCopCar(*this, car)) wanted.setCopInView(frame, at, car.pursuing);
     }
     wanted.process(frame, at, playerCar >= 0);   // cPlayer::Process -> cWantedManager::Process
 }

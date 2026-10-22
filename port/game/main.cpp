@@ -153,6 +153,8 @@ int main(int argc, char** argv) {
     }
     Game& game = TheGame();
     if (!game.init(data, mods)) {
+        game.shutdown();
+        if (game.quitRequested) { Host_Shutdown(); return 0; }
         std::string msg = "Could not find the game files.\n\nPut the files from your own copy of GTA: Chinatown Wars in:\n" + data;
         fprintf(stderr, "%s\n", msg.c_str());
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "GTA: Chinatown Wars", msg.c_str(), nullptr);

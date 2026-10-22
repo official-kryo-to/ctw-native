@@ -488,6 +488,13 @@ void Sound::playerEvent(int event, int volume, int radius) {
     if (ok()) addEvent(ped_, event, volume, radius, -1);
 }
 
+void Sound::pedEvent(uint32_t uid, const int32_t pos[3], int event, int volume, int radius) {
+    if (!ok() || !uid) return;
+    Entity& entity = people_[uid];
+    std::copy_n(pos, 3, entity.pos);
+    addEvent(entity, event, volume, radius, -1);
+}
+
 void Sound::pedThrownBack(const int32_t pos[3]) {
     if (!ok() || thrownBackFrames_) return;
     for (int k = 0; k < 3; ++k) ped_.pos[k] = pos[k];

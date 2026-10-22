@@ -105,6 +105,11 @@ public:
     void pedCrime(const Pedestrians::Ped& victim, int damageType);
     void copCarCrime(Vehicle& car, int damageType, int damage, uint32_t sourceCar);
     void jackCrime(const Vehicle& car);
+    uint32_t arrestingCop = 0;              // cPlayer::ArrestingCop, a stable pedestrian handle
+    bool arrestGrabbed = false, arrestStopVehicle = false;
+    bool arrested() const { return arrested_; }
+    bool policeRestartsAvailable() const { return !restart_.police.empty(); }
+    bool beginArrest(uint32_t cop);         // cPlayer::Arrested, after the arrest task's countdown
     PlayerTargeting targeting;               // the player's auto-aim (cPlayerSensorCone, targeting.cpp)
     Projectiles projectiles;                 // grenades, molotovs, flashbangs, mines and rockets (projectiles.cpp)
     int weaponCycle = 0;                     // input: -1 previous / +1 next weapon this frame
@@ -248,10 +253,12 @@ private:
     void drawDebug(int width, int height);   // F3 (debughud.cpp)
     void killInVehicle(Vehicle& car);
     void updateDeath();
+    bool arrested_ = false;
+    bool bustedDisplay_ = false;
     int deathFrames_ = -1;          // frames since the player died (the death paths set it to 0 with the camera)
     bool deathStarted_ = false;     // updateDeath has seen this death
     int wastedFrames_ = 0;          // HUDText's busted / wasted text: frames left
-    std::string wastedText_;        // e_main.gxt 0x62
+    std::string wastedText_, bustedText_;   // e_main.gxt 0x62 / 0x63
     int respawnFrame() const { return deathScreen.ok() ? 62 : 72; }   // the frame the player is reborn on
     int32_t deathEye_[3] = {}, restartFallback_[3] = {};
     uint16_t deathYaw_ = 0, deathPitch_ = 0;

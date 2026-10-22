@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 #include "game.h"
+#include "loadingscreen.h"
 #include "weaponhud.h"
 #include "hud.h"
 #include "particles.h"
@@ -27,6 +28,16 @@ static Game g_game;
 Game& TheGame() { return g_game; }
 
 bool Game::init(const std::string& data, const std::string& mods) {
+    LoadingScreen loading;
+    if (!loading.init(data)) fprintf(stderr, "loading artwork incomplete: SS_Loading / loading background unavailable\n");
+    quitRequested = false;
+    auto loadingFrame = [&]() {
+        if (quitRequested) return false;
+        if (loading.present()) return true;
+        quitRequested = true;
+        return false;
+    };
+    if (!loadingFrame()) return false;   // show and swap before the expensive game initialization
     RandInit(0); // Android cGame::Init seeds all four gameplay random streams with zero.
     explosionRadiusCheck_ = false; // Explosion::Reset clears the script-controlled duplicate check.
     dataDir = data;
@@ -35,48 +46,71 @@ bool Game::init(const std::string& data, const std::string& mods) {
         fprintf(stderr, "gameplay_tables.bin missing or invalid: run scripts/setup_game.py\n");
         return false;
     }
+    if (!loadingFrame()) return false;
     if (!world.init(dataDir)) return false;
     world.setRadius(1);   // the game keeps a 3 x 3 sector window; one block ring around the player covers it
+    if (!loadingFrame()) return false;
     Hud_Init(dataDir);
     if (!pauseScreen.init(dataDir)) fprintf(stderr, "SS_Hud missing: pause-screen artwork unavailable\n");
     if (!gameplayHud.init(dataDir)) fprintf(stderr, "radar map / SS_AlwaysLoaded missing: no radar HUD\n");
+    if (!loadingFrame()) return false;
     if (props.load()) collision.setPropLibrary(&props);   // before any collision cell loads
     else fprintf(stderr, "prop definitions not found: no street furniture\n");
     if (!collision.init(dataDir)) fprintf(stderr, "world.bin not found: no collision\n");
+    if (!loadingFrame()) return false;
     world.groundBelow = [this](float x, float y, float z, float& ground) {   // light pools (render style)
         ground = collision.ground(x, y, z).z;
         return true;
     };
     player.placeOnGround(&collision);
     if (!pedSprites.init()) fprintf(stderr, "ped sprites not found\n");
+    if (!loadingFrame()) return false;
     camera.reset(player.pos, player.heading());
     for (int i = 0; i < 3; ++i) restartFallback_[i] = player.pos[i];
     if (!restart_.load(dataDir + "/restart_tables.bin"))
         fprintf(stderr, "restart_tables.bin missing: hospital restarts need scripts/setup_game.py\n");
     float p[3];
     player.posf(p);
-    world.loadAllNow(p[0], p[1]);
+    // Upload one city block at a time so close/resize events and the loading
+    // animation remain live throughout the initial sector window.
+    do {
+        if (!loadingFrame()) return false;
+    } while (!world.stream(p[0], p[1], 1));
+    if (!loadingFrame()) return false;
     if (!roads.load(dataDir)) fprintf(stderr, "ai.bin not found: no traffic\n");
+    if (!loadingFrame()) return false;
     if (!TheSound().init(dataDir)) fprintf(stderr, "sound_tables.bin / resbnk.bin invalid or no audio device: no sound effects (run scripts/setup_game.py)\n");
-    if (!radio.init(dataDir)) fprintf(stderr, "radio_tables.bin / SS_Radio missing or invalid: run scripts/setup_game.py\n");
+    if (!loadingFrame()) return false;
+    if (!radio.init(dataDir, loadingFrame)) {
+        if (quitRequested) return false;
+        fprintf(stderr, "radio_tables.bin / SS_Radio missing or invalid: run scripts/setup_game.py\n");
+    }
+    if (!loadingFrame()) return false;
     if (!traffic.init(dataDir)) fprintf(stderr, "population_tables.bin / infozones.bin / popinfo.bin invalid: no traffic (run scripts/setup_game.py)\n");
+    if (!loadingFrame()) return false;
     if (!peds.init(dataDir)) fprintf(stderr, "pedinfo.bin missing or invalid: no pedestrians\n");
+    if (!loadingFrame()) return false;
     if (!Weapons_Init(dataDir))
         fprintf(stderr, "weapon_tables.bin missing or invalid: no weapons or blast health damage (run scripts/setup_game.py)\n");
     else if (!WeaponHud_Init(dataDir)) fprintf(stderr, "SS_Weapons / SS_Hud / SS_AlwaysLoaded missing: no weapon HUD\n");
+    if (!loadingFrame()) return false;
     {   // GlobalText 0x62: "WASTED!", its colour tag kept for the HUD font (UTF-8 of the UTF-16 code units)
         GxtFile text;
-        wastedText_.clear();
-        if (text.load(dataDir + "/e_main.gxt") && text.count() > 0x62)
-            for (char16_t c : text.get(0x62)) {
+        wastedText_.clear(); bustedText_.clear();
+        if (text.load(dataDir + "/e_main.gxt"))
+          for (int id : {0x62, 0x63}) {
+            std::string& target = id == 0x62 ? wastedText_ : bustedText_;
+            if (text.count() <= (size_t)id) continue;
+            for (char16_t c : text.get(id)) {
                 if (!c) continue;
-                if (c < 0x80) wastedText_ += (char)c;
-                else if (c < 0x800) { wastedText_ += (char)(0xC0 | (c >> 6)); wastedText_ += (char)(0x80 | (c & 63)); }
+                if (c < 0x80) target += (char)c;
+                else if (c < 0x800) { target += (char)(0xC0 | (c >> 6)); target += (char)(0x80 | (c & 63)); }
                 else {
-                    wastedText_ += (char)(0xE0 | (c >> 12)); wastedText_ += (char)(0x80 | ((c >> 6) & 63));
-                    wastedText_ += (char)(0x80 | (c & 63));
+                    target += (char)(0xE0 | (c >> 12)); target += (char)(0x80 | ((c >> 6) & 63));
+                    target += (char)(0x80 | (c & 63));
                 }
             }
+          }
     }
     if (!deathScreen.init(dataDir))
         fprintf(stderr, "shard_tables.bin missing or invalid: death fades to black (run scripts/setup_game.py)\n");
@@ -100,8 +134,9 @@ bool Game::init(const std::string& data, const std::string& mods) {
     sectors.reset();
     updateView();
     updateSectors();
+    if (!loadingFrame()) return false;
     Plugins_Init(modsDir);
-    return true;
+    return loadingFrame();
 }
 
 const Model* Game::carModel(int infoId) {
@@ -268,7 +303,7 @@ void Game::focus(int32_t o[3]) const {
 void Game::viewCamera(WorldCamera& cam) const {
     if (renderCamValid_ && !freeCam.on) { cam = renderCam_; return; }   // interpolated while drawing
     if (freeCam.on) cam = freeCam.cam;
-    else if (player.dead) {
+    else if (player.dead || arrested_) {
         for (int i = 0; i < 3; ++i) cam.eye[i] = deathEye_[i] / 4096.f;
         cam.setYawPitch(-(int16_t)deathYaw_ * 360.f / 65536, (int16_t)deathPitch_ * 360.f / 65536);
     }
@@ -320,7 +355,7 @@ bool Game::screenToWorld(float x, float y, int W, int H, float out[3]) const {
 void Game::updateView() {   // the game camera (not a mod's free camera), as cBaseCam::RecalculateMatrix sets it up
     int32_t eye[3];
     uint16_t yaw, pitch;
-    if (player.dead) {
+    if (player.dead || arrested_) {
         std::copy(deathEye_, deathEye_ + 3, eye);
         yaw = deathYaw_;
         pitch = deathPitch_;
@@ -474,7 +509,7 @@ void Game::removeFarCars() {   // cVehicle::ShouldBeDestroyed: more than ~74 uni
 
 // cPlayerOnFoot::HandlePlayerEnterExitVehicle / cPlayerInVehicle: the enter/exit button starts the get-in or get-out task
 void Game::enterOrExit() {
-    if (player.dead || player.reacting()) return;
+    if (player.dead || player.reacting() || arrested_ || arrestGrabbed) return;
     if (task.op != CarTask::None) return;
     if (playerCar >= 0) startExit();
     else startEnter();
@@ -496,7 +531,7 @@ static void constantVelocity(const PedSprites& ps, int anim, const int32_t delta
 }
 
 void Game::startEnter(int target) {   // FindSuitableVehicles (within 10 units) -> the driver's seat
-    if (player.dead) return;
+    if (player.dead || arrested_ || arrestGrabbed) return;
     int best = -1;
     int64_t bestD = 0;
     for (int i = 0; i < (int)cars.size(); ++i) {
@@ -526,9 +561,10 @@ void Game::startEnter(int target) {   // FindSuitableVehicles (within 10 units) 
         return dx * dx + dy * dy + dz * dz;
     };
     const bool driverSide = dist2(d1) >= dist2(d0);
-    // op 1: IsDoorValid(driver); op 6 then 1: IsDoorValid(passenger), then CanBeUsedForPlan(driver), which an
-    // occupied driver's seat fails (the player jacks from the driver's side)
-    const bool viaPassenger = c.seatUser[0] < 0 && c.seatUser[1] < 0 && doorClear(c, 1);
+    // op 6 tests the passenger door without allowing an occupied passenger seat. The subsequent op 1 calls
+    // CanBeUsedForPlan(driver, true): cGetInVehiclePlayer allows jacking, including across from the passenger
+    // side. Requiring an empty driver here sent the player straight into the car's body towards the far door.
+    const bool viaPassenger = c.seatUser[0] != -2 && c.seatUser[1] == -1 && doorClear(c, 1);
     const bool driverDoor = doorClear(c, 0);
     if (driverSide ? driverDoor : !viaPassenger && driverDoor) return;
     if (viaPassenger) { task.seat = 1; task.shuffle = true; return; }
@@ -669,6 +705,10 @@ bool Game::tickTask(bool stickHeld, int16_t stickHeading) {
         place();
         if (!done) return true;
         if (task.shuffle) {
+            // RunReadPlan checks the victim of the next op before sliding across. Wait for the driver's exit
+            // task to release the seat, as on direct entry; never overwrite a still-seated occupant.
+            if (c.seatUser[0] >= 0 && !task.jacked) { task.jacked = true; jackCrime(c); }
+            if (!peds.exitOccupant(*this, c, 0)) return true;
             // plan {6, 1}, op 1: the passenger's door shuts and AddSlideIntoSeatAnim with the shuffle flag (+0x73)
             // slides across to the driver's seat (0x92 / 0x93, flipped from the right-hand side, sinking 0.8)
             c.closeDoor(task.seat);
@@ -1013,7 +1053,7 @@ void Game::addPropExplosion(const int32_t at[3], int16_t scale) {
 
 unsigned Game::explosionParticleCount(const int32_t at[3]) const {
     int32_t eye[3];
-    if (player.dead) std::copy(deathEye_,deathEye_+3,eye);
+    if (player.dead || arrested_) std::copy(deathEye_,deathEye_+3,eye);
     else if (playerCar >= 0) carCam.position(eye);
     else camera.position(eye);
     int64_t d2 = 0;
@@ -1037,7 +1077,7 @@ void Game::processTimeCycle() {   // cTimeCycle::Process: the clock, the weather
         const uint32_t now = tc.time();
         if (now >> 12 != before >> 12) {   // the end of an hour
             weather.hourChanged(*this);
-            stats.processEndOfHour(0);   // cStatsManager::ProcessEndOfHour (the wanted level is not ported: 0)
+            stats.processEndOfHour(wanted.level());   // cStatsManager::ProcessEndOfHour
             if (now < before) stats.incDaysPassedInGame();   // past midnight
         }
         // the minute changed: cStatsManager::UpdateTime by the minutes passed
@@ -1075,9 +1115,11 @@ void Game::updateDeath() {
     ++deathFrames_;
     deathScreen.tick();
     if (deathFrames_ == 1) {
-        stats.incNumberOfTimesWasted();   // cDeathArrestWatcher::PlayerWasted
+        bustedDisplay_ = arrested_;
+        if (arrested_) stats.incNumberOfTimesBusted();
+        else stats.incNumberOfTimesWasted();   // cDeathArrestWatcher::PlayerWasted / PlayerArrested
         // cDeathArrestWatcher::Process state 0 loads the PDA's death app (0x11): the frame shatters
-        if (deathScreen.ok()) deathScreen.open(true);
+        if (deathScreen.ok()) deathScreen.open(!arrested_);
     }
     // state 1: the death camera and HUDImpl::DisplayBustedWasted(0x62, font 5, 125): e_main.gxt's "WASTED!"
     if (deathFrames_ == 2) wastedFrames_ = 125;
@@ -1100,7 +1142,7 @@ void Game::updateDeath() {
         deathStarted_ = false;
         const RestartTables::Point* closest = nullptr;
         int64_t best = 0;
-        for (const auto& p : restart_.hospitals) {
+        for (const auto& p : arrested_ ? restart_.police : restart_.hospitals) {
             int64_t dx = (int64_t)p.pos[0] - player.pos[0], dy = (int64_t)p.pos[1] - player.pos[1];
             int64_t distance = dx * dx + dy * dy;
             if (!closest || distance < best) { closest = &p; best = distance; }
@@ -1111,11 +1153,14 @@ void Game::updateDeath() {
         player.dead = false;
         player.health = 127;
         player.resetReaction();
+        if (arrested_) playerWeapons.clearAll();
         wanted.reset();   // a new life starts unwanted
+        arrestingCop = 0;
+        arrested_ = arrestGrabbed = arrestStopVehicle = false;
         camera.reset(player.pos, player.heading());
         world.loadAllNow(player.pos[0] / 4096.f, player.pos[1] / 4096.f);
         const uint32_t before = world.timeCycle().time();
-        world.timeCycle().advanceFrames(6 * 60 * 30);
+        world.timeCycle().setTime(before + (6u << 12));
         if (world.timeCycle().time() < before) stats.incDaysPassedInGame();   // cTimeCycle::AdvanceTime past midnight
     }
 }
@@ -1125,11 +1170,19 @@ void Game::tick() {
     radio.update(*this);
     ++frame;
     muzzleFlashes.beginTick();
-    if (!player.dead && deathFrames_ >= respawnFrame() && deathFrames_ < respawnFrame() + 12) ++deathFrames_;
+    if (!player.dead && !arrested_ && deathFrames_ >= respawnFrame() && deathFrames_ < respawnFrame() + 12) ++deathFrames_;
     if (wastedFrames_ > 0) --wastedFrames_;
     localArea.update(*this);   // cPlayer::Think
     player.speedScale = speedScale;
     Plugins_BeginFrameInput();
+    if (arrestingCop && !arrested_) {
+        bool valid = false;
+        for (const auto& p : peds.peds) valid |= p.uid == arrestingCop && p.type == 10 && !p.body.dead;
+        if (!valid || !wanted.level() || player.dead) {
+            arrestingCop = 0;
+            arrestGrabbed = arrestStopVehicle = false;
+        }
+    }
     // input -> the player's yoke (cPlayerOnFoot::HandleStrafe: wanted heading = camera yaw + stick angle)
     float mx = 0, my = 0;
     bool sprint = false, walk = false;
@@ -1148,9 +1201,10 @@ void Game::tick() {
         sprint = scriptedState == 3;
         walk = scriptedState == 1;
     }
+    if (arrested_ || arrestGrabbed) { mx = my = 0; sprint = walk = false; }
     bool enter = enterPressed || std::find(scriptedEnterFrames.begin(), scriptedEnterFrames.end(), (int)frame) != scriptedEnterFrames.end();
     enterPressed = false;
-    if (enter && !player.dead) {
+    if (enter && !player.dead && !arrested_ && !arrestGrabbed && !arrestStopVehicle) {
         if (task.op == CarTask::GotoDoor) task.op = CarTask::None;   // pressing again while walking there cancels
         else enterOrExit();
     }
@@ -1193,6 +1247,11 @@ void Game::tick() {
             dc.throttle = back ? 0x1000 : -0x1000;
             dc.handbrake = !back;
         } else if (task.op == CarTask::ClimbOut) dc = Vehicle::Controls{};
+        if (arrestStopVehicle || arrestGrabbed) {
+            dc = Vehicle::Controls{};
+            dc.throttle = -4096;
+            dc.handbrake = true;
+        }
         tickTask(false, 0);
         Weapons_PlayerFrame(*this, false, 0);   // the weapon timers keep running in a vehicle
         weaponCycle = 0;
@@ -1261,7 +1320,7 @@ void Game::tick() {
             stickHeld = false;
         }
     }
-    bool busy = player.dead || player.reacting() || tickTask(stickHeld, stickHeading);   // attached to a car / impact response
+    bool busy = player.dead || arrested_ || arrestGrabbed || player.reacting() || tickTask(stickHeld, stickHeading);
     Player::Input in;
     in.moving = stickHeld;
     in.heading = stickHeading;
@@ -1312,7 +1371,7 @@ void Game::tick() {
     }
     // Prepare movement before dynamic contacts; the shared integration below advances it once.
     if (!busy) player.act(in, &pedSprites);
-    else if (player.dead) player.stepOneShot(&pedSprites);
+    else if (player.dead || arrested_) player.stepOneShot(&pedSprites);
     else if (player.reacting() && player.actReaction(&pedSprites,Pedestrians::vehicleAbove(*this,player)))
         TheSound().pedThrownBack(player.pos);   // cAnimation::HandleFrameResets
     traffic.update(*this);
@@ -1336,7 +1395,7 @@ void Game::tick() {
     updateWorldObjects();
     TheParticles().update(frame,world.timeCycle().time(),playerCar >= 0 ? cars[playerCar].pos : player.pos);
     TheSkidmarks().process();
-    if (player.dead) updateDeath();
+    if (player.dead || arrested_) updateDeath();
     else if (playerCar >= 0) {
         const Vehicle& c = cars[playerCar];
         std::copy(c.pos, c.pos + 3, player.pos);
@@ -1469,12 +1528,13 @@ void Game::render(int W, int H) {
         int alpha = deathFrames_ < 72 ? (deathFrames_ - 60) * 255 / 12 : (84 - deathFrames_) * 255 / 12;
         Hud_Rect(0, 0, (float)W, (float)H, (uint32_t)alpha);   // RRGGBBAA: black with the fade alpha
     }
-    if (wastedFrames_ > 0 && !wastedText_.empty()) {
+    const std::string& deathText = bustedDisplay_ ? bustedText_ : wastedText_;
+    if (wastedFrames_ > 0 && !deathText.empty()) {
         // HUDText::DisplayBustedWasted: centred on the 1024 x 768 HUD frame with the phone text scale at 1.5. Its
         // font 5 is the game's large one; the port has only the HUD font, drawn at twice that scale for it.
         const float k = H / 768.f, scale = 3.f * k;
-        const float w = Hud_TextWidth(wastedText_, scale), h = Hud_LineHeight(scale);
-        Hud_Text((W - w) * 0.5f, (H - h) * 0.5f, scale, 0xFFFFFFFFu, wastedText_);
+        const float w = Hud_TextWidth(deathText, scale), h = Hud_LineHeight(scale);
+        Hud_Text((W - w) * 0.5f, (H - h) * 0.5f, scale, 0xFFFFFFFFu, deathText);
     }
     radio.renderApp(W, H, *this);
     renderPause(W, H);
@@ -1531,6 +1591,7 @@ void Game::setPause(bool open) {
     if (open == pauseOpen) return;
     pauseOpen = open;
     uiPaused = open;
+    Plugins_RefreshMouseCapture();
     Audio_SetSfxPaused(open);
     if (open) pauseScreen.opened(OS_TimeAccurate());
 }

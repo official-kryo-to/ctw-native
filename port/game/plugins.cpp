@@ -44,7 +44,7 @@ int g_w = 1280, g_h = 720;
 int g_clicks = 0;
 float g_wheel = 0, g_dx = 0, g_dy = 0;
 std::string g_text;
-bool g_captured = false;
+bool g_captureRequested = false;
 bool g_wheelConsumed = false;
 float g_clip[4] = {0, 0, 0, 0};   // the mods' clip rectangle (w <= 0: none)
 
@@ -137,11 +137,15 @@ void h_get_mouse(float* x, float* y) {
 }
 int h_mouse_down(int b) { return b >= 0 && b < 3 && Host_MouseDown(b) ? 1 : 0; }
 int h_mouse_clicked(int b) { return b >= 0 && b < 3 && (g_clicks >> b & 1) ? 1 : 0; }
-float h_mouse_wheel() { return g_wheel; }
-void h_set_captured(int on) { g_captured = on != 0; Host_SetRelativeMouse(g_captured); }
+float h_mouse_wheel() { return TheGame().uiPaused ? 0.f : g_wheel; }
+void h_set_captured(int on) {
+    g_captureRequested = on != 0;
+    Plugins_RefreshMouseCapture();
+}
 void h_mouse_delta(float* dx, float* dy) {
-    if (dx) *dx = g_dx;
-    if (dy) *dy = g_dy;
+    const bool looking = !TheGame().uiPaused && g_gameInput && SDL_GetRelativeMouseMode();
+    if (dx) *dx = looking ? g_dx : 0.f;
+    if (dy) *dy = looking ? g_dy : 0.f;
 }
 const char* h_text_input() { return g_text.c_str(); }
 
@@ -238,7 +242,7 @@ void h_on_tick(CtwCallback fn, void* u) { if (fn) g_tick.push_back({fn, u}); }
 void h_on_hud(CtwCallback fn, void* u) { if (fn) g_hud.push_back({fn, u}); }
 void h_on_key(CtwKeyCallback fn, void* u) { if (fn) g_keys.push_back({fn, u}); }
 void h_on_event(CtwGameEventCallback fn, void* u) { if (fn) g_events.push_back({fn, u}); }
-void h_game_input(int on) { g_gameInput = on != 0; }
+void h_game_input(int on) { g_gameInput = on != 0; Plugins_RefreshMouseCapture(); }
 
 CtwHostApi g_host = {
     CTW_PLUGIN_API_VERSION, sizeof(CtwHostApi),
@@ -380,7 +384,7 @@ void Plugins_Shutdown() {
     for(auto& item:g_characterModels)item.second->release();
     g_characterModels.clear();
     g_events.clear(); g_pendingEvents.clear();
-    g_gameInput = true; g_captured = false; Host_SetRelativeMouse(false);
+    g_gameInput = true; g_captureRequested = false; Host_SetRelativeMouse(false);
     Game& g = TheGame();   // nothing a plugin changed about the camera outlives it
     g.freeCam.on = false; g.controlYaw.on = false; g.fovOverride = 0.f; g.renderStyle = {};
     if (g_log) fclose(g_log);
@@ -406,6 +410,7 @@ void Plugins_Tick() {
 }
 
 void Plugins_BeginFrame(int w, int h) {
+    Plugins_RefreshMouseCapture();
     g_w = w; g_h = h;
     g_clicks = Host_PopClicks();
     g_wheel = 0;
@@ -433,3 +438,10 @@ bool Plugins_Key(int sc) {
 }
 
 bool Plugins_GameInput() { return g_gameInput; }
+
+void Plugins_RefreshMouseCapture() {
+    // Capture is a gameplay request, not permission to take the cursor from the native pause, radio or weapon
+    // panels. Remember the request so closing a panel restores mouse look without changing the camera mode.
+    Host_SetRelativeMouse(g_captureRequested && g_gameInput && !TheGame().uiPaused);
+    if (!SDL_GetRelativeMouseMode()) g_dx = g_dy = 0;
+}

@@ -7,7 +7,7 @@
 _ZN11CScriptMain19DefineRestartPointsEv:
     sub sp, sp, #32
     str x30, [sp, #24]
-.macro point x, y, z, heading
+.macro point x, y, z, heading, function=AddHospitalRestartPoint
     adrp x8, .Lpair\@
     add x8, x8, :lo12:.Lpair\@
     ldr d0, [x8]
@@ -16,7 +16,7 @@ _ZN11CScriptMain19DefineRestartPointsEv:
     str w8, [sp, #8]
     mov x1, sp
     mov w2, #\heading
-    bl AddHospitalRestartPoint
+    bl \function
     .pushsection .rodata
     .balign 8
 .Lpair\@:
@@ -28,6 +28,9 @@ _ZN11CScriptMain19DefineRestartPointsEv:
     point -1, -2, 456, 180
     point 0, 0, 1, 0
     point 2147483647, -2147483648, 789, 270
+    .rept 12
+    point 16384, -8192, 42, -180, AddPoliceRestartPoint
+    .endr
     ldr x30, [sp, #24]
     add sp, sp, #32
     ret

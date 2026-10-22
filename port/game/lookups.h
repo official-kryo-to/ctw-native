@@ -138,6 +138,6 @@ struct WeaponTables {
 
 struct RestartTables {
     struct Point { int32_t pos[3], heading; };
-    std::vector<Point> hospitals;
+    std::vector<Point> hospitals, police;
     bool load(const std::string& path);
 };

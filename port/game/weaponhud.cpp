@@ -176,6 +176,7 @@ void WeaponHud_SetWheel(Game& g, bool open) {
         gWheelGame = nullptr;
         Audio_SetSfxPaused(gSoundWasPaused);
     }
+    Plugins_RefreshMouseCapture();
 }
 
 bool WeaponHud_Key(Game& g, int k) {

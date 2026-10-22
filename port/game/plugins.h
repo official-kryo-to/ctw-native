@@ -15,6 +15,7 @@ void Plugins_BeginFrame(int width, int height);   // a rendered frame starts: co
 void Plugins_DrawHud(int width, int height);   // inside Hud_Begin/End
 bool Plugins_Key(int scancode);          // true = a plugin swallowed the key
 bool Plugins_GameInput();                // false while a plugin (a menu) has taken the keyboard
+void Plugins_RefreshMouseCapture();      // native paused UI owns the cursor, even when a mod requests mouse look
 void Plugins_Log(const std::string& line);
 const CtwHostApi& Plugins_HostApi();     // same public table used when loading DLLs
 void Plugins_EmitEvent(uint32_t type, CtwVehicle vehicle, int modelId, int value = 0);

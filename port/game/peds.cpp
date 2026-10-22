@@ -426,7 +426,7 @@ bool Pedestrians::createDriver(Game& g, Vehicle& car, int type, const Traffic::Z
     return true;
 }
 
-bool Pedestrians::exitOccupant(Game& g, Vehicle& car, int seat) {
+bool Pedestrians::exitOccupant(Game& g, Vehicle& car, int seat, bool forgetTraffic) {
     if(seat<0 || seat>=4) return false;
     if(car.seatUser[seat]==-1) return true;
     if(car.seatUser[seat]<0) return false;
@@ -442,7 +442,7 @@ bool Pedestrians::exitOccupant(Game& g, Vehicle& car, int seat) {
         const int32_t fraction=frames ? 4096/(int32_t)frames : 0;
         for(int k=0;k<3;++k) p.exitVelocity[k]=(int16_t)(((int64_t)fraction*(p.exitTarget[k]-p.seatPosition[k]))>>12);
         car.openDoor(seat);
-        g.traffic.forget(car.uid);
+        if (forgetTraffic) g.traffic.forget(car.uid);
         car.setToPhysics(true);
         return false;
     }
@@ -470,6 +470,9 @@ void Pedestrians::updateOccupant(Game& g, Ped& p) {
                 p.exitFlee.set=false;
                 const int32_t from[3]={p.exitFlee.from[0],p.exitFlee.from[1],p.exitFlee.from[2]};
                 react(g,p,-1,from,p.exitFlee.fromCar);
+            } else if (p.enforcer.leavingVehicle) {
+                p.enforcer.leavingVehicle = false;
+                p.flee = {};
             } else {
                 // Until the full carjacking reaction task is ported, a displaced driver exits then flees.
                 p.flee.on=p.flee.straight=true; p.flee.fromCar=car.uid;
@@ -642,9 +645,9 @@ void Pedestrians::fleeFromVehicle(Game& g, Ped& p, Vehicle& car, const int32_t f
     exitOccupant(g, car, p.seat);
 }
 
-void Pedestrians::react(Game& g, Ped& p, int action, const int32_t from[3], uint32_t fromCar) {
+void Pedestrians::react(Game& g, Ped& p, int action, const int32_t from[3], uint32_t fromCar, bool fromPlayer) {
     if (p.deadFrames >= 0 || p.flee.on || p.rollFrames >= 0) return;
-    const int r = action < 0 ? Flee : reactionFor(p, action);   // (action -1: the reaction is already chosen)
+    const int r = action < 0 ? Flee : reactionFor(p, action, fromPlayer);   // (action -1: the reaction is already chosen)
     if (r == Roll) {   // cRollOutOfVehicle away from the threat
         const double dx = (double)p.body.pos[0] - from[0], dy = (double)p.body.pos[1] - from[1];
         const double len = std::sqrt(dx * dx + dy * dy);
@@ -684,7 +687,7 @@ static int bloodDrops(int type, int damage, int effect) {
     }
 }
 
-void Pedestrians::meleeHit(Game& g, Ped& p, int damage, int type, const int32_t from[3], int effect) {
+void Pedestrians::meleeHit(Game& g, Ped& p, int damage, int type, const int32_t from[3], int effect, bool fromPlayer) {
     if (p.vehicle || p.deadFrames >= 0 || p.body.dead) return;   // CanBeHit: alive, not in a closed vehicle
     const int d = damage && 100 * damage < 100 ? 1 : 100 * damage / 100;   // FixDamageForArmour (cPed::Reset: 100)
     const bool killed = p.body.takeDamage(d);
@@ -697,24 +700,24 @@ void Pedestrians::meleeHit(Game& g, Ped& p, int damage, int type, const int32_t 
         p.deadFrames = 0;
         p.rollFrames = -1;
         TheSound().pedDeath(p.body.pos, p.male, false);
-        Stats_PedKilledByPlayer(g, p.subtype);   // cPed::HandlePreDead
+        if (fromPlayer) Stats_PedKilledByPlayer(g, p.subtype);   // cPed::HandlePreDead
         if (type == 0) Rand32Critical(100);
-        Stats_PlayerDamage(g, 0, type, effect);
+        if (fromPlayer) Stats_PlayerDamage(g, 0, type, effect);
         Plugins_EmitEvent(CTW_EVENT_PED_KNOCKED_DOWN, 0, -1, (int)p.uid);
         return;
     }
-    react(g, p, 0, from, 0);   // GetAction: types 0 and 12 are action 0
+    react(g, p, 0, from, 0, fromPlayer);   // GetAction: types 0 and 12 are action 0
     // after HelperForRegisteringCrimesDoneToThisPed cPed::Damage rolls (and discards) Rand32Critical(100) for type 0
     if (type == 0) Rand32Critical(100);
-    Stats_PlayerDamage(g, p.body.health, type, effect);
+    if (fromPlayer) Stats_PlayerDamage(g, p.body.health, type, effect);
 }
 
 void Pedestrians::bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], int effect, const int32_t from[3],
-                            int type) {
+                            int type, bool fromPlayer) {
     (void)dir;
     (void)effect;   // ApplyDamageResponse for the weapon's effect (+0x30) is not ported yet
     if (p.vehicle || p.deadFrames >= 0 || p.body.dead) return;   // CanBeHit: alive, not in a closed vehicle
-    g.stats.incBulletsThatHit();   // the player's bullets (types 1 and 2)
+    if (fromPlayer) g.stats.incBulletsThatHit();   // the player's bullets (types 1 and 2)
     TheSound().bulletHitPed(g, p.uid);   // cPed::Damage: cAudioManager::AddBulletHitPed
     const int d = damage && 100 * damage < 100 ? 1 : 100 * damage / 100;   // FixDamageForArmour (cPed::Reset: 100)
     const bool killed = p.body.takeDamage(d);
@@ -723,13 +726,13 @@ void Pedestrians::bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], i
         p.deadFrames = 0;
         p.rollFrames = -1;
         TheSound().pedDeath(p.body.pos, p.male, false);   // cPed::SetDead -> PlayDeathSound
-        Stats_PedKilledByPlayer(g, p.subtype);           // cPed::HandlePreDead
-        Stats_PlayerDamage(g, 0, type, effect);
+        if (fromPlayer) Stats_PedKilledByPlayer(g, p.subtype);           // cPed::HandlePreDead
+        if (fromPlayer) Stats_PlayerDamage(g, 0, type, effect);
         Plugins_EmitEvent(CTW_EVENT_PED_KNOCKED_DOWN, 0, -1, (int)p.uid);
         return;
     }
-    react(g, p, 0, from, 0);
-    Stats_PlayerDamage(g, p.body.health, type, effect);
+    react(g, p, 0, from, 0, fromPlayer);
+    if (fromPlayer) Stats_PlayerDamage(g, p.body.health, type, effect);
 }
 
 void Pedestrians::fireHit(Game& g, Ped& p, int damage, const int32_t from[3]) {
@@ -990,7 +993,7 @@ void Pedestrians::update(Game& g) {
         p.body.obstacles = still;
         if (p.body.reacting()) { p.body.actReaction(&g.pedSprites,vehicleAbove(g,p.body)); p.movementPrepared = true; }
         else if (p.deadFrames >= 0) { p.body.stepOneShot(&g.pedSprites); p.movementPrepared = true; }
-        else wander(g, p);
+        else if (!policeStep(g, p)) wander(g, p);
         updateSocialSensor(g,p);
         if (!p.body.reacting() && !p.body.dead && p.deadFrames >= 0) p.deadFrames = -1;
     }

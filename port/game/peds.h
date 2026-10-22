@@ -51,6 +51,7 @@
 #pragma once
 #include "player.h"
 #include "traffic.h"
+#include "weapons.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -135,6 +136,14 @@ public:
             int gesture = 0;
             bool approachStarted = false, idle = false, animation = false;
         } talk;
+        struct Enforcer {
+            bool pursuing = false, leavingVehicle = false;
+            // Native arrest task: 0 combat, 1 guard, 2 step aside, 3 approach, 4 car door, 5 countdown.
+            int state = 0;
+            uint16_t arrestTimer = 20;
+            bool animation = false;
+            Weapon weapon{0};
+        } enforcer;
     };
     std::vector<Ped> peds;
     int maxPeds = 0;
@@ -162,17 +171,18 @@ public:
     // clear.
     int reactionFor(const Ped& p, int action, bool fromPlayer = true) const;
     // cPed::HandleReaction on foot: the threat is a point, or follows a vehicle (fromCar != 0)
-    void react(Game& g, Ped& p, int action, const int32_t from[3], uint32_t fromCar);
+    void react(Game& g, Ped& p, int action, const int32_t from[3], uint32_t fromCar, bool fromPlayer = true);
     void explosion(Game& g, const struct ExplosionBlast& blast);
     // cPed::Damage for a bullet (sDamageInfo type 1): FixDamageForArmour (armour 100), the health, death, then
     // ReactToDamage (cSimpleMover::GetAction: action 0). from: the shooter's position.
     // Blood: type 1 (bullets) bleeds 15 drops when the armour-fixed damage is at least 5, type 2 (minigun) always.
-    void bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], int effect, const int32_t from[3], int type = 1);
+    void bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], int effect, const int32_t from[3], int type = 1,
+                   bool fromPlayer = true);
     // cPed::Damage for a melee hit (sDamageInfo type 0, or 12 for the chainsaw): the health and death, the hit
     // animation roll (Rand16Critical(2): +0xEB) and ReactToDamage (action 0).
     // Blood: type 0 bleeds four drops unless the weapon's effect is 0x1D, other types one (the chainsaw's
     // type-12 cParticleEmitterBloodSpray is not ported).
-    void meleeHit(Game& g, Ped& p, int damage, int type, const int32_t from[3], int effect = 0);
+    void meleeHit(Game& g, Ped& p, int damage, int type, const int32_t from[3], int effect = 0, bool fromPlayer = true);
     // cPed::Damage for burning (sDamageInfo type 5, effect 0x1D) and the taser (type 3, effect 0x13): the health and
     // death, no blood, then ReactToDamage (GetAction: types 3 and 5 are action 0). from: the attacker.
     void fireHit(Game& g, Ped& p, int damage, const int32_t from[3]);
@@ -181,7 +191,7 @@ public:
     void generate(Game& g, const Traffic::ZoneInfo& z);
     void collect(Game& g);   // cWorld::GarbageCollection: peds in unloaded sectors are deleted
     bool createDriver(Game& g, Vehicle& car, int type, const Traffic::ZoneInfo& zone, int subtype = -1);
-    bool exitOccupant(Game& g, Vehicle& car, int seat); // true when the seat is free
+    bool exitOccupant(Game& g, Vehicle& car, int seat, bool forgetTraffic = true); // true when the seat is free
     // cPed::HandleReaction in a vehicle for fleeing (cFleeOnFoot from the threat): out of the vehicle, then flee
     // from `from` (following fromCar while it exists)
     void fleeFromVehicle(Game& g, Ped& p, Vehicle& car, const int32_t from[3], uint32_t fromCar);
@@ -199,6 +209,7 @@ private:
     bool appearance(Game& g, Ped& p, int type, const Traffic::ZoneInfo& z, int subtype = -1);
     void updateOccupant(Game& g, Ped& p);
     void wander(Game& g, Ped& p);
+    bool policeStep(Game& g, Ped& p);   // supported on-foot enforcer/arrest task branches (police.cpp)
     bool rejoin(Game& g, Ped& p);
     bool idle(Game& g, Ped& p);
     void updateSocialSensor(Game& g, Ped& p);

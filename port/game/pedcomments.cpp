@@ -12,6 +12,10 @@ void Sound::conversation(Game& game,uint32_t uid) {
     conversationAt(game,uid,(uint32_t)(OS_TimeAccurate()*1000.0));
 }
 
+void Sound::copWantsArrest(Game& game, uint32_t uid) {
+    commentAt(game, uid, 1, 70, 600, (uint32_t)(OS_TimeAccurate()*1000.0));
+}
+
 bool Sound::conversationAt(Game& game,uint32_t uid,uint32_t now) {
     return commentAt(game,uid,5,70,600,now);
 }

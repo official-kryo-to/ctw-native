@@ -16,6 +16,8 @@ unsigned short stuckReverse1[4] = {100, 110, 120, 130};
 unsigned short stuckReverse2[4] = {30, 40, 50, 60};
 int stuckReverseSteer[10][2] = {{4096, -4096}, {2048, 0}};
 }
+int pursuitOffsets[15][2] __asm__("_ZN18cAggressiveDriving8mOffsetsE") = {{100,-200},{300,400}};
+int pursuitNext[30] __asm__("_ZN18cAggressiveDriving5mNextE") = {0,1,2,3,4,5,6};
 // cCopProperties' tables are C++ members: give the stand-ins their mangled names.
 unsigned char cop0[28] __asm__("_ZN14cCopProperties19mTakeDownsPerCopCarE") = {1};
 unsigned char cop1[28] __asm__("_ZN14cCopProperties35mRatingToSubtractOnReachingMaxLevelE") = {2};

@@ -17,6 +17,7 @@ namespace fs = std::filesystem;
 
 static SDL_Window* g_win;
 static SDL_GLContext g_gl;
+static bool g_relativeRequested = false, g_inputFocused = false;
 static int g_w = 1280, g_h = 720;
 static std::string g_resRoot = "data", g_docRoot = "saves";
 static auto g_t0 = std::chrono::steady_clock::now();
@@ -150,6 +151,7 @@ bool Host_Init(const char* title, int w, int h) {
     g_win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h,
                              SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (!g_win) { fprintf(stderr, "window: %s\n", SDL_GetError()); return false; }
+    g_inputFocused = (SDL_GetWindowFlags(g_win) & SDL_WINDOW_INPUT_FOCUS) != 0;
     g_gl = SDL_GL_CreateContext(g_win);
     if (!g_gl || !gladLoadGL((GLADloadfunc)SDL_GL_GetProcAddress)) { fprintf(stderr, "GL init failed\n"); return false; }
     // SDL can return a legacy context when Windows has no modern OpenGL driver.
@@ -234,8 +236,10 @@ void Host_TestMouse(int x, int y, int clicks, int wheel) {
 int Host_PopClicks() { int c = g_clicks; g_clicks = 0; return c; }
 std::string Host_PopText() { std::string t; t.swap(g_text); return t; }
 void Host_SetRelativeMouse(bool on) {
-    if ((SDL_GetRelativeMouseMode() == SDL_TRUE) == on) return;
-    SDL_SetRelativeMouseMode(on ? SDL_TRUE : SDL_FALSE);
+    g_relativeRequested = on;
+    const bool capture = on && g_inputFocused;
+    if ((SDL_GetRelativeMouseMode() == SDL_TRUE) == capture) return;
+    SDL_SetRelativeMouseMode(capture ? SDL_TRUE : SDL_FALSE);
     g_dx = g_dy = 0;
 }
 void Host_PopMouseDelta(float* dx, float* dy) { *dx = g_dx; *dy = g_dy; g_dx = g_dy = 0; }
@@ -278,6 +282,12 @@ bool Host_PumpEvents() {
         }
         if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED)
             SDL_GL_GetDrawableSize(g_win, &g_w, &g_h);
+        if (e.type == SDL_WINDOWEVENT && e.window.windowID == SDL_GetWindowID(g_win) &&
+            (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST || e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)) {
+            g_inputFocused = e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED;
+            Host_SetRelativeMouse(g_relativeRequested);
+            g_dx = g_dy = 0;   // never turn the camera with movement from outside the focused game
+        }
         if (e.type == SDL_CONTROLLERDEVICEADDED) padOpen();
         if (e.type == SDL_CONTROLLERDEVICEREMOVED && g_pad &&
             e.cdevice.which == SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_pad))) {
@@ -293,10 +303,13 @@ bool Host_PumpEvents() {
     return true;
 }
 void Host_Shutdown() {
+    Host_SetRelativeMouse(false);
+    g_inputFocused = false;
     if (g_pad) SDL_GameControllerClose(g_pad);
     g_pad = nullptr;
     g_padState = HostPad{};
     if (g_gl) SDL_GL_DeleteContext(g_gl);
     if (g_win) SDL_DestroyWindow(g_win);
+    g_gl = nullptr; g_win = nullptr;
     SDL_Quit();
 }

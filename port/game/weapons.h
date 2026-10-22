@@ -33,7 +33,7 @@
 // Auto-aim is targeting.cpp, the RPG and the thrown weapons projectiles.cpp, the wheel and button weaponhud.cpp.
 // Sword swings apply their delayed ped/vehicle hit; prop hits, sword swing sounds and sharp-weapon damage reactions
 // are still missing. Not ported yet: the flame thrower, sniper rifle and taser, muzzle flashes and ricochet sounds, blood, the
-// damage reactions' animations, drive-by shooting, AI peds with weapons and weapon pickups.
+// damage reactions' animations, drive-by shooting, most AI weapons and weapon pickups.
 #pragma once
 #include "lookups.h"
 #include "flamethrower.h"
@@ -43,6 +43,7 @@
 #include <string>
 
 class Game;
+class Player;
 
 class Weapon {   // cWeapon
 public:
@@ -146,6 +147,9 @@ private:
 // cPlayer::FirePrimary). fireHeld: the button state; cycle: -1 previous, +1 next weapon.
 // throwHeld: the secondary (thrown weapon) button.
 void Weapons_PlayerFrame(Game& g, bool fireHeld, int cycle, bool throwHeld = false);
+// On-foot NPC fists, nightstick and pistol; the caller supplies its task's aim
+// and fire request. Weapon state/ammunition belong to that NPC, independently.
+void Weapons_NpcFrame(Game& g, Player& shooter, Weapon& weapon, bool fireHeld, uint32_t uid);
 int Weapons_ThrowPower();   // the power being built up while the secondary button is held (0..128), else -1
 // cIPhonePad::RenderSecondWeaponPowerArc -> cWeaponManager::RenderSecondaryPower: the throw's arc on the ground
 void Weapons_RenderThrowArc(const Game& g);

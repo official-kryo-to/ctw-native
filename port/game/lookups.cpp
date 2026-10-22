@@ -211,16 +211,26 @@ bool WeaponTables::load(const std::string& path) {
 
 bool RestartTables::load(const std::string& path) {
     hospitals.clear();
+    police.clear();
     auto file = openTable(path);
-    uint32_t count = 0;
+    uint32_t count = 0, policeCount = 0;
+    char header[8];
     RestartTables next;
-    if (!magic(file, "CTWRESP1") || !read(file, &count, 4) || !count || count > 64) return false;
+    if (!read(file, header, 8) || (std::memcmp(header, "CTWRESP1", 8) && std::memcmp(header, "CTWRESP2", 8)) ||
+        !read(file, &count, 4) || !count || count > 64) return false;
+    if (!std::memcmp(header, "CTWRESP2", 8) && (!read(file, &policeCount, 4) || !policeCount || policeCount > 64)) return false;
     next.hospitals.resize(count);
-    if (!read(file, next.hospitals.data(), count * sizeof(Point)) || !end(file)) return false;
-    for (const auto& p : next.hospitals) {
+    next.police.resize(policeCount);
+    if (!read(file, next.hospitals.data(), count * sizeof(Point)) ||
+        (policeCount && !read(file, next.police.data(), policeCount * sizeof(Point))) || !end(file)) return false;
+    auto valid = [](const Point& p) {
         for (int32_t coordinate : p.pos) if (coordinate < -10000 * 4096 || coordinate > 10000 * 4096) return false;
         if (p.heading < -360 || p.heading > 360) return false;
-    }
+        return true;
+    };
+    for (const auto& p : next.hospitals) if (!valid(p)) return false;
+    for (const auto& p : next.police) if (!valid(p)) return false;
     hospitals.swap(next.hospitals);
+    police.swap(next.police);
     return true;
 }

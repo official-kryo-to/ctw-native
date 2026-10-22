@@ -1494,6 +1494,96 @@ static void playerFrameIntegration() {
     }
 }
 
+static void vehicleEntry() {
+    // Synthetic geometry exercises the real enter button, walk-to-door, occupant update and seat handoff.
+    // No game data is needed; missing sprite frames make each one-shot finish on the next tick.
+    GameplayTables& tables = const_cast<GameplayTables&>(TheGameplayTables());
+    const GameplayTables saved = tables;
+    tables.spawnOffset[0][0] = -4096; tables.spawnOffset[0][1] = 0;
+    tables.spawnOffset[1][0] = 4096; tables.spawnOffset[1][1] = 0;
+    VehicleInfo info{};
+    auto put = [&](int offset, int32_t value) { std::memcpy(info.raw + offset, &value, 4); };
+    put(0x10C, 2); // two seats
+    info.raw[0x94] = 1; info.raw[0x95] = 2;
+    put(0x98, -0x1800); put(0xA0, 0x1800); // door + spawn offset = +/-2.5 units
+    put(0xDC, -0x800); put(0xE8, 0x800);
+    const int32_t origin[3] = {};
+    auto setup = [&](Game& game, int side, bool driver, int16_t heading = 0) {
+        game.clockRunning = false; game.scriptedInput = true;
+        game.peds.densityScale = game.traffic.densityScale = 0;
+        game.cars.emplace_back(); game.cars[0].init(info, 32, origin, heading, 0);
+        auto& car = game.cars[0]; car.uid = 17; car.keep = true;
+        car.hx = 4096; car.hy = 8192; car.hz = 4096;
+        int32_t door[3]; car.doorSpawnPoint(side, door); door[0] += side ? 4*4096 : -4*4096;
+        car.localToWorld(door, game.player.pos);
+        game.camera.reset(game.player.pos, 0);
+        if (driver) {
+            Pedestrians::Ped ped; ped.uid = 91; ped.vehicle = car.uid; ped.seat = 0;
+            ped.body.hidden = ped.body.attached = true;
+            car.seatOffset(0, ped.seatPosition); game.peds.peds.push_back(ped); car.seatUser[0] = 91;
+        }
+    };
+    for (int16_t heading : {0,0x4000,0x7FFF}) for (int side : {0,1}) for (bool occupied : {false,true}) {
+        Game game; setup(game, side, occupied, heading);
+        game.enterPressed = true; game.tick();
+        check(game.task.op == Game::CarTask::GotoDoor && game.task.seat == side && game.task.shuffle == (side == 1),
+              "the normal enter button selects the near door, including the passenger side of an occupied car");
+        bool opened = false, slid = false, shuffled = false, waitedForDriver = false;
+        for (int frame = 0; frame < 150 && game.playerCar < 0; ++frame) {
+            game.tick();
+            const auto pose = game.player.renderPose(nullptr,0,0,0);
+            if (game.task.op == Game::CarTask::OpenDoor) {
+                opened = true;
+                check(game.player.attached && pose.upper_animation == (side ? 8 : 6) &&
+                      bool(pose.flags & CTW_CHARACTER_FLIPPED) == (side != 0),
+                      "entry opens the selected door with the original side-specific animation and flip");
+            }
+            if (game.task.op == Game::CarTask::SlideIn && pose.upper_animation == 0xC) slid = true;
+            if (game.task.op == Game::CarTask::SlideIn && pose.upper_animation == 0x92) {
+                shuffled = true;
+                check(game.task.seat == 0 && !game.task.shuffle && game.cars[0].seatUser[0] == -1,
+                      "passenger entry starts the across-seat animation only after the driver seat is released");
+            }
+            if (occupied && game.task.jacked && game.playerCar < 0) waitedForDriver = true;
+            if (occupied && game.cars[0].seatUser[0] == -2)
+                check(game.peds.peds[0].vehicle == 0 && !game.peds.peds[0].body.hidden,
+                      "entry never overwrites an NPC still attached to the driver's seat");
+        }
+        check(opened && slid && shuffled == (side == 1) && waitedForDriver == occupied,
+              "complete entry runs opening, sliding, optional shuffle and the occupied-driver handoff");
+        check(game.playerCar == 0 && game.player.hidden && !game.player.attached && game.task.op == Game::CarTask::None &&
+              game.cars[0].seatUser[0] == -2 && game.cars[0].seatUser[1] == -1,
+              "walking from either side reaches the driver's seat without getting stuck against the car body");
+        if (occupied) check(game.peds.peds[0].vehicle == 0 && !game.peds.peds[0].exiting && !game.peds.peds[0].body.hidden,
+                            "a jacked driver finishes exiting through the occupant update");
+    }
+    // Door obstruction chooses the next valid plan; a vehicle is a real obstruction in IsDoorValid.
+    for (int blocked : {0,1}) {
+        Game game; setup(game, blocked, false);
+        const int32_t at[3] = {blocked ? 0x1800 : -0x1800,0,0};
+        game.cars.emplace_back(); game.cars[1].init(info,32,at,0,0);
+        game.cars[1].hx = game.cars[1].hy = 0x400; game.cars[1].hz = 0x2000;
+        check(!game.doorClear(game.cars[0],blocked) && game.doorClear(game.cars[0],blocked^1),
+              "the door world test detects a nearby blocking vehicle on only the obstructed side");
+        game.startEnter(0);
+        check(game.task.op == Game::CarTask::GotoDoor && game.task.seat == (blocked^1) && game.task.shuffle == (blocked == 0),
+              "a blocked near door falls back to the clear door's original plan");
+    }
+    {
+        Game game; setup(game,1,false); game.cars[0].seatUser[1] = 92;
+        game.startEnter(0);
+        check(game.task.seat == 0 && !game.task.shuffle,
+              "an occupied passenger seat cannot be used as an intermediate route to the driver");
+    }
+    {
+        Game game; setup(game,1,false);
+        game.startEnter(0); game.player.setHeading(0);
+        check(!game.tickTask(true,(int16_t)0x8000) && game.task.op == Game::CarTask::None && !game.player.attached,
+              "pushing away cancels the door approach without attaching the player");
+    }
+    tables = saved;
+}
+
 int main() {
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1);
     check(Audio_Init() && Audio_Init(), "audio initialization is idempotent");
@@ -1513,7 +1603,7 @@ int main() {
     Audio_SetSfxPaused(false);
     for (int i = 0; i < 50 && Audio_SfxPlaying(voice); ++i) SDL_Delay(20);
     check(!Audio_SfxPlaying(voice), "resumed sound effect finishes normally");
-    playerFrameIntegration();
+    playerFrameIntegration(); vehicleEntry();
     PlayerTestAccess::fightIdle(); SoundTestAccess::run(); CollisionTestAccess::run(); CollisionTestAccess::cameraTests(); PropTestAccess::run(); PropDynamicsTestAccess::run();
     slats(); garbage(); VehicleTestAccess::flaps(); VehicleTestAccess::burnouts(); VehicleTestAccess::knockOff(); VehicleTestAccess::debris(); WaterTestAccess::run(); randomStreams(); explosionsAndShake(); fireAndCamera(); RadioTestAccess::run();
     Audio_Shutdown();

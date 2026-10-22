@@ -37,7 +37,7 @@ bool inCar(const Game& game) {
 }
 }
 
-bool Radio::init(const std::string& dir) {
+bool Radio::init(const std::string& dir, const std::function<bool()>& loadingFrame) {
     shutdown();
     GameFs fs;
     std::vector<uint8_t> data, png;
@@ -60,6 +60,13 @@ bool Radio::init(const std::string& dir) {
     labels.load(dir + "/e_pda.gxt"); names.load(dir + "/e_main.gxt");
     appHeading_ = text(names, 0x3F);   // cRadioApp::Init: AddHeading(GlobalText()->GetString(0x3F)), "Music Player"
     for (const auto& def : tables_.stations) {
+        if (loadingFrame && !loadingFrame()) {
+            // An incomplete station list must not overwrite the user's saved
+            // tuning/listening state when startup is cancelled before loadSave.
+            stations_.clear();
+            shutdown();
+            return false;
+        }
         Station station;
         station.icon = def.icon; station.stream = def.stream;
         station.label = text(labels, def.label); station.name = text(names, def.name);
@@ -338,6 +345,7 @@ void Radio::openApp(bool open, Game& game) {
     appTuning_ = false;
     pointerDown_ = pointerSwiped_ = false;
     game.uiPaused = open;            // cRadioApp::Init: cGame::Pause
+    Plugins_RefreshMouseCapture();
     Audio_SetSfxPaused(open);
     if (open) {
         // cRadioApp::Init: each icon at the running width, 40 pixels apart; the carousel starts on the station

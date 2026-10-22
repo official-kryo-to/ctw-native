@@ -87,7 +87,7 @@ class GameBinary:
         return ''
 
     def constant_calls(self, name):
-        """Track constant call arguments in the two straight-line table initializers."""
+        """Track constant call arguments in straight-line table initializers, including external tail calls."""
         from capstone.arm64 import ARM64_OP_IMM, ARM64_OP_REG
         symbol = self.symbols.get(name)
         if symbol is None:
@@ -131,8 +131,11 @@ class GameBinary:
                 base = regs.get(regname(ins, op[1].mem.base))
                 number = None if base is None else struct.unpack('<Q', self.read(base + op[1].mem.disp, 8))[0]
                 write(ins, op[0], number)
-            elif ins.mnemonic == 'bl':
+            elif ins.mnemonic == 'bl' or (ins.mnemonic == 'b' and
+                                         not symbol['st_value'] <= op[0].imm < symbol['st_value'] + len(code)):
                 yield self.call_name(op[0].imm), dict(regs), dict(stack)
+                if ins.mnemonic == 'b':
+                    return
                 for r in range(19):
                     regs.pop(f'x{r}', None)
             elif ins.mnemonic == 'ret':
@@ -142,20 +145,25 @@ class GameBinary:
                     regs.pop(regname(ins, reg), None)
 
     def restart(self):
-        points = []
+        hospitals, police = [], []
         for name, regs, stack in self.constant_calls('_ZN11CScriptMain19DefineRestartPointsEv'):
-            if 'AddHospitalRestartPoint' not in name:
+            if 'AddHospitalRestartPoint' in name:
+                points = hospitals
+            elif 'AddPoliceRestartPoint' in name:
+                points = police
+            else:
                 continue
             pointer = regs.get('x1')
             packed, z, heading = stack.get(pointer), stack.get(pointer + 8) if pointer is not None else None, regs.get('x2')
             if packed is None or z is None or heading is None:
-                raise TableError('Could not resolve hospital restart coordinates.')
+                raise TableError('Could not resolve restart coordinates.')
             x, y = struct.unpack('<2i', struct.pack('<Q', packed))
             heading = struct.unpack('<i', struct.pack('<I', heading))[0]
             points.append((x, y, z, heading))
-        if len(points) != 5:
-            raise TableError('Unexpected hospital restart point count.')
-        return b'CTWRESP1' + struct.pack('<I', len(points)) + b''.join(struct.pack('<4i', *p) for p in points)
+        if len(hospitals) != 5 or len(police) != 12:
+            raise TableError('Unexpected hospital or police restart point count.')
+        return (b'CTWRESP2' + struct.pack('<II', len(hospitals), len(police)) +
+                b''.join(struct.pack('<4i', *p) for p in hospitals + police))
 
     def population(self):
         profiles = []
@@ -186,6 +194,33 @@ class GameBinary:
             raise TableError("No population zones found.")
         return (b'CTWZONE1' + struct.pack('<II', len(zones), len(profiles)) + b''.join(zones) +
                 b''.join(struct.pack('<12i', *p) for p in profiles))
+
+    def navigation(self):
+        nav, islands = [], []
+        for name, regs, _ in self.constant_calls('_ZN12cZoneManager17SetupDefaultZonesEv'):
+            is_nav = name.startswith('_ZNK8ZoneImpl10SetNavZone')
+            is_island = name.startswith('_ZNK8ZoneImpl13SetIslandZone')
+            if not is_nav and not is_island:
+                continue
+            address = regs.get('x1')
+            if address is None:
+                raise TableError('Could not resolve navigation zone name.')
+            zone_name = self.read(address, 16).split(b'\0', 1)[0]
+            if not 1 <= len(zone_name) <= 8:
+                raise TableError('Unsupported navigation zone name.')
+            if is_nav:
+                text, affluence, no_bleed = (regs.get(f'x{i}') for i in range(2, 5))
+                if (text is None or not 0 <= text <= 65535 or affluence not in range(4) or no_bleed not in (0, 1)):
+                    raise TableError('Unsupported navigation zone arguments.')
+                nav.append(struct.pack('<8sHBB', zone_name, text, affluence, no_bleed))
+            else:
+                island = regs.get('x2')
+                if island is None or not 0 <= island <= 255:
+                    raise TableError('Unsupported island zone arguments.')
+                islands.append(struct.pack('<8sI', zone_name, island))
+        if not nav or not islands:
+            raise TableError('No navigation or island zones found.')
+        return b'CTWNAV1\0' + struct.pack('<II', len(nav), len(islands)) + b''.join(nav + islands)
 
     def sound(self):
         data = b'CTWSND4\0'
@@ -218,9 +253,12 @@ class GameBinary:
 
     def driving(self):
         # gDrivingProps: 103 vehicles, five {acceleration, deceleration} byte pairs each.
-        return (b'CTWDRIV2' + self.symbol_data('gDrivingProps', 1030) +
+        return (b'CTWDRIV3' + self.symbol_data('gDrivingProps', 1030) +
                 self.symbol_data('stuckReverse1', 8) + self.symbol_data('stuckReverse2', 8) +
-                self.symbol_data('stuckReverseSteer', 80))
+                self.symbol_data('stuckReverseSteer', 80) +
+                self.symbol_data('_ZN18cAggressiveDriving8mOffsetsE', 120) +
+                self.symbol_data('_ZN18cAggressiveDriving5mNextE', 120) +
+                self.read(0x481e00, 64) + self.read(0x487198, 20))
 
     def radio(self):
         # cRadioApp::InitStationIconsAndText and cWavStream's fixed-width filename table.
@@ -284,7 +322,7 @@ class GameBinary:
 
 def extract_tables(binary):
     game = GameBinary(binary)
-    return {'population_tables.bin': game.population(), 'sound_tables.bin': game.sound(),
+    return {'population_tables.bin': game.population(), 'navigation_tables.bin': game.navigation(), 'sound_tables.bin': game.sound(),
             'render_tables.bin': game.render(), 'gameplay_tables.bin': game.gameplay(),
             'radio_tables.bin': game.radio(), 'restart_tables.bin': game.restart(),
             'weather_tables.bin': game.weather(), 'weapon_tables.bin': game.weapons(),

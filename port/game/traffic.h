@@ -26,6 +26,7 @@
 #include "aispline.h"
 #include "driving.h"
 #include "trafficavoidance.h"
+#include "zones.h"
 #include <cstdint>
 #include <map>
 #include <string>
@@ -45,9 +46,10 @@ public:
         return avoidance_.interceptPed(g,uid,out);
     }
 
-    struct ZoneInfo { int fields[20]; int pedMakeup, vehMakeup, pedDensity, carDensity, sex = 0; };   // sex: 1 male, 2 female
+    using ZoneInfo = ZoneManager::PopulationInfo;   // sex: 1 male, 2 female
     const ZoneInfo* zoneAt(int32_t x, int32_t y, bool night) const;
     std::string zoneName(int32_t x, int32_t y) const;
+    const ZoneManager& zones() const { return zones_; }
     int maxCars = 0;          // the cap of the last population update (HUD / tests)
     int count() const { return (int)drivers_.size(); }
     float densityScale = 1.f; // PC mod API: scales the target moving-car population; original default is 1
@@ -75,6 +77,10 @@ public:
 
 private:
     struct Driver {           // cWanderRoads
+        struct Pursuit {
+            bool active = false, leaving = false, initialized = false;
+            uint8_t course = 8, offset = 8, timer = 0;
+        } pursuit;
         AISpline spline;
         int32_t speed = 6 << 12;   // +0xE8
         uint8_t horn = 0, startDelay = 1, holdCounter = 0;   // +0xF5, +0xF7, +0xFB
@@ -98,9 +104,7 @@ private:
     };
     std::map<uint32_t, Driver> drivers_;   // by Vehicle::uid
 
-    struct Zone { std::string name; int16_t x0, y0, x1, y1; int info = -1; };
-    std::vector<Zone> zones_;
-    std::vector<ZoneInfo> infos_[2];       // day, night
+    ZoneManager zones_;
     // popinfo.bin
     std::vector<std::vector<uint8_t>> lists_;
     struct Makeup { std::vector<std::pair<uint16_t, uint16_t>> entries; uint8_t sea = 0, land = 0; };
@@ -125,6 +129,8 @@ private:
     bool completedAim(const Game& g, const Vehicle& v, Driver& d);
     void rejoin(Game& g, Vehicle& v, Driver& d);
     void wanderUnderPhysics(Game& g, Vehicle& v, Driver& d);   // cWanderRoadsUnderPhysics::Process
+    bool enforce(Game& g, Vehicle& v, Driver& d); // police vehicle pursuit and the handoff to arrest on foot
+    void pursuitTarget(const Game& g, const Vehicle& v, Driver::Pursuit& state, int32_t out[3]);
     int32_t roadSpeed(Game& g, const Vehicle& v, const Driver& d) const;   // iAITask::GetRoadSpeed
     friend struct TrafficTestAccess;
 };

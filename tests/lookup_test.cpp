@@ -3,6 +3,7 @@
 // See LICENSE in the repository root.
 #include "lookups.h"
 #include "gfx/rendertables.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -154,6 +155,39 @@ int main() {
     bytes[8] = 10; bytes.pop_back();
     save(path, bytes);
     check(!weather.load(path.string()), "truncated weather table rejected");
+
+    RestartTables restart;
+    const RestartTables::Point hospital{{-4096,8192,123},-90}, police{{12288,-4096,456},180};
+    bytes.clear();
+    append(bytes, "CTWRESP2", 8);
+    append(bytes, counts, sizeof counts);
+    append(bytes, &hospital, sizeof hospital);
+    append(bytes, &police, sizeof police);
+    save(path, bytes);
+    check(restart.load(path.string()) && restart.hospitals.size() == 1 && restart.police.size() == 1 &&
+          restart.police[0].pos[1] == -4096 && restart.hospitals[0].heading == -90,
+          "restart table keeps police and hospital positions and signed headings separate");
+    const auto complete = bytes;
+    bytes.pop_back(); save(path, bytes);
+    check(!restart.load(path.string()) && restart.police.empty() && restart.hospitals.empty(),
+          "truncated restart clears both previous station lists");
+    bytes = complete; bytes.push_back(0); save(path, bytes);
+    check(!restart.load(path.string()), "restart table rejects trailing data");
+    bytes = complete; bytes[12] = 0; save(path, bytes);
+    check(!restart.load(path.string()), "new restart format requires police points");
+    bytes = complete; bytes[12] = 65; save(path, bytes);
+    check(!restart.load(path.string()), "restart point count is bounded before allocation");
+    bytes = complete;
+    const int32_t invalidHeading = 361;
+    std::copy_n((const char*)&invalidHeading,4,bytes.end()-4); save(path,bytes);
+    check(!restart.load(path.string()), "invalid police heading rejects the table");
+    bytes.clear();
+    append(bytes, "CTWRESP1", 8);
+    append(bytes, counts, 4);
+    append(bytes, &hospital, sizeof hospital);
+    save(path, bytes);
+    check(restart.load(path.string()) && restart.hospitals.size() == 1 && restart.police.empty(),
+          "legacy hospital-only exports still load without inventing police restart points");
     std::filesystem::remove(path);
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }

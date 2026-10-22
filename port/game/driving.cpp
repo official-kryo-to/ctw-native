@@ -30,18 +30,41 @@ int16_t targetAngle(int32_t dp, bool negative) {
 }
 
 bool DrivingProps::load(const std::string& path) {
-    loaded_ = false;
+    loaded_ = policeLoaded_ = false;
     std::vector<uint8_t> data;
     const size_t size=sizeof values_+sizeof reverseFirst_+sizeof reverseSecond_+sizeof reverseSteering_;
-    if (!Data_ReadAll(path, data) || data.size() != 8 + size || std::memcmp(data.data(), "CTWDRIV2", 8)) return false;
+    if (!Data_ReadAll(path, data) || data.size()<8) return false;
+    const bool version3 = std::memcmp(data.data(),"CTWDRIV3",8)==0;
+    const size_t policeSize=sizeof pursuitOffsets_+sizeof pursuitNext_+sizeof pursuitRemap_+sizeof speedValues_;
+    if ((!version3 && std::memcmp(data.data(),"CTWDRIV2",8)) || data.size()!=8+size+(version3?policeSize:0)) return false;
     std::memcpy(values_, data.data() + 8, sizeof values_);
     size_t offset=8+sizeof values_;
     std::memcpy(reverseFirst_,data.data()+offset,sizeof reverseFirst_);offset+=sizeof reverseFirst_;
     std::memcpy(reverseSecond_,data.data()+offset,sizeof reverseSecond_);offset+=sizeof reverseSecond_;
-    std::memcpy(reverseSteering_,data.data()+offset,sizeof reverseSteering_);
+    std::memcpy(reverseSteering_,data.data()+offset,sizeof reverseSteering_);offset+=sizeof reverseSteering_;
+    if (version3) {
+        std::memcpy(pursuitOffsets_,data.data()+offset,sizeof pursuitOffsets_);offset+=sizeof pursuitOffsets_;
+        std::memcpy(pursuitNext_,data.data()+offset,sizeof pursuitNext_);offset+=sizeof pursuitNext_;
+        std::memcpy(pursuitRemap_,data.data()+offset,sizeof pursuitRemap_);offset+=sizeof pursuitRemap_;
+        std::memcpy(speedValues_,data.data()+offset,sizeof speedValues_);
+        for (const auto& pair:pursuitOffsets_) for (int32_t value:pair)
+            if (value < -100*4096 || value > 100*4096) return false;
+        for (int32_t value:pursuitNext_) if (value<0 || value>=15) return false;
+        for (int64_t value:pursuitRemap_) if (value<0 || value>=15) return false;
+        for (int32_t value:speedValues_) if (value<0 || value>255) return false;
+        policeLoaded_=true;
+    }
     loaded_ = true;
     return true;
 }
+
+bool DrivingProps::pursuitOffset(int index,int32_t out[2]) const {
+    if (!policeLoaded_ || index<0 || index>=15) return false;
+    out[0]=pursuitOffsets_[index][0];out[1]=pursuitOffsets_[index][1];return true;
+}
+int DrivingProps::pursuitNext(int index) const { return policeLoaded_ && index>=0 && index<30 ? pursuitNext_[index] : -1; }
+int DrivingProps::pursuitRemap(int index) const { return policeLoaded_ && index>=0 && index<8 ? (int)pursuitRemap_[index] : -1; }
+int DrivingProps::speedValue(int index) const { return policeLoaded_ && index>=0 && index<5 ? speedValues_[index] : 0; }
 
 bool DrivingProps::reverseTimes(int attempt,uint16_t& first,uint16_t& second,uint16_t& pattern) const {
     if (!loaded_ || attempt<0) return false;
@@ -185,11 +208,11 @@ bool AIDriving::constraints(const Vehicle& v, const DrivingProps& props, Driving
 }
 
 Vehicle::Controls AIDriving::towards(const Vehicle& vehicle, const DrivingProps& props,
-                                   const int32_t target[3], int32_t speedLimit) {
+                                   const int32_t target[3], int32_t speedLimit, const int32_t* targetMotion) {
     Vehicle::Controls result;
     DrivingConstraints c;
     if (!constraints(vehicle,props,c)) return result;
-    const DrivingData data(vehicle,target);
+    const DrivingData data(vehicle,target,targetMotion);
     result.steer = data.steering(c);
     const int32_t desired = std::max(0,std::min({speedLimit,data.speedForSteering(c),data.speedForDeceleration(c)}));
     result.throttle = data.gas(c,desired);

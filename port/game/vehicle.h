@@ -68,6 +68,7 @@ public:
     int numSeats() const { return numSeats_; }
     bool hasSiren() const { return infoFlags8e_ & 1; }   // info +0x8E bit 0
     bool siren = false;                                  // +0x98A: the siren is sounding
+    bool pursuing = false;                              // +0x948 bit 27: a police vehicle pursuing the player
 
     // damage (cVehicle::DoOnCollisionWorking / Damage / SetHealth / Process / SetDead)
     int health() const { return health_; }

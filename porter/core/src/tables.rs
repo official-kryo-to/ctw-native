@@ -188,8 +188,7 @@ impl<'a> GameBinary<'a> {
         Ok(String::new())
     }
 
-    /// Tracks constant call arguments in a straight-line table initializer: every `bl` with the registers and
-    /// stack slots known at that point.
+    /// Tracks constant call arguments in a straight-line table initializer, including external tail calls.
     pub fn constant_calls(&self, name: &str) -> Result<Vec<(String, Regs, Stack)>, TableError> {
         let (value, size) = match self.symbols.get(name) {
             Some(&s) => s,
@@ -278,9 +277,17 @@ impl<'a> GameBinary<'a> {
                     };
                     write(&mut regs, op(0)?, number);
                 }
-                "bl" => {
+                m @ ("bl" | "b")
+                    if m == "bl" || {
+                        let target = imm(op(0)?).unwrap_or(0) as u64;
+                        !(address..address.saturating_add(code.len() as u64)).contains(&target)
+                    } =>
+                {
                     let target = imm(op(0)?).unwrap_or(0) as u64;
                     calls.push((self.call_name(target)?, regs.clone(), stack.clone()));
+                    if m == "b" {
+                        return Ok(calls);
+                    }
                     for r in 0..19 {
                         regs.remove(&format!("x{r}"));
                     }
@@ -377,6 +384,12 @@ impl<'a> GameBinary<'a> {
         Ok(out)
     }
 
+    pub fn navigation(&self) -> Result<Vec<u8>, TableError> {
+        navigation_table(self.constant_calls("_ZN12cZoneManager17SetupDefaultZonesEv")?, |address| {
+            self.read(address, 16).map(<[u8]>::to_vec)
+        })
+    }
+
     pub fn sound(&self) -> Result<Vec<u8>, TableError> {
         let mut data = b"CTWSND4\0".to_vec();
         for (name, size) in [
@@ -435,11 +448,15 @@ impl<'a> GameBinary<'a> {
 
     pub fn driving(&self) -> Result<Vec<u8>, TableError> {
         // gDrivingProps: 103 vehicles, five acceleration/deceleration byte pairs each.
-        let mut out = b"CTWDRIV2".to_vec();
+        let mut out = b"CTWDRIV3".to_vec();
         out.extend(self.symbol_data("gDrivingProps", 1030)?);
         out.extend(self.symbol_data("stuckReverse1", 8)?);
         out.extend(self.symbol_data("stuckReverse2", 8)?);
         out.extend(self.symbol_data("stuckReverseSteer", 80)?);
+        out.extend(self.symbol_data("_ZN18cAggressiveDriving8mOffsetsE", 120)?);
+        out.extend(self.symbol_data("_ZN18cAggressiveDriving5mNextE", 120)?);
+        out.extend(self.read(0x481e00, 64)?);
+        out.extend(self.read(0x487198, 20)?);
         Ok(out)
     }
 
@@ -541,12 +558,17 @@ impl<'a> GameBinary<'a> {
 }
 
 fn restart_table(calls: Vec<(String, Regs, Stack)>) -> Result<Vec<u8>, TableError> {
-    let mut points = Vec::new();
+    let mut hospitals = Vec::new();
+    let mut police = Vec::new();
     for (name, regs, stack) in calls {
-        if !name.contains("AddHospitalRestartPoint") {
+        let points = if name.contains("AddHospitalRestartPoint") {
+            &mut hospitals
+        } else if name.contains("AddPoliceRestartPoint") {
+            &mut police
+        } else {
             continue;
-        }
-        let bad = || TableError("Could not resolve hospital restart coordinates.".into());
+        };
+        let bad = || TableError("Could not resolve restart coordinates.".into());
         let pointer = regs.get("x1").copied().flatten().ok_or_else(bad)?;
         let packed = stack.get(&pointer).copied().flatten().ok_or_else(bad)?;
         let packed = u64::try_from(packed).map_err(|_| bad())?.to_le_bytes();
@@ -558,12 +580,67 @@ fn restart_table(calls: Vec<(String, Regs, Stack)>) -> Result<Vec<u8>, TableErro
         point.extend(heading.to_le_bytes());
         points.push(point);
     }
-    if points.len() != 5 {
-        return err("Unexpected hospital restart point count.");
+    if hospitals.len() != 5 || police.len() != 12 {
+        return err("Unexpected hospital or police restart point count.");
     }
-    let mut out = b"CTWRESP1".to_vec();
-    out.extend((points.len() as u32).to_le_bytes());
-    out.extend(points.into_iter().flatten());
+    let mut out = b"CTWRESP2".to_vec();
+    out.extend((hospitals.len() as u32).to_le_bytes());
+    out.extend((police.len() as u32).to_le_bytes());
+    out.extend(hospitals.into_iter().chain(police).flatten());
+    Ok(out)
+}
+
+fn navigation_table(
+    calls: Vec<(String, Regs, Stack)>,
+    read_name: impl Fn(u64) -> Result<Vec<u8>, TableError>,
+) -> Result<Vec<u8>, TableError> {
+    let mut navigation = Vec::new();
+    let mut islands = Vec::new();
+    for (name, regs, _) in calls {
+        let is_nav = name.starts_with("_ZNK8ZoneImpl10SetNavZone");
+        if !is_nav && !name.starts_with("_ZNK8ZoneImpl13SetIslandZone") {
+            continue;
+        }
+        let get = |r: &str| regs.get(r).copied().flatten();
+        let address = get("x1")
+            .and_then(|v| u64::try_from(v).ok())
+            .ok_or_else(|| TableError("Could not resolve navigation zone name.".into()))?;
+        let raw = read_name(address)?;
+        let zone_name = &raw[..raw.iter().position(|&b| b == 0).unwrap_or(raw.len())];
+        if !(1..=8).contains(&zone_name.len()) {
+            return err("Unsupported navigation zone name.");
+        }
+        let mut padded = [0u8; 8];
+        padded[..zone_name.len()].copy_from_slice(zone_name);
+        if is_nav {
+            match (get("x2"), get("x3"), get("x4")) {
+                (Some(text), Some(affluence), Some(no_bleed))
+                    if (0..=65535).contains(&text) && (0..=3).contains(&affluence) && (0..=1).contains(&no_bleed) =>
+                {
+                    navigation.extend(padded);
+                    navigation.extend((text as u16).to_le_bytes());
+                    navigation.extend([affluence as u8, no_bleed as u8]);
+                }
+                _ => return err("Unsupported navigation zone arguments."),
+            }
+        } else {
+            match get("x2") {
+                Some(island) if (0..=255).contains(&island) => {
+                    islands.extend(padded);
+                    islands.extend((island as u32).to_le_bytes());
+                }
+                _ => return err("Unsupported island zone arguments."),
+            }
+        }
+    }
+    if navigation.is_empty() || islands.is_empty() {
+        return err("No navigation or island zones found.");
+    }
+    let mut out = b"CTWNAV1\0".to_vec();
+    out.extend(((navigation.len() / 12) as u32).to_le_bytes());
+    out.extend(((islands.len() / 12) as u32).to_le_bytes());
+    out.extend(navigation);
+    out.extend(islands);
     Ok(out)
 }
 
@@ -572,6 +649,7 @@ pub fn extract_tables(binary: &[u8]) -> Result<Vec<(&'static str, Vec<u8>)>, Tab
     let game = GameBinary::new(binary)?;
     Ok(vec![
         ("population_tables.bin", game.population()?),
+        ("navigation_tables.bin", game.navigation()?),
         ("sound_tables.bin", game.sound()?),
         ("render_tables.bin", game.render()?),
         ("gameplay_tables.bin", game.gameplay()?),
@@ -637,6 +715,77 @@ fn shift_value(shift: &Arm64Shift) -> u32 {
 mod tests {
     use super::*;
 
+    fn navigation_calls() -> Vec<(String, Regs, Stack)> {
+        vec![
+            (
+                "_ZNK8ZoneImpl10SetNavZone".into(),
+                HashMap::from([
+                    ("x1".into(), Some(100)),
+                    ("x2".into(), Some(513)),
+                    ("x3".into(), Some(3)),
+                    ("x4".into(), Some(1)),
+                ]),
+                Stack::new(),
+            ),
+            (
+                "_ZNK8ZoneImpl13SetIslandZone".into(),
+                HashMap::from([("x1".into(), Some(200)), ("x2".into(), Some(2))]),
+                Stack::new(),
+            ),
+        ]
+    }
+
+    fn navigation_name(address: u64) -> Result<Vec<u8>, TableError> {
+        Ok(if address == 100 { b"EIGHTCHR\0".to_vec() } else { b"TAILEND\0".to_vec() })
+    }
+
+    #[test]
+    fn navigation_preserves_compact_metadata_and_repeated_names() {
+        let mut calls = navigation_calls();
+        calls.insert(1, calls[0].clone());
+        let table = navigation_table(calls, navigation_name).unwrap();
+        let mut expected = b"CTWNAV1\0".to_vec();
+        expected.extend(2u32.to_le_bytes());
+        expected.extend(1u32.to_le_bytes());
+        let mut nav = b"EIGHTCHR".to_vec();
+        nav.extend(513u16.to_le_bytes());
+        nav.extend([3, 1]);
+        expected.extend(nav.repeat(2));
+        expected.extend(b"TAILEND\0");
+        expected.extend(2u32.to_le_bytes());
+        assert_eq!(table, expected);
+    }
+
+    #[test]
+    fn navigation_rejects_unresolved_and_invalid_definitions() {
+        for (register, value) in [
+            ("x1", None),
+            ("x2", Some(-1)),
+            ("x2", Some(65536)),
+            ("x3", None),
+            ("x3", Some(4)),
+            ("x4", None),
+            ("x4", Some(2)),
+        ] {
+            let mut calls = navigation_calls();
+            calls[0].1.insert(register.into(), value);
+            assert!(navigation_table(calls, navigation_name).is_err());
+        }
+        for island in [None, Some(-1), Some(256)] {
+            let mut calls = navigation_calls();
+            calls[1].1.insert("x2".into(), island);
+            assert!(navigation_table(calls, navigation_name).is_err());
+        }
+        for missing in [0, 1] {
+            let mut calls = navigation_calls();
+            calls.remove(missing);
+            assert!(navigation_table(calls, navigation_name).is_err());
+        }
+        for name in [b"\0".to_vec(), b"LONGERTHAN8\0".to_vec()] {
+            assert!(navigation_table(navigation_calls(), |_| Ok(name.clone())).is_err());
+        }
+    }
+
     fn hospital_call() -> (String, Regs, Stack) {
         let packed = u64::from_le_bytes([(-4096i32).to_le_bytes(), 8192i32.to_le_bytes()].concat().try_into().unwrap());
         (
@@ -646,25 +795,42 @@ mod tests {
         )
     }
 
-    #[test]
-    fn restart_preserves_signed_coordinates_and_heading() {
+    fn restart_calls() -> Vec<(String, Regs, Stack)> {
         let mut calls = vec![hospital_call(); 5];
-        calls.insert(0, ("OtherRestartPoint".into(), Regs::new(), Stack::new()));
-        let table = restart_table(calls).unwrap();
-        assert_eq!(&table[..8], b"CTWRESP1");
-        assert_eq!(&table[8..12], &5u32.to_le_bytes());
-        let point: Vec<u8> = [-4096i32, 8192, 123, -90].into_iter().flat_map(i32::to_le_bytes).collect();
-        assert_eq!(&table[12..], point.repeat(5));
+        for _ in 0..12 {
+            let mut police = hospital_call();
+            police.0 = "AddPoliceRestartPoint".into();
+            calls.push(police);
+        }
+        calls
     }
 
     #[test]
-    fn restart_requires_five_resolved_points() {
+    fn restart_preserves_signed_coordinates_and_heading() {
+        let mut calls = restart_calls();
+        calls.insert(0, ("OtherRestartPoint".into(), Regs::new(), Stack::new()));
+        let table = restart_table(calls).unwrap();
+        assert_eq!(&table[..8], b"CTWRESP2");
+        assert_eq!(&table[8..12], &5u32.to_le_bytes());
+        assert_eq!(&table[12..16], &12u32.to_le_bytes());
+        let point: Vec<u8> = [-4096i32, 8192, 123, -90].into_iter().flat_map(i32::to_le_bytes).collect();
+        assert_eq!(&table[16..], point.repeat(17));
+    }
+
+    #[test]
+    fn restart_requires_resolved_hospital_and_police_points() {
         assert!(restart_table(vec![hospital_call(); 4]).is_err());
-        let mut calls = vec![hospital_call(); 5];
+        let mut calls = restart_calls();
         calls[2].1.remove("x1");
         assert!(restart_table(calls).is_err());
-        let mut calls = vec![hospital_call(); 5];
+        let mut calls = restart_calls();
         calls[2].2.remove(&(SP_BASE + 8));
+        assert!(restart_table(calls).is_err());
+        let mut calls = restart_calls();
+        calls.pop();
+        assert!(restart_table(calls).is_err());
+        let mut calls = restart_calls();
+        calls[7].1.remove("x2");
         assert!(restart_table(calls).is_err());
     }
 }

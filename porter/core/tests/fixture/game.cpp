@@ -4,11 +4,16 @@
 // Synthetic stand-in for the table initializers of libGame.so (parity test only).
 #include <new>
 struct PopulationProfile { PopulationProfile(int,int,int,int,int,int,int,int,int,int,int,int); char d[20]; };
-struct ZoneImpl { void SetPopulationZone(const char*, int, PopulationProfile*, int,int,int,int,int,int) const; };
+struct ZoneImpl {
+    void SetPopulationZone(const char*, int, PopulationProfile*, int,int,int,int,int,int) const;
+    void SetNavZone(const char*, unsigned, int, bool) const;
+    void SetIslandZone(const char*, unsigned) const;
+};
 struct cZoneManager {
     PopulationProfile* profiles; ZoneImpl* zone;
     void DefinePopProfiles();
     void SetupDefaultPopulation();
+    void SetupDefaultZones();
 };
 extern "C" void other_call(int);
 void cZoneManager::DefinePopProfiles() {
@@ -23,4 +28,13 @@ void cZoneManager::SetupDefaultPopulation() {
     zone->SetPopulationZone("CHINA", 3, p + 1, 1, 7, 1000, 2, 700, 5);
     zone->SetPopulationZone("DOWNTWN", 12, p + 0, 4, 0, 1, 2, 3, 4);
     zone->SetPopulationZone("PORT", 7, p + 2, 65536, 1 << 20, 9, 9, 0, 1);
+}
+void cZoneManager::SetupDefaultZones() {
+    zone->SetNavZone("NAVNEG", 513, 0, true);
+    zone->SetNavZone("EIGHTCHR", 65535, 3, false);
+    zone->SetNavZone("NAVNEG", 77, 2, false);
+    zone->SetIslandZone("TEST_A", 0);
+    zone->SetIslandZone("TEST_B", 1);
+    // Optimized builds tail-call the final initializer. Losing this call silently loses an island.
+    zone->SetIslandZone("TAILEND", 2);
 }

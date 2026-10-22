@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <string>
 
-// User-local acceleration and reverse-recovery tables, extracted by setup.
+// User-local acceleration, reverse recovery and police target-plan tables, extracted by setup.
 class DrivingProps {
 public:
     bool load(const std::string& path);
@@ -16,11 +16,19 @@ public:
     int32_t maxAcceleration(int vehicle, int gear) const;
     bool reverseTimes(int attempt, uint16_t& first, uint16_t& second, uint16_t& pattern) const;
     int32_t reverseSteer(uint16_t pattern, bool secondPhase) const;
+    bool policeData() const { return policeLoaded_; }
+    bool pursuitOffset(int index, int32_t out[2]) const;
+    int pursuitNext(int index) const;
+    int pursuitRemap(int index) const;
+    int speedValue(int index) const;
 private:
     int8_t values_[103][5][2]{};
     uint16_t reverseFirst_[4]{}, reverseSecond_[4]{};
     int32_t reverseSteering_[10][2]{};
     bool loaded_ = false;
+    int32_t pursuitOffsets_[15][2]{}, pursuitNext_[30]{}, speedValues_[5]{};
+    int64_t pursuitRemap_[8]{};
+    bool policeLoaded_ = false;
 };
 
 struct DrivingConstraints {
@@ -57,5 +65,6 @@ class AIDriving {
 public:
     static bool constraints(const Vehicle& vehicle, const DrivingProps& props, DrivingConstraints& out);
     static Vehicle::Controls towards(const Vehicle& vehicle, const DrivingProps& props,
-                                    const int32_t target[3], int32_t speedLimit);
+                                    const int32_t target[3], int32_t speedLimit,
+                                    const int32_t* targetMotion = nullptr);
 };

@@ -18,53 +18,20 @@ bool tdbg() { static int d = getenv("CTW_TRAFFICDBG") ? 1 : 0; return d; }
 inline int32_t mulq(int64_t a, int64_t b) { return (int32_t)((a * b) >> 12); }
 inline int32_t isqrt64(int64_t v) { return v <= 0 ? 0 : (int32_t)std::sqrt((double)v); }
 
-// PopulationProfile(p1..p12) -> the sPopStats fields (7 bits each, field = ped type)
-void profileFields(const int p[12], int f[20]) {
-    for (int i = 0; i < 20; ++i) f[i] = 0;
-    f[1] = p[0] & 0x7F; f[10] = p[1] & 0x7F; f[0] = p[2] & 0x7F; f[3] = p[3] & 0x7F; f[5] = p[4] & 0x7F;
-    f[19] = p[5] & 0x7F; f[7] = p[6] & 0x7F; f[11] = p[7] & 0x7F; f[12] = p[8] & 0x7F; f[8] = p[9] & 0x7F;
-    f[15] = p[10] & 0x7F; f[18] = p[11] & 0x7F;
-}
 }   // namespace
 
 bool Traffic::init(const std::string& dataDir) {
     zones_.clear();
-    infos_[0].clear(); infos_[1].clear();
     lists_.clear(); makeups_.clear(); drivers_.clear();
     linkCursor_ = 0;
     spawnFallback_ = 0;
     avoidance_.reset();
     if (!drivingProps_.load(dataDir + "/driving_props.bin"))
         fprintf(stderr,"driving_props.bin missing or invalid: traffic rejoining needs scripts/setup_game.py\n");
-    PopulationTables tables;
-    if (!tables.load(dataDir + "/population_tables.bin")) return false;
+    if (!zones_.init(dataDir)) return false;
     GameFs fs;
-    std::vector<uint8_t> z, pi;
-    if (!fs.open(dataDir) || !fs.read("infozones.bin", z) || !fs.read("popinfo.bin", pi) || pi.size() < 14) return false;
-    // cZoneMgr::Init + cPopulationZones::Init: records sharing a name share their population info
-    std::vector<std::string> names;
-    for (size_t i = 0; i + 16 <= z.size(); i += 16) {
-        Zone zn;
-        zn.name = std::string((const char*)&z[i], strnlen((const char*)&z[i], 8));
-        memcpy(&zn.x0, &z[i + 8], 2); memcpy(&zn.y0, &z[i + 10], 2); memcpy(&zn.x1, &z[i + 12], 2); memcpy(&zn.y1, &z[i + 14], 2);
-        auto it = std::find(names.begin(), names.end(), zn.name);
-        zn.info = (int)(it - names.begin());
-        if (it == names.end()) names.push_back(zn.name);
-        zones_.push_back(zn);
-    }
-    ZoneInfo def{};   // cPopulationZones::mNoZoneDefault: pop stats 0x500, makeups 0 / 5, densities 25 / 25
-    def.fields[1] = 10;
-    def.pedMakeup = 0; def.vehMakeup = 5; def.pedDensity = 25; def.carDensity = 25;
-    for (int dn = 0; dn < 2; ++dn) infos_[dn].assign(names.size(), def);
-    for (const ZoneSetup& s : tables.zones) {   // cZoneManager::SetupDefaultPopulation -> cPopulationZones::Add
-        auto it = std::find(names.begin(), names.end(), std::string(s.name, strnlen(s.name, 8)));
-        if (it == names.end()) continue;
-        ZoneInfo& zi = infos_[s.night][it - names.begin()];
-        profileFields(tables.profiles[s.profile].data(), zi.fields);
-        zi.pedMakeup = s.pedMakeup; zi.vehMakeup = s.vehMakeup;
-        zi.pedDensity = std::min(s.pedDensity, 100); zi.carDensity = std::min(s.carDensity, 100);
-        zi.sex = s.sex;
-    }
+    std::vector<uint8_t> pi;
+    if (!fs.open(dataDir) || !fs.read("popinfo.bin", pi) || pi.size() < 14) return false;
     // popinfo.bin (cPopInfoManager::Init): u32 listTable, u32 pedMakeups, u32 vehicleMakeups, u16 listCount;
     // list = {u32 offset, u8 count, ...} -> count vehicle ids; vehicle makeup (8) = {u32 offset, u16 n, u8 sea, u8 land}
     // -> n x {u16 list, u16 weight}
@@ -109,28 +76,16 @@ bool Traffic::init(const std::string& dataDir) {
     return true;
 }
 
-const Traffic::ZoneInfo* Traffic::zoneAt(int32_t x, int32_t y, bool night) const {   // cZoneMgr::GetZoneForPoint
-    int X = (x >> 12) / 5, Y = (y >> 12) / 5;
-    for (const Zone& z : zones_)
-        if (z.x0 < X && X <= z.x1 && z.y0 < Y && Y <= z.y1) return &infos_[night ? 1 : 0][z.info];
-    return nullptr;
+const Traffic::ZoneInfo* Traffic::zoneAt(int32_t x, int32_t y, bool night) const {
+    return zones_.populationAt(x, y, night);
 }
 
 const Traffic::ZoneInfo& Traffic::zoneOrDefault(int32_t x, int32_t y, bool night) const {
-    static const ZoneInfo def = [] {   // cPopulationZones::mNoZoneDefault
-        ZoneInfo d{};
-        d.fields[1] = 10; d.vehMakeup = 5; d.pedDensity = 25; d.carDensity = 25;
-        return d;
-    }();
-    const ZoneInfo* z = zoneAt(x, y, night);
-    return z ? *z : def;
+    return zones_.populationOrDefault(x, y, night);
 }
 
 std::string Traffic::zoneName(int32_t x, int32_t y) const {
-    int X = (x >> 12) / 5, Y = (y >> 12) / 5;
-    for (const Zone& z : zones_)
-        if (z.x0 < X && X <= z.x1 && z.y0 < Y && Y <= z.y1) return z.name;
-    return "";
+    return zones_.populationName(x, y);
 }
 
 int Traffic::vehicleFromMakeup(const Game& g, int makeup, int limit) const {   // cPopInfoManager::GetVehicleId
@@ -472,9 +427,13 @@ void Traffic::update(Game& g) {
     // Physics activation starts rejoining; it does not remove the seated driver's road task.
     for (auto it = drivers_.begin(); it != drivers_.end();) {
         bool keep = false;
+        Vehicle* owned = nullptr;
         for (int i = 0; i < (int)g.cars.size(); ++i)
-            if (g.cars[i].uid == it->first) keep = !g.cars[i].dead() && g.cars[i].seatUser[0] > 0 &&
-                i != g.playerCar && i != g.task.car;
+            if (g.cars[i].uid == it->first) {
+                owned=&g.cars[i];keep = !g.cars[i].dead() && g.cars[i].seatUser[0] > 0 &&
+                    i != g.playerCar && i != g.task.car;break;
+            }
+        if (!keep && owned) owned->pursuing=false;
         it = keep ? std::next(it) : drivers_.erase(it);
     }
     avoidance_.update(g);
@@ -486,6 +445,7 @@ void Traffic::update(Game& g) {
             d.controls={};
             d.movementRequested=false;
             std::copy(v.pos,v.pos+3,d.beforePhysics);
+            if (enforce(g,v,d)) continue;
             if (!d.underPhysics && (v.physicsActive() || d.rejoining)) {
                 // cWanderRoads::Process gives up on a physics car that is not frozen; CreateWanderRoads makes it a
                 // cWanderRoadsUnderPhysics, which starts with its rejoin
