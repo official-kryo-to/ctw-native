@@ -37,13 +37,20 @@ class GameBinary:
         if ids != ['a4c441f4943abbcc72e8270ec18248e4358a89e2']:
             raise TableError('Unsupported ARM64 build ID; fixed lookup offsets are not verified for this binary.')
         self.relocations = {}
+        self.pointers = {}   # where relocated pointers point: a symbol plus its addend, or a RELATIVE addend
         for section in self.elf.iter_sections():
             if section['sh_type'] not in ('SHT_RELA', 'SHT_REL'):
                 continue
             symbols = self.elf.get_section(section['sh_link'])
+            rela = section['sh_type'] == 'SHT_RELA'
             for rel in section.iter_relocations():
+                addend = rel['r_addend'] if rela else 0
                 if rel['r_info_sym'] and symbols:
-                    self.relocations[rel['r_offset']] = symbols.get_symbol(rel['r_info_sym']).name
+                    symbol = symbols.get_symbol(rel['r_info_sym'])
+                    self.relocations[rel['r_offset']] = symbol.name
+                    self.pointers[rel['r_offset']] = symbol['st_value'] + addend
+                elif rel['r_info_type'] == 1027:   # R_AARCH64_RELATIVE
+                    self.pointers[rel['r_offset']] = addend
         self.decoder = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
         self.decoder.detail = True
 
@@ -54,6 +61,12 @@ class GameBinary:
                 start = seg['p_offset'] + offset
                 return self.data[start:start + count]
         raise TableError(f"Address 0x{address:x} is not file-backed.")
+
+    def pointer(self, address):
+        """The 64-bit pointer stored at address, after its relocation."""
+        if address in self.pointers:
+            return self.pointers[address]
+        return struct.unpack('<Q', self.read(address, 8))[0]
 
     def symbol_data(self, name, count):
         symbol = self.symbols.get(name)
@@ -242,6 +255,27 @@ class GameBinary:
         return (b'CTWWANT1' + self.read(0x481568, 32) + self.read(0x48785e, 26 * 2) + self.read(0x4871f4, 13 * 4) +
                 cop + self.symbol_data('_ZN14cCopProperties38mFailedProbationFramesPerMinusTakedownE', 4))
 
+    def shards(self):
+        # Gui::RenderScreenShards' nine Gui::ShardEffect<n> sets: {int count; pad; records}, each record
+        # {start vertices, end vertices, int count; pad} of (x, y, u, v) int16 vertices.
+        data = b'CTWSHRD1'
+        for n in range(1, 10):
+            name = f'_ZN3Gui12ShardEffect{n}E'
+            header = self.symbol_data(name, 16)
+            count = struct.unpack_from('<i', header)[0]
+            if not 0 < count <= 64:
+                raise TableError(f'Unexpected layout for {name}.')
+            records = self.pointer(self.symbols[name]['st_value'] + 8)
+            data += struct.pack('<I', count)
+            for k in range(count):
+                record = records + 24 * k
+                vertices = struct.unpack('<i', self.read(record + 16, 4))[0]
+                if not 0 < vertices <= 16:
+                    raise TableError(f'Unexpected layout for {name}.')
+                data += struct.pack('<I', vertices)
+                data += self.read(self.pointer(record), 8 * vertices) + self.read(self.pointer(record + 8), 8 * vertices)
+        return data
+
     def weapons(self):
         # cWeaponInfo::msWeaponInfos (28 records of 60 bytes), cWeaponManager::GetDefaultWeaponAmmo's table and
         # cBulletTraces::AddTrace's three trace lifetimes.
@@ -254,5 +288,5 @@ def extract_tables(binary):
             'render_tables.bin': game.render(), 'gameplay_tables.bin': game.gameplay(),
             'radio_tables.bin': game.radio(), 'restart_tables.bin': game.restart(),
             'weather_tables.bin': game.weather(), 'weapon_tables.bin': game.weapons(),
-            'wanted_tables.bin': game.wanted(),
+            'wanted_tables.bin': game.wanted(), 'shard_tables.bin': game.shards(),
             'driving_props.bin': game.driving(), 'ped_comments.bin': game.ped_comments()}

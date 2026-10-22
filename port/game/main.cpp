@@ -55,6 +55,7 @@ int main(int argc, char** argv) {
     float hour = -1;
     int forceWeather = -1;
     int forceWanted = -1;
+    int dieAt = -1;   // --die N: the player dies on frame N (testing the death sequence)
     const char* giveWeapons = nullptr;
     int fireFrom = -1, throwFrom = -1, throwTo = -1;
     for (int i = 1; i < argc; ++i) {
@@ -68,7 +69,7 @@ int main(int argc, char** argv) {
         else if (strcmp(option, "--data") && strcmp(option, "--mods") && strcmp(option, "--shot") &&
                  strcmp(option, "--frames") && strcmp(option, "--keys") && strcmp(option, "--export-textures") && strcmp(option, "--ui") && strcmp(option, "--state") &&
                  strcmp(option, "--enter") && strcmp(option, "--handbrake") && strcmp(option, "--burnout") && strcmp(option, "--hour") &&
-                 strcmp(option, "--weather") && strcmp(option, "--weapon") && strcmp(option, "--fire") && strcmp(option, "--throw") && strcmp(option, "--wanted") &&
+                 strcmp(option, "--weather") && strcmp(option, "--weapon") && strcmp(option, "--fire") && strcmp(option, "--throw") && strcmp(option, "--wanted") && strcmp(option, "--die") &&
                  strcmp(option, "--shot-every")) {
             fprintf(stderr, "Unknown option: %s\n", option);
             return 4;
@@ -113,6 +114,7 @@ int main(int argc, char** argv) {
         if (!strcmp(argv[i], "--hour")) hour = (float)atof(argv[i + 1]);   // testing: start at this time of day
         if (!strcmp(argv[i], "--weather")) forceWeather = atoi(argv[i + 1]);   // testing: ForceWeather(0..7)
         if (!strcmp(argv[i], "--wanted")) forceWanted = atoi(argv[i + 1]);     // testing: SetLevel(0..6)
+        if (!strcmp(argv[i], "--die")) dieAt = atoi(argv[i + 1]);
         if (!strcmp(argv[i], "--weapon")) giveWeapons = argv[i + 1];   // testing: give these weapon types (comma-separated)
         if (!strcmp(argv[i], "--throw")) {   // testing: hold the throw button over frames A:B
             if (sscanf(argv[i + 1], "%d:%d", &throwFrom, &throwTo) != 2) throwTo = throwFrom + 1;
@@ -178,6 +180,7 @@ int main(int argc, char** argv) {
         for (int f = 0; f < frames; ++f) {
             if (fireFrom >= 0) game.scriptedFire = f >= fireFrom;
             if (throwFrom >= 0) game.scriptedThrow = f >= throwFrom && f < throwTo;
+            if (f == dieAt) game.player.takeDamage(1000, true);
             game.tick();
             if (shotEvery > 0 && f % shotEvery == 0) {
                 game.render((int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());

@@ -152,14 +152,17 @@ impl<'a> Elf<'a> {
         Ok(out)
     }
 
-    /// `(r_offset, symbol index)` of a REL or RELA section.
-    pub fn relocations(&self, section: &Section) -> Result<Vec<(u64, u32)>, ElfError> {
-        let default = if section.sh_type == SHT_RELA { 24 } else { 16 };
+    /// `(r_offset, symbol index, type, addend)` of a REL or RELA section (a REL entry's addend is 0).
+    pub fn relocations(&self, section: &Section) -> Result<Vec<(u64, u32, u32, i64)>, ElfError> {
+        let rela = section.sh_type == SHT_RELA;
+        let default = if rela { 24 } else { 16 };
         let entsize = if section.entsize == 0 { default } else { section.entsize };
         let mut out = Vec::new();
         for i in 0..section.size / entsize {
             let at = section.offset + i * entsize;
-            out.push((u64_at(self.data, at)?, (u64_at(self.data, at + 8)? >> 32) as u32));
+            let info = u64_at(self.data, at + 8)?;
+            let addend = if rela { u64_at(self.data, at + 16)? as i64 } else { 0 };
+            out.push((u64_at(self.data, at)?, (info >> 32) as u32, info as u32, addend));
         }
         Ok(out)
     }

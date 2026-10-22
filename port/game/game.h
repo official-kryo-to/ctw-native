@@ -24,6 +24,7 @@
 #include "watercannon.h"
 #include "weather.h"
 #include "wanted.h"
+#include "deathscreen.h"
 #include "weapons.h"
 #include "particles.h"
 #include "fire.h"
@@ -95,6 +96,7 @@ public:
     SniperScope scope;                       // cPlayerAsSniper / cSniperCam
     Stats stats;                             // gStatsManager (cStatsManager)
     WantedManager wanted;                    // the player's wanted level (cPlayer +0x400, wanted.h)
+    DeathScreen deathScreen;                 // Gui::cDeathArrestApp (deathscreen.h)
     static constexpr uint32_t kPlayerOnFoot = 0xFFFFFFFFu;   // Vehicle::lastDamagedBy: the player himself
     // crimes.cpp: cops seeing the player and cWantedManager::Process (from updatePopulation, as cPlayer::Process
     // runs it just before cPopulationManager::Update); the player's crimes against a ped (sDamageInfo type, after
@@ -246,7 +248,11 @@ private:
     void drawDebug(int width, int height);   // F3 (debughud.cpp)
     void killInVehicle(Vehicle& car);
     void updateDeath();
-    int deathFrames_ = 0;
+    int deathFrames_ = -1;          // frames since the player died (the death paths set it to 0 with the camera)
+    bool deathStarted_ = false;     // updateDeath has seen this death
+    int wastedFrames_ = 0;          // HUDText's busted / wasted text: frames left
+    std::string wastedText_;        // e_main.gxt 0x62
+    int respawnFrame() const { return deathScreen.ok() ? 62 : 72; }   // the frame the player is reborn on
     int32_t deathEye_[3] = {}, restartFallback_[3] = {};
     uint16_t deathYaw_ = 0, deathPitch_ = 0;
     bool deathCameraSettled_ = false;

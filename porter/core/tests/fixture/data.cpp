@@ -30,3 +30,23 @@ unsigned char cop9[28] __asm__("_ZN14cCopProperties16mTargetSpeedMultE") = {10};
 unsigned char cop10[28] __asm__("_ZN14cCopProperties27mProbationaryHidePercentageE") = {11};
 unsigned char cop11[28] __asm__("_ZN14cCopProperties41mCarToPlayerOnFootArrivalOffsetMultiplierE") = {12};
 int copFailedProbation __asm__("_ZN14cCopProperties38mFailedProbationFramesPerMinusTakedownE") = 2048;
+
+// Gui::ShardEffect1..9: shard sets whose records point at vertex arrays (relocated pointers).
+namespace Gui {
+struct ShardRecord { const short* start; const short* end; int count; };
+struct ShardSet { int count; const ShardRecord* records; };
+static const short shardA[12] = {0, 0, 0, 0, 512, 0, 1024, 0, 0, 384, 0, 768};
+static const short shardB[12] = {-10, -20, 0, 0, 500, -30, 0, 0, -5, 400, 0, 0};
+static const short shardC[8] = {512, 0, 1024, 0, 1024, 768, 2048, 1536};
+static const short shardD[8] = {530, -40, 0, 0, 1100, 800, 0, 0};
+static const ShardRecord shardRecords[2] = {{shardA, shardB, 3}, {shardC, shardD, 2}};
+ShardSet ShardEffect1 = {2, shardRecords};
+ShardSet ShardEffect2 = {1, shardRecords + 1};
+ShardSet ShardEffect3 = {2, shardRecords};
+ShardSet ShardEffect4 = {1, shardRecords};
+ShardSet ShardEffect5 = {2, shardRecords};
+ShardSet ShardEffect6 = {1, shardRecords + 1};
+ShardSet ShardEffect7 = {2, shardRecords};
+ShardSet ShardEffect8 = {1, shardRecords};
+ShardSet ShardEffect9 = {2, shardRecords};
+}

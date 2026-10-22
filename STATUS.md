@@ -101,7 +101,12 @@ compatibility with the original.
 - **Sound:** engines, horns, doors, impacts, object smashing, explosions, the player's footsteps, music, the city,
   rain and airport ambience, and pedestrian screams and falls. Footsteps use the legs while holding the sword
   or using unarmed fight idle; sword and fist swing cues follow the original animation timing. HUD sounds
-  continue during pause while world sounds are suspended.
+  continue during pause while world sounds are suspended. Also: blocked traffic's horn patterns (cHorn), sirens
+  (toggled with **Q** / **E** in a siren vehicle), weapon reloads and melee hits, the chainsaw's engine, fight
+  grunts, pain comments for shot peds, the landing thud of a thrown player and the burnout launch.
+- **Death:** the original death app: the frame breaks into one of the nine shard sets and flies apart with the
+  "Wasted" jingle and the WASTED! text, then the player is reborn at the nearest hospital six hours later and the
+  game fades in. The hospital fee is not taken (the port has no money yet); arrests are not ported.
 - **Random numbers:** the original four-stream generator and seed.
 - **Radio:** the original radio app (**Tab** in a car): the station carousel (the original's quarter-step scrolling,
   swipe sound and "Music Player" heading), the equaliser driven by the music, favourite stars and the volume meter,

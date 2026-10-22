@@ -33,11 +33,15 @@ fn err<T>(message: impl Into<String>) -> Result<T, TableError> {
 pub type Regs = HashMap<String, Option<i128>>;
 pub type Stack = HashMap<i128, Option<i128>>;
 
+const R_AARCH64_RELATIVE: u32 = 1027;
+
 pub struct GameBinary<'a> {
     elf: Elf<'a>,
     symbols: HashMap<String, (u64, u64)>,
     names: HashMap<u64, String>,
     relocations: HashMap<u64, String>,
+    /// Where relocated pointers point: a symbol plus its addend, or a RELATIVE addend.
+    pointers: HashMap<u64, u64>,
     cs: Capstone,
 }
 
@@ -88,6 +92,7 @@ impl<'a> GameBinary<'a> {
             }
         }
         let mut relocations = HashMap::new();
+        let mut pointers = HashMap::new();
         for section in elf.sections.iter().filter(|s| s.sh_type == SHT_RELA || s.sh_type == SHT_REL) {
             let table: Option<&Section> =
                 elf.sections.get(section.link as usize).filter(|s| s.sh_type == SHT_DYNSYM || s.sh_type == SHT_SYMTAB);
@@ -95,16 +100,17 @@ impl<'a> GameBinary<'a> {
                 Some(t) => Some(elf.symbols(t).map_err(invalid)?),
                 None => None,
             };
-            for (offset, sym) in elf.relocations(section).map_err(invalid)? {
+            for (offset, sym, kind, addend) in elf.relocations(section).map_err(invalid)? {
                 if sym == 0 {
+                    if kind == R_AARCH64_RELATIVE {
+                        pointers.insert(offset, addend as u64);
+                    }
                     continue;
                 }
                 if let Some(list) = &table_symbols {
-                    let name = list
-                        .get(sym as usize)
-                        .map(|s| s.name.clone())
-                        .ok_or_else(|| TableError("Invalid ELF game binary.".into()))?;
-                    relocations.insert(offset, name);
+                    let symbol = list.get(sym as usize).ok_or_else(|| TableError("Invalid ELF game binary.".into()))?;
+                    relocations.insert(offset, symbol.name.clone());
+                    pointers.insert(offset, symbol.value.wrapping_add(addend as u64));
                 }
             }
         }
@@ -114,7 +120,7 @@ impl<'a> GameBinary<'a> {
             .detail(true)
             .build()
             .map_err(|e| TableError(format!("Could not start the disassembler: {e}")))?;
-        Ok(GameBinary { elf, symbols, names, relocations, cs })
+        Ok(GameBinary { elf, symbols, names, relocations, pointers, cs })
     }
 
     pub fn read(&self, address: u64, count: u64) -> Result<&'a [u8], TableError> {
@@ -132,6 +138,15 @@ impl<'a> GameBinary<'a> {
             }
         }
         err(format!("Address 0x{address:x} is not file-backed."))
+    }
+
+    /// The 64-bit pointer stored at `address`, after its relocation.
+    fn pointer(&self, address: u64) -> Result<u64, TableError> {
+        if let Some(&target) = self.pointers.get(&address) {
+            return Ok(target);
+        }
+        let raw = self.read(address, 8)?;
+        Ok(u64::from_le_bytes(raw.try_into().unwrap()))
     }
 
     fn symbol_data(&self, name: &str, count: u64) -> Result<&'a [u8], TableError> {
@@ -456,6 +471,33 @@ impl<'a> GameBinary<'a> {
     }
 
     /// cWantedRating's level table (8 x {u16 threshold, u8 roadblock %, u8 stinger %}), the 26 crime records,
+    /// Gui::RenderScreenShards' nine Gui::ShardEffect<n> sets: {int count; pad; records}, each record
+    /// {start vertices, end vertices, int count; pad} of (x, y, u, v) int16 vertices.
+    pub fn shards(&self) -> Result<Vec<u8>, TableError> {
+        let mut data = b"CTWSHRD1".to_vec();
+        for n in 1..=9 {
+            let name = format!("_ZN3Gui12ShardEffect{n}E");
+            let header = self.symbol_data(&name, 16)?;
+            let count = i32::from_le_bytes(header[..4].try_into().unwrap());
+            if !(1..=64).contains(&count) {
+                return err(format!("Unexpected layout for {name}."));
+            }
+            let records = self.pointer(self.symbols[&name].0 + 8)?;
+            data.extend((count as u32).to_le_bytes());
+            for k in 0..count as u64 {
+                let record = records + 24 * k;
+                let vertices = i32::from_le_bytes(self.read(record + 16, 4)?.try_into().unwrap());
+                if !(1..=16).contains(&vertices) {
+                    return err(format!("Unexpected layout for {name}."));
+                }
+                data.extend((vertices as u32).to_le_bytes());
+                data.extend(self.read(self.pointer(record)?, 8 * vertices as u64)?);
+                data.extend(self.read(self.pointer(record + 8)?, 8 * vertices as u64)?);
+            }
+        }
+        Ok(data)
+    }
+
     /// cVehicle::HandlePlayerCrime's 13 crime types, cCopProperties' seven-level tables and the failed-probation
     /// frames per lost takedown.
     pub fn wanted(&self) -> Result<Vec<u8>, TableError> {
@@ -538,6 +580,7 @@ pub fn extract_tables(binary: &[u8]) -> Result<Vec<(&'static str, Vec<u8>)>, Tab
         ("weather_tables.bin", game.weather()?),
         ("weapon_tables.bin", game.weapons()?),
         ("wanted_tables.bin", game.wanted()?),
+        ("shard_tables.bin", game.shards()?),
         ("driving_props.bin", game.driving()?),
         ("ped_comments.bin", game.ped_comments()?),
     ])

@@ -59,7 +59,7 @@ target_include_directories(ctw_gameplay PUBLIC game)
 target_sources(ctw_gameplay PRIVATE game/radar.cpp game/gamehud.cpp)
 target_sources(ctw_gameplay PRIVATE game/gameplayapi.cpp game/cameraobstruction.cpp)
 target_sources(ctw_gameplay PRIVATE game/vehicledebris.cpp game/vehicleskids.cpp game/trails.cpp game/vehiclereactions.cpp
-    game/wanted.cpp game/crimes.cpp)
+    game/wanted.cpp game/crimes.cpp game/deathscreen.cpp)
 target_sources(ctw_gameplay PRIVATE game/explosions.cpp)
 target_sources(ctw_gameplay PRIVATE game/pausescreen.cpp game/driving.cpp game/trafficavoidance.cpp)
 target_link_libraries(ctw_gameplay PUBLIC ctw_engine)

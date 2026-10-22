@@ -17,6 +17,7 @@
 #include "gfx/assets.h"
 #include <SDL.h>
 #include <glad/gl.h>
+#include "text/gxt.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -63,6 +64,22 @@ bool Game::init(const std::string& data, const std::string& mods) {
     if (!Weapons_Init(dataDir))
         fprintf(stderr, "weapon_tables.bin missing or invalid: no weapons or blast health damage (run scripts/setup_game.py)\n");
     else if (!WeaponHud_Init(dataDir)) fprintf(stderr, "SS_Weapons / SS_Hud / SS_AlwaysLoaded missing: no weapon HUD\n");
+    {   // GlobalText 0x62: "WASTED!", its colour tag kept for the HUD font (UTF-8 of the UTF-16 code units)
+        GxtFile text;
+        wastedText_.clear();
+        if (text.load(dataDir + "/e_main.gxt") && text.count() > 0x62)
+            for (char16_t c : text.get(0x62)) {
+                if (!c) continue;
+                if (c < 0x80) wastedText_ += (char)c;
+                else if (c < 0x800) { wastedText_ += (char)(0xC0 | (c >> 6)); wastedText_ += (char)(0x80 | (c & 63)); }
+                else {
+                    wastedText_ += (char)(0xE0 | (c >> 12)); wastedText_ += (char)(0x80 | ((c >> 6) & 63));
+                    wastedText_ += (char)(0x80 | (c & 63));
+                }
+            }
+    }
+    if (!deathScreen.init(dataDir))
+        fprintf(stderr, "shard_tables.bin missing or invalid: death fades to black (run scripts/setup_game.py)\n");
     if (!wanted.init(dataDir))
         fprintf(stderr, "wanted_tables.bin missing or invalid: no wanted level (run scripts/setup_game.py)\n");
     if (!weather.init(dataDir))
@@ -1047,8 +1064,23 @@ void Game::finishShortFrame() {
 }
 
 void Game::updateDeath() {
+    if (!deathStarted_) {   // a death no path set the camera up for (burning, a script): start from the view
+        deathStarted_ = true;
+        if (deathFrames_ != 0) {
+            camera.position(deathEye_);
+            deathYaw_ = (uint16_t)camera.yaw; deathPitch_ = camera.pitch();
+            deathFrames_ = 0; deathCameraSettled_ = false;
+        }
+    }
     ++deathFrames_;
-    if (deathFrames_ == 1) stats.incNumberOfTimesWasted();   // cDeathArrestWatcher::PlayerWasted
+    deathScreen.tick();
+    if (deathFrames_ == 1) {
+        stats.incNumberOfTimesWasted();   // cDeathArrestWatcher::PlayerWasted
+        // cDeathArrestWatcher::Process state 0 loads the PDA's death app (0x11): the frame shatters
+        if (deathScreen.ok()) deathScreen.open(true);
+    }
+    // state 1: the death camera and HUDImpl::DisplayBustedWasted(0x62, font 5, 125): e_main.gxt's "WASTED!"
+    if (deathFrames_ == 2) wastedFrames_ = 125;
     auto approach = [](int32_t& value, int32_t target, int step) { value += std::clamp(target - value, -step, step); };
     if (!deathCameraSettled_) {
         approach(deathEye_[0], player.pos[0], 0x1000);
@@ -1060,8 +1092,12 @@ void Game::updateDeath() {
             std::abs(deathEye_[0] - player.pos[0]) < 0x800 && std::abs(deathEye_[1] - player.pos[1]) < 0x800 &&
             std::abs(deathEye_[2] - player.pos[2] - 0x8000) < 0x800;
     } else deathEye_[2] = std::min(deathEye_[2] + 0x333, 100 * 4096);
-    // The PDA hospital billing app is not ported yet. Keep its fade/rebirth transition playable.
-    if (deathFrames_ == 72) {
+    // State 4, about 60 frames in (state 2 waits for its timer, which counts two a frame, to reach 0x76): six hours
+    // pass and the player is reborn at the nearest hospital (the $200 fee is not taken: the port has no money yet).
+    // The app then makes way for the game, which fades in over 12 frames (state 6: cScreenFade::FadeIn(12)).
+    if (deathFrames_ == respawnFrame()) {
+        deathScreen.close();
+        deathStarted_ = false;
         const RestartTables::Point* closest = nullptr;
         int64_t best = 0;
         for (const auto& p : restart_.hospitals) {
@@ -1089,7 +1125,8 @@ void Game::tick() {
     radio.update(*this);
     ++frame;
     muzzleFlashes.beginTick();
-    if (!player.dead && deathFrames_ >= 72 && deathFrames_ < 84) ++deathFrames_;
+    if (!player.dead && deathFrames_ >= respawnFrame() && deathFrames_ < respawnFrame() + 12) ++deathFrames_;
+    if (wastedFrames_ > 0) --wastedFrames_;
     localArea.update(*this);   // cPlayer::Think
     player.speedScale = speedScale;
     Plugins_BeginFrameInput();
@@ -1417,15 +1454,27 @@ void Game::render(int W, int H) {
     if (scope.active && playerCar < 0) scope.renderScope(W, H);   // cSniperCam::Set's scope model
     glDisable(GL_DEPTH_TEST);
     applyGrade(W, H);
+    deathScreen.render(W, H);   // the death app: the captured frame's shards over black
 
     Hud_Begin(W, H);
-    if (!pauseOpen) gameplayHud.render(*this, W, H);
+    const bool hudShown = !pauseOpen && !deathScreen.active();   // cDeathArrestWatcher hides the mini HUD
+    if (hudShown) gameplayHud.render(*this, W, H);
     if (showDebug) drawDebug(W, H);
-    if (!pauseOpen) WeaponHud_Render(*this, W, H);   // the game's HUD, under the mods' windows
+    if (hudShown) WeaponHud_Render(*this, W, H);   // the game's HUD, under the mods' windows
     Plugins_DrawHud(W, H);
-    if (deathFrames_ >= 60 && deathFrames_ < 84) {
+    const int reborn = respawnFrame();
+    if (deathScreen.ok() && deathFrames_ >= reborn && deathFrames_ < reborn + 12) {   // cScreenFade::FadeIn(12)
+        Hud_Rect(0, 0, (float)W, (float)H, (uint32_t)((reborn + 12 - deathFrames_) * 255 / 12));
+    } else if (!deathScreen.ok() && deathFrames_ >= 60 && deathFrames_ < 84) {   // no shard tables: fade through black
         int alpha = deathFrames_ < 72 ? (deathFrames_ - 60) * 255 / 12 : (84 - deathFrames_) * 255 / 12;
         Hud_Rect(0, 0, (float)W, (float)H, (uint32_t)alpha);   // RRGGBBAA: black with the fade alpha
+    }
+    if (wastedFrames_ > 0 && !wastedText_.empty()) {
+        // HUDText::DisplayBustedWasted: centred on the 1024 x 768 HUD frame with the phone text scale at 1.5. Its
+        // font 5 is the game's large one; the port has only the HUD font, drawn at twice that scale for it.
+        const float k = H / 768.f, scale = 3.f * k;
+        const float w = Hud_TextWidth(wastedText_, scale), h = Hud_LineHeight(scale);
+        Hud_Text((W - w) * 0.5f, (H - h) * 0.5f, scale, 0xFFFFFFFFu, wastedText_);
     }
     radio.renderApp(W, H, *this);
     renderPause(W, H);
@@ -1497,4 +1546,4 @@ bool Game::pauseKey(int k) {
 
 void Game::renderPause(int W, int H) { pauseScreen.render(*this, W, H); }
 
-void Game::shutdown() { pauseScreen.shutdown(); WeaponHud_Shutdown(); gameplayHud.shutdown(); radio.shutdown(); Plugins_Shutdown(); }
+void Game::shutdown() { deathScreen.shutdown(); pauseScreen.shutdown(); WeaponHud_Shutdown(); gameplayHud.shutdown(); radio.shutdown(); Plugins_Shutdown(); }

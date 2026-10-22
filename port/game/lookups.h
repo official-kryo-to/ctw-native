@@ -91,6 +91,18 @@ struct WantedTables {
     bool load(const std::string& path);
 };
 
+// Gui::ShardEffect1..9 (shard_tables.bin): the screen shards of the death and arrest app
+struct ShardTables {
+    struct Shard {
+        int count = 0;               // a triangle fan of up to 16 vertices
+        int16_t start[16][4]{};      // x, y on a 1024 x 768 screen and u, v (twice x, y)
+        int16_t end[16][4]{};        // where each vertex flies to (x, y)
+    };
+    std::vector<Shard> sets[9];
+    bool loaded = false;
+    bool load(const std::string& path);
+};
+
 struct WeatherTables {
     uint8_t chance[8][8]{};         // cTimeCycle::msWeatherChanceTable: percentages of the next weather
     uint32_t thunder[5]{};          // UpdateLightning: resident-bank samples

@@ -159,6 +159,28 @@ bool WantedTables::load(const std::string& path) {
     return true;
 }
 
+bool ShardTables::load(const std::string& path) {
+    auto file = openTable(path);
+    ShardTables next;
+    if (!magic(file, "CTWSHRD1")) return false;
+    for (std::vector<Shard>& set : next.sets) {
+        uint32_t count = 0;
+        if (!read(file, &count, 4) || count == 0 || count > 64) return false;
+        set.resize(count);
+        for (Shard& s : set) {
+            uint32_t vertices = 0;
+            if (!read(file, &vertices, 4) || vertices == 0 || vertices > 16 ||
+                !read(file, s.start, vertices * 8) || !read(file, s.end, vertices * 8))
+                return false;
+            s.count = (int)vertices;
+        }
+    }
+    if (!end(file)) return false;
+    next.loaded = true;
+    *this = next;
+    return true;
+}
+
 bool WeatherTables::load(const std::string& path) {
     auto file = openTable(path);
     WeatherTables next;

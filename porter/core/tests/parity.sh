@@ -53,6 +53,8 @@ for opt in O1 O2 Os; do
     grep -q '^driving_props.bin ' "$work/rs.txt"
     grep -q '^ped_comments.bin ' "$work/py.txt"
     grep -q '^ped_comments.bin ' "$work/rs.txt"
+    grep -q '^shard_tables.bin ' "$work/py.txt"
+    grep -q '^shard_tables.bin ' "$work/rs.txt"
     compare "tables, fixture -$opt" "$work/py.txt" "$work/rs.txt"
 done
 for lib in libc.so.6 libm.so.6 libstdc++.so.6; do
