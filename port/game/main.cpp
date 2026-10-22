@@ -45,6 +45,7 @@ int main(int argc, char** argv) {
     std::string data, mods;
     const char* shot = nullptr;
     int frames = 60;
+    int shotEvery = 0;   // --shot-every N: also save <shot>_<frame>.bmp every N frames (watching motion)
     const char* keys = nullptr;
     const char* ui = nullptr;   // shot mode: "frame:key=N;frame:click=x,y;frame:mouse=x,y;frame:wheel=x,y,n" (UI tests)
     bool trace = false;
@@ -66,7 +67,8 @@ int main(int argc, char** argv) {
         else if (strcmp(option, "--data") && strcmp(option, "--mods") && strcmp(option, "--shot") &&
                  strcmp(option, "--frames") && strcmp(option, "--keys") && strcmp(option, "--export-textures") && strcmp(option, "--ui") && strcmp(option, "--state") &&
                  strcmp(option, "--enter") && strcmp(option, "--handbrake") && strcmp(option, "--burnout") && strcmp(option, "--hour") &&
-                 strcmp(option, "--weather") && strcmp(option, "--weapon") && strcmp(option, "--fire") && strcmp(option, "--throw")) {
+                 strcmp(option, "--weather") && strcmp(option, "--weapon") && strcmp(option, "--fire") && strcmp(option, "--throw") &&
+                 strcmp(option, "--shot-every")) {
             fprintf(stderr, "Unknown option: %s\n", option);
             return 4;
         }
@@ -78,6 +80,7 @@ int main(int argc, char** argv) {
         if (!strcmp(argv[i], "--mods")) mods = argv[i + 1];
         if (!strcmp(argv[i], "--shot")) shot = argv[i + 1];
         if (!strcmp(argv[i], "--frames")) frames = atoi(argv[i + 1]);
+        if (!strcmp(argv[i], "--shot-every")) shotEvery = atoi(argv[i + 1]);
         if (!strcmp(argv[i], "--ui")) ui = argv[i + 1];
         if (!strcmp(argv[i], "--export-textures")) exportTextures = argv[i + 1];
         if (!strcmp(argv[i], "--keys")) keys = argv[i + 1];   // shot mode: comma-separated SDL scancodes to press
@@ -173,6 +176,12 @@ int main(int argc, char** argv) {
             if (fireFrom >= 0) game.scriptedFire = f >= fireFrom;
             if (throwFrom >= 0) game.scriptedThrow = f >= throwFrom && f < throwTo;
             game.tick();
+            if (shotEvery > 0 && f % shotEvery == 0) {
+                game.render((int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());
+                std::string base = shot;
+                if (base.size() > 4 && base.compare(base.size() - 4, 4, ".bmp") == 0) base.resize(base.size() - 4);
+                saveBmp((base + "_" + std::to_string(f) + ".bmp").c_str());
+            }
             if (trace)
                 for (const Projectiles::Projectile& p : game.projectiles.list())
                     printf("f%3d projectile %d at %.2f %.2f %.2f life %d%c", f, p.kind, p.pos[0] / 4096.0,
@@ -207,8 +216,9 @@ int main(int argc, char** argv) {
             } else if (trace) {
                 float p[3];
                 game.player.posf(p);
-                printf("f%3d pos %.3f %.3f %.3f lvl %d ground %d vz %.2f head %d cam %d pitch %d\n", f, p[0], p[1], p[2], game.player.level(),
-                       game.player.onGround(), game.player.vel[2] / 4096.f, game.player.heading(), (int16_t)game.camera.yaw, (int16_t)game.camera.pitch());
+                printf("f%3d pos %.3f %.3f %.3f lvl %d ground %d vz %.2f head %d cam %d pitch %d wanted %d\n", f, p[0], p[1], p[2], game.player.level(),
+                       game.player.onGround(), game.player.vel[2] / 4096.f, game.player.heading(), (int16_t)game.camera.yaw, (int16_t)game.camera.pitch(),
+                       game.wanted.level());
             }
         }
         if (keys)
