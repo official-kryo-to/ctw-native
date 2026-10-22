@@ -494,6 +494,74 @@ void Game::startEnter(int target) {   // FindSuitableVehicles (within 10 units) 
     task.op = CarTask::GotoDoor;
     task.car = best;
     task.seat = 0;
+    // cVehicle::GetPlan for the driver's seat: GetPedFacingToVehicleSide (the nearer door: driver's unless the
+    // passenger's is strictly nearer) picks one of cSeats::mPlansForSeats' sequences and the first plan whose ops
+    // pass CheckSeatValidity is taken. Driver's side: {1} the driver's door, {6, 1} in by the passenger's door and
+    // across, {100} warp in. Passenger's side: {6, 1}, then {1}, then {100}. ({2, 1} validates as {6, 1} does for the
+    // player and is left out.) Bikes and single seaters use the bike plans (ops 9 and 10): straight on.
+    Vehicle& c = cars[best];
+    if (c.isBike() || c.numSeats() <= 1) return;
+    int32_t local[3], d0[3], d1[3];
+    c.doorSpawnPoint(0, local); c.localToWorld(local, d0);
+    c.doorSpawnPoint(1, local); c.localToWorld(local, d1);
+    auto dist2 = [&](const int32_t* w) {
+        const int64_t dx = w[0] - player.pos[0], dy = w[1] - player.pos[1], dz = w[2] - player.pos[2];
+        return dx * dx + dy * dy + dz * dz;
+    };
+    const bool driverSide = dist2(d1) >= dist2(d0);
+    // op 1: IsDoorValid(driver); op 6 then 1: IsDoorValid(passenger), then CanBeUsedForPlan(driver), which an
+    // occupied driver's seat fails (the player jacks from the driver's side)
+    const bool viaPassenger = c.seatUser[0] < 0 && c.seatUser[1] < 0 && doorClear(c, 1);
+    const bool driverDoor = doorClear(c, 0);
+    if (driverSide ? driverDoor : !viaPassenger && driverDoor) return;
+    if (viaPassenger) { task.seat = 1; task.shuffle = true; return; }
+    // {100}: cNewGetInVehicle::HandleWarp (valid while the doors are not locked: cSeats +0x23, never set here)
+    if (c.seatUser[0] >= 0) jackCrime(c);
+    if (!peds.exitOccupant(*this, c, 0)) { task = CarTask{}; return; }
+    finishEnter(c);
+    task = CarTask{};
+}
+
+bool Game::doorClear(const Vehicle& c, int seat) {
+    // cVehicle::IsDoorValid's world test: a sphere of ENTER_EXIT_RADIUS (1.25) at the seat's offset, 1.25 + 0.01 up,
+    // must not touch the static world's boxes or another vehicle, and the ground at the door's spawn point must be
+    // at most a unit below the car and not steeper than 0xB4E. (The original first drops the sphere from 50 units
+    // above onto whatever is below it; the port tests it where it is, against boxes only.)
+    if (seat >= c.numSeats()) return false;
+    int32_t local[3], p[3], contact[3], n[3], depth;
+    c.seatOffset(seat, local);
+    local[2] = 0x1428;
+    c.localToWorld(local, p);
+    Collision::Candidates cand;
+    collision.candidates(p, 0x1400, false, cand);
+    for (const Collision::Box* b : cand.boxes)
+        if (Collision::sphereVBox(p, 0x1400, *b, contact, n, depth)) return false;
+    for (const Vehicle& o : cars) {
+        if (&o == &c) continue;
+        Collision::Box b{};
+        b.cx = o.pos[0]; b.cy = o.pos[1]; b.cz = o.pos[2] + o.hz;
+        b.hx = o.hx; b.hy = o.hy; b.hz = o.hz;
+        b.angle = (int16_t)-o.heading();
+        if (Collision::sphereVBox(p, 0x1400, b, contact, n, depth)) return false;
+    }
+    c.doorSpawnPoint(seat, local);
+    c.localToWorld(local, p);
+    const Collision::Ground gr = collision.ground(p[0] / 4096.f, p[1] / 4096.f, c.pos[2] / 4096.f);
+    return c.pos[2] / 4096.f - gr.z <= 1.f && gr.normal[2] * 4096.f > (float)0xB4E;
+}
+
+void Game::finishEnter(Vehicle& c) {   // RunPostEnterSeat: in the seat; the door shuts
+    if (!c.isBike()) c.closeDoor(task.seat);
+    else c.bikeMounted = 1;
+    c.seatUser[0] = -2;
+    c.engineOn = true;
+    c.keep = true;   // a car the player used is not cleaned up (cVehicle +0x945 bit 3)
+    player.hidden = true;
+    player.attached = false;
+    playerCar = (int)(&c - cars.data());
+    Plugins_EmitEvent(CTW_EVENT_PLAYER_ENTERED_VEHICLE, c.uid, c.infoId);
+    int32_t previousView[3]; camera.position(previousView);
+    carCam.inherit(previousView, camera.yaw, camera.pitch(), camera.blockedFrames());
 }
 
 void Game::startExit() {   // cExitCar: which way out depends on the speed (mInstructionsWheeledVehicle)
@@ -579,18 +647,22 @@ bool Game::tickTask(bool stickHeld, int16_t stickHeading) {
         if (!done) for (int i = 0; i < 3; ++i) task.off[i] += task.vel[i];
         place();
         if (!done) return true;
-        // RunPostEnterSeat: in the seat; the door shuts
-        if (!c.isBike()) c.closeDoor(task.seat);
-        else c.bikeMounted = 1;
-        c.seatUser[task.seat] = -2;
-        c.engineOn = true;
-        c.keep = true;   // a car the player used is not cleaned up (cVehicle +0x945 bit 3)
-        player.hidden = true;
-        player.attached = false;
-        playerCar = task.car;
-        Plugins_EmitEvent(CTW_EVENT_PLAYER_ENTERED_VEHICLE, c.uid, c.infoId);
-        int32_t previousView[3]; camera.position(previousView);
-        carCam.inherit(previousView, camera.yaw, camera.pitch(), camera.blockedFrames());
+        if (task.shuffle) {
+            // plan {6, 1}, op 1: the passenger's door shuts and AddSlideIntoSeatAnim with the shuffle flag (+0x73)
+            // slides across to the driver's seat (0x92 / 0x93, flipped from the right-hand side, sinking 0.8)
+            c.closeDoor(task.seat);
+            task.shuffle = false;
+            task.seat = 0;
+            int32_t seat[3];
+            c.seatOffset(0, seat);
+            int32_t d[3] = {seat[0] - task.off[0], seat[1] - task.off[1], -0xCCC};
+            int32_t rel[3] = {player.pos[0] - c.pos[0], player.pos[1] - c.pos[1], player.pos[2] - c.pos[2]};
+            const bool right = (int64_t)c.right[0] * rel[0] + (int64_t)c.right[1] * rel[1] + (int64_t)c.right[2] * rel[2] > 0;
+            player.playOneShot(0x92, 0x93, right);
+            constantVelocity(pedSprites, 0x92 + body, d, task.vel);
+            return true;
+        }
+        finishEnter(c);
         task.op = CarTask::None;
         return true; // this frame's entry task still owns the ped; do not run walking after taking the seat
     }

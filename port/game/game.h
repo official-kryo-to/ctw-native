@@ -145,8 +145,11 @@ public:
         int16_t vel[3] = {0, 0, 0};     // cOneShotAnimationTask::AddConstantVelocity, per frame
         int32_t end[3] = {0, 0, 0};     // get out: where the ped ends up (car space)
         bool jacked = false;            // the jack crime has been registered (cNewGetInVehicle::HandleJackCrime)
+        bool shuffle = false;           // plan {6, 1}: in by the passenger door, then across to the driver's seat
     } task;
     void startEnter(int target = -1);
+    bool doorClear(const Vehicle& c, int seat);   // the world part of cVehicle::IsDoorValid
+    void finishEnter(Vehicle& c);                 // cNewGetInVehicle::RunPostEnterSeat for the player
     void startExit();
     bool tickTask(bool stickHeld, int16_t stickHeading);   // true while the task drives the player
     const Model* carModel(int infoId);
