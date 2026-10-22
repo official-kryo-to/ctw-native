@@ -38,6 +38,10 @@ struct SoundTables {
     int32_t collisionLow[3]{}, collisionMed[3]{}, collisionHigh[3]{}, revAfterShift[4]{};
     struct PropSfx { uint16_t sample; uint8_t volume, pad; };
     PropSfx propSfx[57]{};
+    struct HornStep { uint8_t on, pad; uint16_t frames; };   // on 2 ends the pattern
+    HornStep hornPatterns[5][4]{};  // cHorn: gHornPatterns
+    uint8_t hornFade[4]{};          // cHorn::LoopBeepFadeVal
+    bool horns = false;             // the tables have them (an older CTWSND2 file does not)
     bool load(const std::string& path);
 };
 

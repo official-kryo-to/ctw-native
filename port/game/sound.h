@@ -48,6 +48,9 @@ public:
     void objectEvent(uint32_t id, const int32_t pos[3], int event, int volume, int radius);
     void objectTick(uint32_t id, const int32_t pos[3]);
     bool horn = false;                                           // the player holds the horn
+    // cAudioManager::SoundHorn -> cHorn::SoundHorn: a traffic car honks (a pattern of beeps and blasts in one of
+    // three channels); a police car with no wanted level gives its event 0x81 instead, at most every 5-10 s
+    void soundHorn(Game& g, const Vehicle& v);
     bool ok() const { return !res_.data.empty(); }
 
 private:
@@ -81,6 +84,17 @@ private:
     uint32_t lastCollision_ = 0;
 
     int addEvent(Entity& e, int event, int volume, int radius, int sfx);   // cAudioManager::AddSoundEvent
+    struct HornChannel {             // cHorn: three of 0x1C bytes
+        uint32_t delay = 0;          // +0x00: honks to let pass before this channel takes another
+        int8_t step = -1;            // +0x04: the pattern step, -1 free
+        uint8_t pattern = 0;         // +0x05
+        int phase = 0;               // +0x08: 0 start the step, 1 playing it
+        uint32_t uid = 0;            // +0x0C: the vehicle (0 none; the original's 9999)
+        uint32_t frames = 0;         // +0x10: the step's frames left
+        bool beep = false;           // +0x14: the step is a beep (event 0x46), not a blast (the event 0x47 loop)
+    } horns_[3];
+    uint32_t policeHornMs_ = 0;      // cHorn +0x54
+    void processHorns(Game& g);      // cHorn::Process
     void processEntity(Game& g, Entity& e, bool persistent);              // ProcessStandardSfx
     void carEngine(Game& g, Vehicle& v, Entity& e);                       // ProcessEntityTypeCar
     void playerCar(Game& g, Vehicle& v, Entity& e);                       // ProcessEntityTypePlayerCar

@@ -363,7 +363,7 @@ impl<'a> GameBinary<'a> {
     }
 
     pub fn sound(&self) -> Result<Vec<u8>, TableError> {
-        let mut data = b"CTWSND2\0".to_vec();
+        let mut data = b"CTWSND3\0".to_vec();
         for (name, size) in [
             ("gEventInfo", 156 * 16),
             ("gGears", 20 * 48),
@@ -376,6 +376,9 @@ impl<'a> GameBinary<'a> {
         // The rev-after-shift table has no exported name in this supported version.
         data.extend(self.read(0x480920, 16)?);
         data.extend(self.symbol_data("gPropSfx", 57 * 4)?);
+        // then cHorn's five four-step beep patterns and its LoopBeepFadeVal table
+        data.extend(self.symbol_data("gHornPatterns", 80)?);
+        data.extend(self.read(0x48036c, 4)?);
         Ok(data)
     }
 

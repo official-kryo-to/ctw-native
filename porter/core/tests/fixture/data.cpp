@@ -9,6 +9,7 @@ unsigned char gCarCollisionEventsLow[12] = {6};
 unsigned char gCarCollisionEventsMed[12] = {7};
 unsigned char gCarCollisionEventsHigh[12] = {8};
 unsigned char gPropSfx[57 * 4] = {11, 12, 13};
+unsigned char gHornPatterns[80] = {1, 0, 9, 0, 0, 0, 3, 0, 2};
 unsigned char TextColours[92] = {9, 10, 11};
 unsigned char gDrivingProps[1030] = {3, 4, 5, 6};
 unsigned short stuckReverse1[4] = {100, 110, 120, 130};

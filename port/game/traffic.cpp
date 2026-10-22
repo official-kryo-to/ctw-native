@@ -6,6 +6,7 @@
 #include "game.h"
 #include "os/gamefs.h"
 #include "lookups.h"
+#include "sound.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -429,11 +430,12 @@ void Traffic::forwardSpeed(Game& g, Vehicle& v, Driver& d) {   // cWanderRoads::
 
 void Traffic::wander(Game& g, Vehicle& v, Driver& d) {   // On-rail state at 0x722f50
     // cWanderRoads::Process, once every 32 frames (the process bucket): a blocked driver's horn counter (+0xF5) runs
-    // down, sounding the horn while its bit 2 is set (cAudioManager::SoundHorn, not ported); when it runs out, one
+    // down, sounding the horn while its bit 2 is set (cAudioManager::SoundHorn); when it runs out, one
     // time in four the car goes under physics with speed value 3 (cVehicle::SpeedValue: 15) and the road task is
     // restarted, so the driver pulls out round the obstruction and rejoins the road. The counter is re-armed with
     // Rand16Critical(10) + 5.
     if (((g.frame + (v.uid & 255)) & 31) == 31 && d.horn) {
+        if (d.horn & 4) TheSound().soundHorn(g, v);   // cAudioManager::SoundHorn
         if (--d.horn == 0) {
             if (Rand16Critical(100) <= 24) {
                 v.setToPhysics(true);

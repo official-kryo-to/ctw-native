@@ -505,6 +505,64 @@ void Sound::playerPed(Game& g) {
     lastWalkFrame_ = frame;
 }
 
+void Sound::soundHorn(Game& g, const Vehicle& v) {   // cAudioManager::SoundHorn -> cHorn::SoundHorn
+    if (!ok() || !tables_.horns || v.infoId < 0 || v.infoId >= (int)g.vehicleInfos.size()) return;
+    const int type = g.vehicleInfos[v.infoId].type();
+    if (type == 2 || type == 3) return;
+    if (type == 0) {
+        bool police = false;
+        for (int id : {0x12, 0x22, 4, 7, 3, 0x25}) police |= v.infoId == id;
+        if (police) {
+            if (g.wanted.level() > 0) return;   // (the siren speaks for it)
+            const uint32_t now = (uint32_t)(OS_TimeAccurate() * 1000.0);
+            if (now - policeHornMs_ > 5000u + Rand16NonCritical(5000)) {
+                policeHornMs_ = now;
+                addEvent(ents_[v.uid], 0x81, 0x3C, 1000, -1);
+                return;
+            }
+        }
+    }
+    for (const HornChannel& h : horns_) if (h.uid == v.uid) return;
+    for (HornChannel& h : horns_) {   // every free channel takes it unless it is still letting honks pass
+        if (h.step != -1) continue;
+        if (h.delay) { --h.delay; continue; }
+        h.delay = Rand16NonCritical(25);
+        h.step = 0;
+        h.phase = 0;
+        h.uid = v.uid;
+        h.pattern = (uint8_t)Rand16NonCritical(5);
+    }
+}
+
+void Sound::processHorns(Game& g) {   // cHorn::Process
+    for (HornChannel& h : horns_) {
+        if (h.step == -1) continue;
+        const Vehicle* car = nullptr;
+        for (const Vehicle& c : g.cars) if (c.uid == h.uid) { car = &c; break; }
+        if (!car || car->infoId < 0 || car->infoId >= (int)g.vehicleInfos.size()) {
+            h.step = -1; h.phase = 0; h.uid = 0;
+            continue;
+        }
+        const GearSound& gs = tables_.gears[std::min<int>(g.vehicleInfos[car->infoId].raw[0x8C], 19)];
+        Entity& e = ents_[h.uid];
+        for (int k = 0; k < 3; ++k) e.pos[k] = car->pos[k];
+        if (h.phase == 0) {
+            const auto& step = tables_.hornPatterns[h.pattern % 5][h.step];
+            h.beep = step.on != 0;
+            h.frames = step.frames;
+            if (h.beep) addEvent(e, 0x46, 0x32, 1000, gs.horn2);
+            else addEvent(e, 0x47, 0x32, 1000, gs.horn);
+            h.phase = 1;
+        } else if (--h.frames == 0) {   // the step is over: the next one, unless the pattern ends
+            ++h.step;
+            if (h.step > 3 || tables_.hornPatterns[h.pattern % 5][h.step].on == 2) { h.step = -1; h.uid = 0; }
+            h.phase = 0;
+        } else if (!h.beep) {   // a blast keeps its loop going, fading over its last three frames
+            addEvent(e, 0x47, h.frames <= 3 ? tables_.hornFade[h.frames] : 0x32, 1000, gs.horn);
+        }
+    }
+}
+
 void Sound::update(Game& g) {
     if (!ok()) return;
     updatePedComments(g);
@@ -526,6 +584,7 @@ void Sound::update(Game& g) {
     processEntity(g, ped_, false);
     for (Entity& e : script_) processEntity(g, e, false);
     for (auto& [uid, e] : ents_) e.seen = false;
+    processHorns(g);   // cAudioManager::DoProcess -> cHorn::Process
     for (int i = 0; i < (int)g.cars.size(); ++i) {
         Vehicle& v = g.cars[i];
         Entity& e = ents_[v.uid];
