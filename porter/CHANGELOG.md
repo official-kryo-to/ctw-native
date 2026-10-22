@@ -3,6 +3,17 @@
 What changed in each release of CTW-Native. A release is the Porter exe with the game inside, so every entry
 covers both. The newest is on top; the release workflow publishes the entry of the version it builds.
 
+## 0.3.0
+
+- Add wanted levels, crime reporting, police pedestrians and vehicles, and HUD stars.
+- Add the pause screen and the death screen with its shattering effect, Wasted jingle and text.
+- Improve traffic reactions, obstacle avoidance, lane rejoining and horns; enter vehicles through the nearer door.
+- Add pedestrian social behaviour, correct random pedestrian outfits, and improve crash and landing reactions.
+- Add skid marks, tyre smoke, rim sparks, burnouts, damaged-car effects and riders thrown from bikes in crashes.
+- Expand fire, explosion and water effects, including hydrants, fountains, sinking props and debris smoke trails.
+- Add vehicle sirens, melee and weapon sounds, fight grunts and landing sounds; refine the radio screen.
+- Update the Porter's table extraction to include the new game data, matching the Python setup.
+
 ## 0.2.0
 
 - Streets feel alive: pedestrians walk the sidewalks in their original outfits, dive clear of speeding cars, and traffic stops for them.
