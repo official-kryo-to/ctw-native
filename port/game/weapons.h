@@ -56,6 +56,9 @@ public:
     uint8_t shots = 0;        // +0x17 (cDualPistol: alternating hands)
     int8_t spin = 0;          // +0x18 (cMinigun: the barrel spin, fires above 8)
     uint8_t delayedHit = 0;   // cSword +0x14: seven sword-animation ticks before the hit
+    uint8_t sawPrevState = 0; // cChainsaw +0x14: the state on the last DoSound
+    int16_t sawTimer = 0;     // cChainsaw +0x16: the rev-up's hold, counted down by 0x20
+    bool sawHit = false;      // cChainsaw +0x18: HitSfx (a ped was cut this frame)
     FlameThrowerState flame;  // cFlameThrower +0x18..+0x39
     TazerState tazer;         // cTazer +0x18..+0x30
     bool melee() const { return type <= 4; }

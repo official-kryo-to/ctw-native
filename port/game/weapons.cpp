@@ -590,11 +590,14 @@ void hitStuff(Game& g, Weapon& w, int16_t angle, int pedDamage, int vehicleDamag
         c.damage(vehicleDamage);
         hitCar = true;
     }
-    if (w.type == 0) {   // cFistWeapon::HitSfx / HitVehicleSfx (the others' are empty or not decoded)
-        if (hitPed) TheSound().playerEvent(35, 50, 200);
-        if (hitCar) TheSound().playerEvent(85, 127, 200);
-    } else if (w.type == 3 && hitCar) {   // cSword::HitVehicleSfx (HitSfx for peds is empty)
-        TheSound().playerEvent(84, 127, 200);
+    // HitSfx (a ped: only the fists make a sound; the chainsaw marks it for DoSound) and HitVehicleSfx
+    if (hitPed) {
+        if (w.type == 0) TheSound().playerEvent(35, 50, 200);   // cFistWeapon::HitSfx
+        else if (w.type == 4) w.sawHit = true;                  // cChainsaw::HitSfx
+    }
+    if (hitCar) {
+        static const int kHitVehicleSfx[5][2] = {{85, 127}, {83, 127}, {81, 127}, {84, 127}, {82, 30}};
+        if (w.type >= 0 && w.type <= 4) TheSound().playerEvent(kHitVehicleSfx[w.type][0], kHitVehicleSfx[w.type][1], 200);
     }
 }
 
@@ -649,7 +652,31 @@ void fireWeapon(Game& g, Weapon& w) {   // cBulletBasedWeapon::Fire / cMeleeBase
     w.setState(1, 0);
 }
 
+// cChainsaw::DoSound (from cChainsaw::Update): the idle engine while it is held, a rev-up when it starts to cut, the
+// cutting loop (quieter while the rev-up is still held), and a rev-down when it stops
+static void chainsawSound(Weapon& w) {
+    w.sawTimer = w.sawTimer > 0 ? (int16_t)std::max(w.sawTimer - 0x20, 0) : (int16_t)0;
+    if (w.sawPrevState == 0) {
+        if (w.state == 1 && w.sawTimer == 0) {
+            TheSound().playerEvent(0x1F, 0x7F, 0x12C);
+            w.sawTimer = 0x12C;
+        }
+    } else if (w.sawPrevState == 1) {
+        if (w.state == 0 && w.sawTimer <= 0x95) TheSound().playerEvent(0x20, 0x7F, 0x12C);
+    }
+    // (the original also retimes the looping slot by the sample's length, plus Rand32NonCritical(100) + 150 after a
+    // hit; the port's loops repeat by themselves)
+    if (w.state == 1) {
+        if (w.sawTimer <= 0x7E) TheSound().playerEvent(0x1E, 0x7F - w.sawTimer, 0x12C);
+    } else {
+        TheSound().playerEvent(0x21, 100, 0xC8);
+    }
+    w.sawHit = false;
+    w.sawPrevState = (uint8_t)w.state;
+}
+
 void updateWeapon(Game& g, Weapon& w) {   // cWeapon::Update
+    if (w.type == 4) chainsawSound(w);              // cChainsaw::Update, then cWeapon::Update
     if (w.type == 16) FlameThrower_Update(g, w);   // cFlameThrower::Update, then cWeapon::Update
     if (w.type == 19) Tazer_Update(g, w, gYoke.held && &w == g.playerWeapons.current());   // cTazer::Update
     if (w.type == 15 && w.spin - 1 >= 0) {   // cMinigun::Update: the spin winds down, its sound follows it
@@ -660,13 +687,26 @@ void updateWeapon(Game& g, Weapon& w) {   // cWeapon::Update
         case 3:
             w.timer -= 2;
             if (w.timer > 0) return;
-            // ReloadSfx (decoded for the pistol, micro SMG, shotgun and sniper rifle; the other guns' are not yet)
+            // the gun's ReloadSfx: AddSoundEvent(event, volume, radius)
             {
-                if (w.type == 5) TheSound().playerEvent(73, 40, 200);
-                else if (w.type == 8) TheSound().playerEvent(77, 40, 200);
-                else if (w.type == 10) TheSound().playerEvent(78, 40, 200);
-                else if (w.type == 18) TheSound().playerEvent(76, 40, 200);
-                else if (w.type == 17) TheSound().playerEvent(75, 60, 200);   // cRocketLauncher::ReloadSfx
+                static const int kReloadSfx[19][3] = {
+                    {}, {}, {}, {}, {},
+                    {73, 40, 200},    // cPistol
+                    {73, 40, 200},    // cDualPistol
+                    {73, 40, 200},    // cDesertEagle
+                    {77, 40, 200},    // cUzi
+                    {77, 40, 200},    // cMp5
+                    {78, 40, 200},    // cShotgun
+                    {43, 40, 200},    // cSawnOffShotgun
+                    {43, 100, 1000},  // cDoubleBarreledShotgun
+                    {74, 40, 200},    // cAK47
+                    {74, 40, 200},    // cColt
+                    {72, 100, 200},   // cMinigun
+                    {},
+                    {75, 60, 200},    // cRocketLauncher
+                    {76, 40, 200}};   // cSniperRifle
+                if (w.type < 19 && kReloadSfx[w.type][2])
+                    TheSound().playerEvent(kReloadSfx[w.type][0], kReloadSfx[w.type][1], kReloadSfx[w.type][2]);
             }
             w.timer = Weapons_Info(w.type).reloadTime;
             w.state = 4;
@@ -854,6 +894,10 @@ void Weapons_PlayerFrame(Game& g, bool fireHeld, int cycle, bool throwHeld) {
     const bool onFootAnimation=g.playerCar<0 && !g.player.dead && !g.player.attached && !g.player.reacting();
     if (c.type==0 && onFootAnimation && (c.state==1 || (c.flags&2)))
         TheSound().playerEvent(9,50,200); // native unarmed cue 0x902218, animation call 0x87e228
+    // the nightstick and the bat (cases 1 and 2): their FireSfx when the swing steps from frame 3 to 4 (0x87e180)
+    if ((c.type == 1 || c.type == 2) && onFootAnimation &&
+        ((c.state && (c.state == 1 || !(c.flags & 1))) || (c.flags & 2)) && g.player.enteredUpperFrame(4))
+        TheSound().playerEvent(7, 127, 200);   // cNiteStick / cBaseballBat::FireSfx
     if (c.type == 3 && onFootAnimation &&
         ((c.state && (c.state == 1 || !(c.flags & 1))) || (c.flags & 2))) {
         Weapon& sword = *m.current();
