@@ -183,7 +183,7 @@ public:
     // cPed::cPed + SetPedType + SetMale (looks only); betweenTypeAndSex runs where CreateRandomPed's own work ends,
     // before the zone's sex makeup is applied
     void dress(Ped& p, int zoneSex, const std::function<void()>& betweenTypeAndSex = {}) const;
-    // cPedInfoManager::sPedSubTypeInfo::GetAssignedWeapon: one of the record's two weapons by their chances (0x1C:
+    // sPedSubTypeInfo::GetAssignedWeapon (cPedInfoManager): one of the record's two weapons by their chances (0x1C:
     // none)
     static int assignedWeapon(const Record& r);
     // cPed::AssociateWithPlayer: the money a new ped carries in a zone of this affluence (it rolls whatever the

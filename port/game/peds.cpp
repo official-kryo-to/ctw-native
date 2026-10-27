@@ -200,7 +200,7 @@ void Pedestrians::dress(Ped& p, int zoneSex, const std::function<void()>& betwee
     p.body.palLegs = l;
 }
 
-int Pedestrians::assignedWeapon(const Record& r) {   // cPedInfoManager::sPedSubTypeInfo::GetAssignedWeapon
+int Pedestrians::assignedWeapon(const Record& r) {   // sPedSubTypeInfo::GetAssignedWeapon (cPedInfoManager)
     if (r.weapons[0] == 0xFF) return 0x1C;
     if (r.chances[0] >= Rand16Critical(100)) return r.weapons[0];
     for (int i = 0;;) {   // until a roll passes, alternating with the second weapon when there is one
@@ -233,7 +233,7 @@ void Pedestrians::dropGoodies(Game& g, Ped& p) {   // cPed::DropGoodiesWhenDead
         g.pickups.addDroppedWeapon(weapon, p.body.pos);
         return;
     }
-    // cPlayer +0x3F9 (WorldImpl::AllowMoneyPickups): only rampages switch it off and their end switches it back on
+    // cPlayer +0x3F9, which the script's AllowMoneyPickups sets: only rampages switch it off, and back on at their end
     static const int kMoney[4] = {0, 10, 30, 60};
     if (p.dropMoney && g.pickups.allowMoney && p.moneyTier) g.pickups.addDroppedMoney(kMoney[p.moneyTier & 3], p.body.pos);
 }

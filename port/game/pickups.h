@@ -60,7 +60,7 @@ public:
     static int typeFromWeapon(int weapon);           // AddDroppedWeapon's switch (-1: none)
     const std::vector<Pickup>& list() const { return pickups_; }
     bool allowMelee = true;                          // AllowMeleePickups (+0x191)
-    bool allowMoney = true;                          // WorldImpl::AllowMoneyPickups (cPlayer +0x3F9): dead peds' money
+    bool allowMoney = true;                          // cPlayer +0x3F9 (the script's AllowMoneyPickups): dead peds' money
     static constexpr int kPoolSize = 30;             // cGamePoolManager's "Pickup" pool
 
 private:

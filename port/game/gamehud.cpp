@@ -226,7 +226,7 @@ bool CashMeter::step(int32_t money, bool titleShown) {   // cHudApp::UpdateCash
     if (money == shown_) slide_ = slide_ < 0x28 ? slide_ + 2 : 0x2A;
     else slide_ = std::max(slide_ - 2, 0);
     if (money != shown_) text_ = shown_;   // the text sprite is made again, with the amount shown so far
-    // Gui::cCashMeter::Process(show: in view without a mission title, count: in view)
+    // cCashMeter::Process (show: in view without a mission title; count: in view)
     const bool count = slide_ == 0;
     delta_ = false;
     if (money == shown_) return false;

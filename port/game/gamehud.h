@@ -8,7 +8,8 @@
 
 class Game;
 
-// The HUD's money: cHudApp::UpdateCash and its Gui::cCashMeter, stepped once per game frame. While the money
+// The HUD's money: cHudApp::UpdateCash and its cash meter (cCashMeter::cCashMeter: font 3 at y 8, to the right of
+// the amount, which UpdateCash keeps pointing at), stepped once per game frame. While the money
 // (cPlayer +0x112C) differs from the amount shown (+0x1130), the green "$" amount (GlobalText 0x100, font 5, at
 // x 0x118) slides down into view, two pixels a frame from 0x2A up; once it is in, the shown amount counts towards
 // the money with a growing step (a 500th of the difference more each frame, a 100th when it falls or the
