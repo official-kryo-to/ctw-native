@@ -245,6 +245,72 @@ void GameplayApi_Fill(CtwHostApi& api) {
         g.weaponCycle = direction > 0 ? 1 : -1;
         return 1;
     };
+    // version 13: multiplayer
+    api.spawn_puppet = [](const float* xyz, float heading, int body, int upper, int legs) -> CtwPuppet {
+        Game& g = TheGame();
+        const int palettes = g.pedSprites.paletteCount();
+        if (!vectorValid(xyz) || !std::isfinite(heading) || body < 0 || body > 1 || upper < 0 || upper >= palettes ||
+            legs < 0 || legs >= palettes) return 0;
+        int32_t pos[3]; fixed(xyz, pos);
+        return g.peds.spawnPuppet(g, pos, angle(heading), body, upper, legs);
+    };
+    api.set_puppet_state = [](CtwPuppet handle, const CtwPuppetState* s) -> int {
+        Game& g = TheGame();
+        Pedestrians::Ped* p = g.peds.find(handle);
+        if (!p || !p->puppet.on || !s || s->size < sizeof(CtwPuppetState) || !vectorValid(s->position) ||
+            !vectorValid(s->velocity, 512.f) || !std::isfinite(s->heading)) return 0;
+        fixed(s->position, p->puppet.target);
+        fixed(s->velocity, p->puppet.velocity);
+        p->puppet.heading = angle(s->heading);
+        p->puppet.move = std::clamp(s->move, 0, 3);
+        p->puppet.dead = (s->flags & CTW_PUPPET_DEAD) != 0;
+        p->puppet.vehicle = s->vehicle && vehicle(s->vehicle) ? s->vehicle : 0;
+        return 1;
+    };
+    api.remove_puppet = [](CtwPuppet handle) -> int { return TheGame().peds.removePuppet(TheGame(), handle) ? 1 : 0; };
+    api.take_puppet_damage = [](CtwPuppet handle) -> int {
+        Pedestrians::Ped* p = TheGame().peds.find(handle);
+        if (!p || !p->puppet.on) return 0;
+        const int damage = p->puppet.damage;
+        p->puppet.damage = 0;
+        return damage;
+    };
+    api.world_to_screen = [](const float* xyz, float* out) -> int {
+        if (!vectorValid(xyz) || !out) return 0;
+        return TheGame().worldToScreen(xyz, (int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight(), out) ? 1 : 0;
+    };
+    api.get_player_vitals = [](int* health, int* armour, int* move) -> int {
+        const Game& g = TheGame();
+        if (health) *health = g.player.health;
+        if (armour) *armour = g.player.armour;
+        if (move) *move = g.playerCar >= 0 ? 0 : std::clamp(g.player.level(), 0, 3);
+        return 1;
+    };
+    api.damage_player = [](int amount) -> int { return TheGame().damagePlayer(amount) ? 1 : 0; };
+    api.get_vehicle_pose = [](CtwVehicle handle, float* xyz, float* quat, float* velocity) -> int {
+        const Vehicle* v = vehicle(handle);
+        if (!v) return 0;
+        float q[4];
+        v->orientation(q);
+        for (int k = 0; k < 3; ++k) {
+            if (xyz) xyz[k] = v->pos[k] / 4096.f;
+            if (velocity) velocity[k] = v->vel[k] / 4096.f;
+        }
+        if (quat) for (int k = 0; k < 4; ++k) quat[k] = q[k];
+        return 1;
+    };
+    api.set_vehicle_pose = [](CtwVehicle handle, const float* xyz, const float* quat, const float* velocity) -> int {
+        Game& g = TheGame();
+        Vehicle* v = vehicle(handle);
+        if (!v || v->dead() || indexOf(handle) == g.playerCar || (g.task.op != Game::CarTask::None && indexOf(handle) == g.task.car) ||
+            !vectorValid(xyz) || !quat || !vectorValid(velocity, 512.f)) return 0;
+        for (int k = 0; k < 4; ++k) if (!std::isfinite(quat[k])) return 0;
+        int32_t pos[3], vel[3];
+        fixed(xyz, pos); fixed(velocity, vel);
+        g.traffic.forget(handle);
+        v->setPose(pos, quat, vel);
+        return 1;
+    };
     api.set_prop_physics = [](int full) { TheGame().propDynamics.setFullPhysics(full != 0); };
     api.get_prop_physics = [] { return TheGame().propDynamics.fullPhysics() ? 1 : 0; };
     api.get_player_weapon = [](int* type, int* ammo, int* clip) -> int {

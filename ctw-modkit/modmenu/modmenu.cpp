@@ -711,6 +711,15 @@ extern "C" CTW_PLUGIN_EXPORT int ctw_plugin_init(const CtwHostApi* host) {
     g_api.cycle_weapon = gameplay && CTW_HOST_HAS(H,cycle_weapon) ? H->cycle_weapon : nullptr;
     g_api.set_prop_physics = gameplay && CTW_HOST_HAS(H,set_prop_physics) ? H->set_prop_physics : nullptr;
     g_api.get_prop_physics = gameplay && CTW_HOST_HAS(H,get_prop_physics) ? H->get_prop_physics : nullptr;
+    g_api.spawn_puppet = gameplay && CTW_HOST_HAS(H,spawn_puppet) ? H->spawn_puppet : nullptr;
+    g_api.set_puppet_state = gameplay && CTW_HOST_HAS(H,set_puppet_state) ? H->set_puppet_state : nullptr;
+    g_api.remove_puppet = gameplay && CTW_HOST_HAS(H,remove_puppet) ? H->remove_puppet : nullptr;
+    g_api.take_puppet_damage = gameplay && CTW_HOST_HAS(H,take_puppet_damage) ? H->take_puppet_damage : nullptr;
+    g_api.world_to_screen = CTW_HOST_HAS(H,world_to_screen) ? H->world_to_screen : nullptr;
+    g_api.get_player_vitals = gameplay && CTW_HOST_HAS(H,get_player_vitals) ? H->get_player_vitals : nullptr;
+    g_api.damage_player = gameplay && CTW_HOST_HAS(H,damage_player) ? H->damage_player : nullptr;
+    g_api.get_vehicle_pose = gameplay && CTW_HOST_HAS(H,get_vehicle_pose) ? H->get_vehicle_pose : nullptr;
+    g_api.set_vehicle_pose = gameplay && CTW_HOST_HAS(H,set_vehicle_pose) ? H->set_vehicle_pose : nullptr;
 #undef FORWARD_V4
 #undef FORWARD_V5
     g_api.on_game_event = gameplay && H->on_game_event ? api_on_event : nullptr;

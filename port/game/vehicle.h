@@ -92,6 +92,9 @@ public:
     void explosionHit(const struct ExplosionBlast& blast, bool occupiedByPlayer);
     bool repair();                               // mod API: restore a living vehicle, without resurrecting wrecks
     void teleport(const int32_t pos[3], int16_t heading); // rebuild the physics transform, upright and stationary
+    // PC (multiplayer mods): any rotation (quaternion x, y, z, w) and motion, left under physics
+    void setPose(const int32_t pos[3], const float q[4], const int32_t velocity[3]);
+    void orientation(float q[4]) const { for (int k = 0; k < 4; ++k) q[k] = q_[k]; }
     void processDamage(uint32_t frame);           // the damage part of cVehicle::Process
     void checkForDriverFallingOut();              // cVehicle::CheckForDriverFallingOut
     void processDebris(const Model* model);

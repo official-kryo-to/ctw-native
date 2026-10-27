@@ -404,7 +404,7 @@ void Pedestrians::generate(Game& g, const Traffic::ZoneInfo& z) {
 
 void Pedestrians::collect(Game& g) {
     peds.erase(std::remove_if(peds.begin(), peds.end(), [&](const Ped& p) {
-        if (p.vehicle) return false; // its vehicle owns the lifetime of an occupant
+        if (p.vehicle || p.puppet.on) return false; // its vehicle owns the lifetime of an occupant; a mod a puppet's
         return !g.sectors.loadedAt(p.body.pos[0], p.body.pos[1]);
     }), peds.end());
 }
@@ -481,7 +481,7 @@ bool Pedestrians::exitOccupant(Game& g, Vehicle& car, int seat, bool forgetTraff
     if(car.seatUser[seat]==-1) return true;
     if(car.seatUser[seat]<0) return false;
     for(Ped& p:peds) if(p.uid==(uint32_t)car.seatUser[seat] && p.vehicle==car.uid) {
-        if(p.exiting) return false;
+        if(p.exiting || p.puppet.on) return false;   // (another player cannot be pulled out of his vehicle)
         p.exiting=true; p.body.hidden=false;
         car.seatOffset(seat,p.seatPosition); p.seatPosition[2]-=0x2800;
         car.doorSpawnPoint(seat,p.exitTarget); p.exitTarget[1]-=0x800;
@@ -538,6 +538,7 @@ void Pedestrians::updateOccupant(Game& g, Ped& p) {
 
 void Pedestrians::releaseOccupants(Game& g, Vehicle& car, bool killed) {
     for(Ped& p:peds) if(p.vehicle==car.uid) {
+        if (p.puppet.on) killed = false;   // its own game decides whether it dies
         int32_t door[3]; car.doorSpawnPoint(p.seat,door); car.localToWorld(door,p.body.pos);
         if(car.seatUser[p.seat]==(int)p.uid) car.seatUser[p.seat]=-1;
         p.vehicle=0; p.seat=-1; p.exiting=false;
@@ -553,7 +554,7 @@ void Pedestrians::releaseOccupants(Game& g, Vehicle& car, bool killed) {
 
 void Pedestrians::knockOffDriver(Game& g, Vehicle& car, const int32_t dir[3]) {
     for (Ped& p : peds) {
-        if (p.vehicle != car.uid || p.seat != 0) continue;
+        if (p.vehicle != car.uid || p.seat != 0 || p.puppet.on) continue;
         if (car.seatUser[0] == (int)p.uid) car.seatUser[0] = -1;
         p.vehicle = 0; p.seat = -1; p.exiting = false;
         p.body.hidden = p.body.attached = false;
@@ -696,7 +697,7 @@ void Pedestrians::fleeFromVehicle(Game& g, Ped& p, Vehicle& car, const int32_t f
 }
 
 void Pedestrians::react(Game& g, Ped& p, int action, const int32_t from[3], uint32_t fromCar, bool fromPlayer) {
-    if (p.deadFrames >= 0 || p.flee.on || p.rollFrames >= 0) return;
+    if (p.deadFrames >= 0 || p.flee.on || p.rollFrames >= 0 || p.puppet.on) return;
     const int r = action < 0 ? Flee : reactionFor(p, action, fromPlayer);   // (action -1: the reaction is already chosen)
     if (r == Roll) {   // cRollOutOfVehicle away from the threat
         const double dx = (double)p.body.pos[0] - from[0], dy = (double)p.body.pos[1] - from[1];
@@ -739,6 +740,10 @@ static int bloodDrops(int type, int damage, int effect) {
 
 void Pedestrians::meleeHit(Game& g, Ped& p, int damage, int type, const int32_t from[3], int effect, bool fromPlayer) {
     if (p.vehicle || p.deadFrames >= 0 || p.body.dead) return;   // CanBeHit: alive, not in a closed vehicle
+    if (p.puppet.on) {   // another player: their own game takes the damage the player does
+        if (fromPlayer) { p.puppet.damage += damage; g.addBlood(p.body.pos, 1); }
+        return;
+    }
     const int d = damage && 100 * damage < 100 ? 1 : 100 * damage / 100;   // FixDamageForArmour (cPed::Reset: 100)
     const bool killed = p.body.takeDamage(d);
     // cMeleeBasedWeapon::HitStuffHelper: the victim grunts (cAudioManager::DoFightGrunt(ped, false, false))
@@ -767,6 +772,10 @@ void Pedestrians::bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], i
     (void)dir;
     (void)effect;   // ApplyDamageResponse for the weapon's effect (+0x30) is not ported yet
     if (p.vehicle || p.deadFrames >= 0 || p.body.dead) return;   // CanBeHit: alive, not in a closed vehicle
+    if (p.puppet.on) {   // another player: their own game takes the damage the player does
+        if (fromPlayer) { g.stats.incBulletsThatHit(); p.puppet.damage += damage; g.addBlood(p.body.pos, 5); }
+        return;
+    }
     if (fromPlayer) g.stats.incBulletsThatHit();   // the player's bullets (types 1 and 2)
     TheSound().bulletHitPed(g, p.uid);   // cPed::Damage: cAudioManager::AddBulletHitPed
     const int d = damage && 100 * damage < 100 ? 1 : 100 * damage / 100;   // FixDamageForArmour (cPed::Reset: 100)
@@ -786,7 +795,7 @@ void Pedestrians::bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], i
 }
 
 void Pedestrians::fireHit(Game& g, Ped& p, int damage, const int32_t from[3]) {
-    if (p.vehicle || p.deadFrames >= 0 || p.body.dead) return;
+    if (p.vehicle || p.deadFrames >= 0 || p.body.dead || p.puppet.on) return;
     const int d = damage && 100 * damage < 100 ? 1 : 100 * damage / 100;   // FixDamageForArmour (cPed::Reset: 100)
     if (p.body.takeDamage(d)) {
         p.deadFrames = 0;
@@ -1039,6 +1048,7 @@ void Pedestrians::update(Game& g) {
             finishTalk(p);
         p.movementPrepared = false;
         p.wantsMovement = false;
+        if (p.puppet.on) { p.body.obstacles = still; puppetStep(g, p); continue; }
         if(p.vehicle) { updateOccupant(g,p); continue; }
         p.body.obstacles = still;
         if (p.body.reacting()) { p.body.actReaction(&g.pedSprites,vehicleAbove(g,p.body)); p.movementPrepared = true; }
@@ -1066,14 +1076,14 @@ void Pedestrians::update(Game& g) {
         if (g.player.health != health) g.addBlood(g.player.pos, 1);
     }
     for (Ped& p : peds) {   // cPed::SetDead asks every ped but the player to drop its goodies; cPed::Process drops them
-        if (p.body.dead && !p.deathSeen) p.deathSeen = p.dropPending = true;
+        if (p.body.dead && !p.deathSeen) p.deathSeen = p.dropPending = !p.puppet.on;
         if (p.dropPending && !p.vehicle && !p.body.hidden) dropGoodies(g, p);
     }
     // cPed::ShouldBeDestroyed: about 85 units from the player and off screen
     int32_t f[3];
     g.focus(f);
     peds.erase(std::remove_if(peds.begin(), peds.end(), [&](const Ped& p) {
-        return !p.vehicle && dist2(p.body.pos, f) >= kRemoveDist2 && !g.view.canSee(p.body.pos, 0x2000);
+        return !p.vehicle && !p.puppet.on && dist2(p.body.pos, f) >= kRemoveDist2 && !g.view.canSee(p.body.pos, 0x2000);
     }), peds.end());
 }
 
@@ -1119,4 +1129,122 @@ void Pedestrians::render(const PedSprites* sprites, const PedLight* light, float
         auto pose=p.body.renderPose(sprites,p.uid,p.type,p.body.dead ? CTW_CHARACTER_DEAD : 0,alpha);
         if (!Plugins_RenderCharacter(pose)) p.body.render(sprites, light);
     }
+}
+
+// ---- PC multiplayer: puppets ----------------------------------------------------------------------------------
+Pedestrians::Ped* Pedestrians::find(uint32_t uid) {
+    for (Ped& p : peds) if (p.uid == uid) return &p;
+    return nullptr;
+}
+
+const Pedestrians::Ped* Pedestrians::find(uint32_t uid) const {
+    for (const Ped& p : peds) if (p.uid == uid) return &p;
+    return nullptr;
+}
+
+uint32_t Pedestrians::spawnPuppet(Game& g, const int32_t pos[3], int16_t heading, int body, int upper, int legs) {
+    Ped p;
+    p.uid = nextUid_++;
+    p.type = 1;
+    p.male = body != 0;
+    p.body.bodySet = body;
+    p.body.palUpper = upper;
+    p.body.palLegs = legs;
+    p.body.playerControlled = false;
+    p.body.invulnerable = true;
+    p.ambientDisabled = true;   // nobody stops it for a chat
+    p.dropWeapon = p.dropMoney = false;
+    p.puppet.on = true;
+    std::copy(pos, pos + 3, p.body.pos);
+    std::copy(pos, pos + 3, p.puppet.target);
+    p.body.placeOnGround(&g.collision);
+    p.body.setHeading(heading);
+    p.puppet.heading = heading;
+    peds.push_back(std::move(p));
+    return peds.back().uid;
+}
+
+bool Pedestrians::removePuppet(Game& g, uint32_t uid) {
+    for (size_t i = 0; i < peds.size(); ++i) {
+        Ped& p = peds[i];
+        if (p.uid != uid || !p.puppet.on) continue;
+        for (Vehicle& car : g.cars)
+            for (int& user : car.seatUser) if (user == (int)uid) user = -1;
+        peds.erase(peds.begin() + (long)i);
+        return true;
+    }
+    return false;
+}
+
+void Pedestrians::puppetStep(Game& g, Ped& p) {
+    Ped::Puppet& t = p.puppet;
+    // into, out of or between vehicles: it takes the driver's seat (a puppet's own vehicle, made by the mod)
+    if (p.vehicle != t.vehicle) {
+        for (Vehicle& car : g.cars)
+            if (car.uid == p.vehicle && car.seatUser[0] == (int)p.uid) car.seatUser[0] = -1;
+        p.vehicle = 0; p.seat = -1;
+        p.body.hidden = p.body.attached = false;
+        for (Vehicle& car : g.cars) {
+            if (car.uid != t.vehicle || car.dead() || (car.seatUser[0] != -1 && car.seatUser[0] != (int)p.uid)) continue;
+            car.seatUser[0] = (int)p.uid;
+            p.vehicle = car.uid; p.seat = 0;
+            car.seatOffset(0, p.seatPosition);
+            p.body.hidden = p.body.attached = true;   // a rider is drawn on his bike by the game (Game::render)
+            car.engineOn = true;
+        }
+        if (!p.vehicle) std::copy(t.target, t.target + 3, p.body.pos);   // out: where its game says
+    }
+    if (p.vehicle) {
+        for (const Vehicle& car : g.cars) {
+            if (car.uid != p.vehicle) continue;
+            car.localToWorld(p.seatPosition, p.body.pos);
+            p.body.setHeading(car.heading());
+            std::copy(car.vel, car.vel + 3, p.body.vel);
+            if (car.isBike()) {   // as cPed::AnimatePedInVehicle for the player
+                if (car.bikeLeaning()) p.body.ride(0xA6, 0xA7, &g.pedSprites);
+                else p.body.ride(0x5C, 0x5D, &g.pedSprites);
+            }
+        }
+        return;
+    }
+    // dying and living again as its own game says
+    if (t.dead && !p.body.dead) {
+        p.body.invulnerable = false;
+        p.body.takeDamage(p.body.health + p.body.armour, true);
+        p.body.invulnerable = true;
+        p.deadFrames = 0;
+        TheSound().pedDeath(p.body.pos, p.male, false);
+    } else if (!t.dead && p.body.dead) {
+        p.body.resetDamageState();
+        p.deadFrames = -1;
+        std::copy(t.target, t.target + 3, p.body.pos);
+        p.body.placeOnGround(&g.collision);
+    }
+    if (p.body.dead) {
+        p.body.stepOneShot(&g.pedSprites);
+        p.movementPrepared = true;
+        return;
+    }
+    if (p.body.reacting()) p.body.resetReaction();
+    // walk towards where it is: a little ahead along its velocity, snapping when it got too far away
+    const int64_t dx = (int64_t)t.target[0] + t.velocity[0] / 10 - p.body.pos[0];
+    const int64_t dy = (int64_t)t.target[1] + t.velocity[1] / 10 - p.body.pos[1];
+    const int64_t dz = (int64_t)t.target[2] - p.body.pos[2];
+    const int64_t d2 = dx * dx + dy * dy;
+    if (d2 > (int64_t)0x6000 * 0x6000 || dz > 0x4000 || dz < -0x4000) {   // 6 units across or 4 up: it jumps there
+        std::copy(t.target, t.target + 3, p.body.pos);
+        std::fill(p.body.vel, p.body.vel + 3, 0);
+    } else if (d2 > (int64_t)0x1000 * 0x1000) {   // over a unit off: pulled a fifth of the way back each frame
+        p.body.pos[0] += (int32_t)(dx / 5);
+        p.body.pos[1] += (int32_t)(dy / 5);
+    }
+    Player::Input in;
+    const bool far = d2 > (int64_t)0x400 * 0x400;   // a quarter of a unit
+    in.moving = (t.move > 0 && far) || d2 > (int64_t)0x1000 * 0x1000;
+    in.maxLevel = (uint8_t)std::clamp(t.move, 1, 3);
+    in.sprint = t.move >= 3;
+    in.heading = in.moving ? padAngle((float)dx, (float)dy) : t.heading;
+    if (!in.moving) p.body.setHeading(t.heading);
+    p.body.act(in, &g.pedSprites);
+    p.movementPrepared = true;
 }

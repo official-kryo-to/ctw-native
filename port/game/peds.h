@@ -126,6 +126,16 @@ public:
         // cPed::SetPedType: the weapon pedinfo assigns (0 none), cPed::AssociateWithPlayer: the money carried (+0x35E
         // bits 6-7: none, $10, $30 or $60); cPed::Reset sets dropping the weapon or the money (+0x338 bits 7 and 8),
         // cPed::SetDead asks for it (bit 28) and cPed::DropGoodiesWhenDead does it once the body has settled
+        // PC (multiplayer mods): another player's character, moved by a mod (CtwPuppetState) instead of the AI
+        struct Puppet {
+            bool on = false;
+            int32_t target[3]{}, velocity[3]{};
+            int16_t heading = 0;
+            int move = 0;              // 0 standing .. 3 sprinting
+            bool dead = false;
+            uint32_t vehicle = 0;      // the vehicle it drives
+            int damage = 0;            // what the player did to it since the mod last asked
+        } puppet;
         int weapon = 0;
         uint8_t moneyTier = 0;
         bool dropWeapon = true, dropMoney = true, dropPending = false, deathSeen = false;
@@ -180,6 +190,11 @@ public:
     // affluence; other affluences keep `current`)
     static uint8_t moneyTier(int affluence, uint8_t current);
     void dropGoodies(Game& g, Ped& p);   // cPed::DropGoodiesWhenDead
+    // PC multiplayer: puppets (see Ped::Puppet). spawnPuppet returns the ped's uid (0: failed).
+    uint32_t spawnPuppet(Game& g, const int32_t pos[3], int16_t heading, int body, int upper, int legs);
+    bool removePuppet(Game& g, uint32_t uid);
+    Ped* find(uint32_t uid);
+    const Ped* find(uint32_t uid) const;
     enum ReactionKind { None = 0, Flee = 1, Attack = 2, VehicleReaction = 3, FleeOrGetIn = 4, Roll = 5, Idle = 6 };
     // cPed::GetReactionHelper: the first record for the action (or any action, 9) whose Rand32Critical(100) roll is
     // within its chance; then AdjustPedInVehicleReaction (a vehicle reaction makes a driver drive away, a passenger
@@ -231,6 +246,7 @@ private:
     // the dynamic body spheres touch this tick (contacts' swept test, either way round)
     static bool touching(const Player& a, const Player& b);
     bool policeStep(Game& g, Ped& p);   // supported on-foot enforcer/arrest task branches (police.cpp)
+    void puppetStep(Game& g, Ped& p);   // a puppet walks to its target, sits in its vehicle, dies and lives again
     bool rejoin(Game& g, Ped& p);
     bool idle(Game& g, Ped& p);
     void updateSocialSensor(Game& g, Ped& p);

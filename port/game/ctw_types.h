@@ -113,4 +113,19 @@ typedef struct CtwCharacterBounds {
     float minimum[3], maximum[3], duration;
 } CtwCharacterBounds;
 typedef int (*CtwCharacterCallback)(const CtwCharacterPose* pose, void* user);
+
+/* Version 13: a puppet is a character a mod moves, such as another player in a multiplayer game. It looks like a
+   pedestrian, walks to the position it is given and sits in the vehicle it is given; the game neither moves it on
+   its own nor hurts it (take_puppet_damage reports what the player did to it). */
+typedef uint32_t CtwPuppet;
+enum CtwPuppetFlags { CTW_PUPPET_DEAD = 1 };
+typedef struct CtwPuppetState {
+    uint32_t size;                  /* sizeof(CtwPuppetState) */
+    float position[3];              /* where its feet should be */
+    float heading;                  /* degrees, as get_player_heading */
+    float velocity[3];              /* units per second, for smooth movement between updates */
+    int32_t move;                   /* 0 standing, 1 walking, 2 running, 3 sprinting */
+    uint32_t flags;                 /* CtwPuppetFlags */
+    CtwVehicle vehicle;             /* the vehicle it drives, 0 on foot */
+} CtwPuppetState;
 #endif

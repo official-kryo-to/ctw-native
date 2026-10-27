@@ -198,6 +198,19 @@ void Vehicle::teleport(const int32_t p[3], int16_t heading) {
     setToPhysics(true);
 }
 
+void Vehicle::setPose(const int32_t p[3], const float q[4], const int32_t velocity[3]) {
+    float n = std::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    if (!(n > 1e-6f)) n = 1.f;
+    setToPhysics(false);   // as teleport: the centre of gravity follows the new transform
+    simple_ = false;
+    for (int k = 0; k < 3; ++k) angVel[k] = force_[k] = torque_[k] = 0;
+    for (int k = 0; k < 4; ++k) q_[k] = q[k] / n;
+    std::copy(p, p + 3, pos);
+    syncFromIntegrator();
+    setToPhysics(true);
+    std::copy(velocity, velocity + 3, vel);
+}
+
 int16_t Vehicle::heading() const { return (int16_t)-atan2q(-fwd[0], fwd[1]); }
 int32_t Vehicle::speed() const { return (int32_t)isqrt((int64_t)vel[0] * vel[0] + (int64_t)vel[1] * vel[1] + (int64_t)vel[2] * vel[2]); }
 

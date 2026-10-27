@@ -30,7 +30,7 @@
 #include <stddef.h>
 #include "ctw_types.h"
 
-#define CTW_MOD_API_VERSION 12
+#define CTW_MOD_API_VERSION 13
 #define CTW_MOD_HAS(api, member) ((api) && (api)->size >= offsetof(CtwApi, member) + sizeof((api)->member) && (api)->member)
 
 #ifdef _WIN32
@@ -237,6 +237,20 @@ typedef struct CtwApi {
     /* --- version 12 ------------------------------------------------------------------------------------- */
     void (*set_prop_physics)(int full);   /* 1: hit props come loose and tumble; 0: the original (default) */
     int (*get_prop_physics)(void);
+    /* --- version 13: multiplayer ------------------------------------------------------------------------ */
+    /* Puppets are characters your mod moves, such as other players (see CtwPuppetState in ctw_types.h). They
+       walk to the position you give, sit in the vehicle you give and stay until removed; the game never hurts
+       them, but take_puppet_damage returns what the player did to one since you last asked. */
+    CtwPuppet (*spawn_puppet)(const float xyz[3], float heading, int body_set, int palette_upper, int palette_legs);
+    int (*set_puppet_state)(CtwPuppet puppet, const CtwPuppetState* state);
+    int (*remove_puppet)(CtwPuppet puppet);
+    int (*take_puppet_damage)(CtwPuppet puppet);
+    int (*world_to_screen)(const float xyz[3], float out_xy[2]);   /* HUD pixels; 0 = behind the camera */
+    int (*get_player_vitals)(int* health, int* armour, int* move); /* 0..127, 0..127, 0 standing .. 3 sprinting */
+    int (*damage_player)(int amount);                               /* armour first, can kill; 1 = ok */
+    /* position, rotation (quaternion x, y, z, w) and velocity; set: not the player's own vehicle */
+    int (*get_vehicle_pose)(CtwVehicle vehicle, float xyz[3], float quat[4], float velocity[3]);
+    int (*set_vehicle_pose)(CtwVehicle vehicle, const float xyz[3], const float quat[4], const float velocity[3]);
 } CtwApi;
 
 /*

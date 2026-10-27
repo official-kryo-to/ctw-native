@@ -28,6 +28,7 @@ void Game::updateWanted() {
 }
 
 void Game::pedCrime(const Pedestrians::Ped& p, int type) {   // cPed::HelperForRegisteringCrimesDoneToThisPed
+    if (p.puppet.on) return;   // (another player in a multiplayer game is no crime)
     // the attacker is the player; the ped's health (+0x35F) has already been reduced
     const bool cop = p.type == 10;
     const bool killed = p.body.dead || p.body.health <= 0 || p.deadFrames >= 0;

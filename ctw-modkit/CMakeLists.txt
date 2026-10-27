@@ -50,6 +50,10 @@ endfunction()
 ctw_mod(cheat_example CheatExample)
 ctw_mod(enhancements Enhancements)
 ctw_mod(trumpify Trumpify)
+ctw_mod(multiplayer Multiplayer)
+if(WIN32)
+    target_link_libraries(multiplayer PRIVATE ws2_32)
+endif()
 
 # Optional donor assets belong to the local Enhancements build, never the engine
 # or distributed mod sources. Normal development builds need no extra command.
@@ -82,6 +86,11 @@ if(BUILD_TESTING AND TARGET ctw_engine)
         target_link_libraries(enhancementscameratest PRIVATE m)
     endif()
     add_test(NAME enhancements_camera COMMAND enhancementscameratest)
+    add_executable(multiplayerprotocoltest ../tests/multiplayer_protocol_test.c examples/multiplayer/protocol.c)
+    if(NOT MSVC)
+        target_link_libraries(multiplayerprotocoltest PRIVATE m)
+    endif()
+    add_test(NAME multiplayer_protocol COMMAND multiplayerprotocoltest)
     add_library(api_probe_mod SHARED ../tests/api_probe_mod.c)
     target_include_directories(api_probe_mod PRIVATE ${CTW_INCLUDE})
     set_target_properties(api_probe_mod PROPERTIES PREFIX "" RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/testmods

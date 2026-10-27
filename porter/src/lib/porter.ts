@@ -70,6 +70,7 @@ export type BundledMod = {
 const MOCK_MODS: BundledMod[] = [
   { folder: 'CheatExample', name: 'Cheat Example', version: '2.0', author: 'Kryo.to', description: 'Vehicle and world cheats, a spawn menu for vehicles and weapons (F7) and a free camera (F8).', code: true, textures: 0 },
   { folder: 'Enhancements', name: 'Enhancements', version: '1.0', author: 'Kryo.to', description: 'Third-person camera, PSP-style lighting and optional 3D characters.', code: true, textures: 0 },
+  { folder: 'Multiplayer', name: 'Multiplayer', version: '1.0', author: 'Kryo.to', description: 'Play together: up to eight players in one city over the network (F9 to host or join, T to chat).', code: true, textures: 0 },
   { folder: 'Trumpify', name: 'Trumpify', version: '1.1', author: 'Kryo.to', description: 'One picture on every advert in the city.', code: false, textures: 61 },
 ]
 

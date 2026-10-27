@@ -39,10 +39,10 @@ int main() {
     SDL_Init(0);
     Game& g = TheGame();
     const auto& api = Plugins_HostApi();
-    check(api.version == 12 && CTW_HOST_HAS(&api, set_prop_physics) && CTW_HOST_HAS(&api, cycle_weapon) && CTW_HOST_HAS(&api, consume_mouse_wheel) && CTW_HOST_HAS(&api, world_line) &&
+    check(api.version == 13 && CTW_HOST_HAS(&api, set_vehicle_pose) && CTW_HOST_HAS(&api, spawn_puppet) && CTW_HOST_HAS(&api, set_prop_physics) && CTW_HOST_HAS(&api, cycle_weapon) && CTW_HOST_HAS(&api, consume_mouse_wheel) && CTW_HOST_HAS(&api, world_line) &&
           CTW_HOST_HAS(&api, get_camera_shake) && CTW_HOST_HAS(&api, get_character_bounds) &&
           CTW_HOST_HAS(&api, draw_character_model_at_time) && CTW_HOST_HAS(&api, draw_character_model_attached) &&
-          CTW_HOST_HAS(&api, give_weapon) && CTW_HOST_HAS(&api, get_player_weapon), "v12 append-only host is available");
+          CTW_HOST_HAS(&api, give_weapon) && CTW_HOST_HAS(&api, get_player_weapon), "v13 append-only host is available");
     check(!api.get_prop_physics(), "props keep the original physics by default");
     api.set_prop_physics(1);
     check(api.get_prop_physics() && g.propDynamics.fullPhysics(), "mods can switch on full prop physics");
@@ -158,6 +158,38 @@ int main() {
     g.peds.peds.clear();
     check(api.set_ped_density(0) && api.get_ped_density() == 0 && !api.set_ped_density(4.5f) && api.set_ped_density(1),
           "pedestrian density validates its limits");
+    {   // v13 puppets: moved by the mod, never hurt here, their damage reported once
+        const float at[3] = {5, 0, 0};
+        check(!api.spawn_puppet(at, 0, 1, 4, 5), "without ped sprites no palette is valid for a puppet");
+        const int32_t pos[3] = {5 * 4096, 0, 0};
+        const uint32_t id = g.peds.spawnPuppet(g, pos, 0, 1, 4, 5);
+        check(id && g.peds.peds.size() == 1 && g.peds.peds[0].puppet.on && g.peds.peds[0].body.invulnerable,
+              "a puppet is a pedestrian the AI leaves alone");
+        CtwPuppetState s{}; s.size = sizeof s;
+        s.position[0] = 7; s.move = 2;
+        check(api.set_puppet_state(id, &s) && g.peds.peds[0].puppet.target[0] == 7 * 4096 && g.peds.peds[0].puppet.move == 2,
+              "a puppet takes its target from the mod");
+        s.size = 4; check(!api.set_puppet_state(id, &s), "an undersized puppet state is refused");
+        const int32_t from[3] = {0, 0, 0};
+        g.peds.bulletHit(g, g.peds.peds[0], 20, from, 0, from, 1, true);
+        g.peds.bulletHit(g, g.peds.peds[0], 30, from, 0, from, 1, false);
+        check(g.peds.peds[0].body.health == 127 && api.take_puppet_damage(id) == 20 && api.take_puppet_damage(id) == 0,
+              "only the player's hits count, and the puppet itself is not hurt");
+        for (int i = 0; i < 30; ++i) g.peds.update(g);
+        check(g.peds.peds.size() == 1, "a puppet is never cleaned up by distance");
+        check(api.remove_puppet(id) && g.peds.peds.empty() && !api.remove_puppet(id), "a puppet goes when removed");
+        float screen[2];
+        g.camera.reset(g.player.pos, g.player.heading());
+        const float ahead[3] = {g.player.pos[0] / 4096.f, g.player.pos[1] / 4096.f, g.player.pos[2] / 4096.f};
+        check(g.worldToScreen(ahead, 1280, 720, screen) && screen[0] > 0 && screen[0] < 1280 && screen[1] > 0 && screen[1] < 720 &&
+              !api.world_to_screen(ahead, nullptr), "the followed player is on screen");
+        int health = 0, armour = -1, move = -1;
+        check(api.get_player_vitals(&health, &armour, &move) && health == g.player.health && armour == g.player.armour,
+              "the player's vitals are readable");
+        const int before = g.player.health;
+        check(api.damage_player(10) && g.player.health < before && !api.damage_player(0), "another player's hits hurt the player");
+        g.player.health = 127;
+    }
     api.set_control_yaw(1,90);
     check(g.controlYaw.on && g.controlYaw.yaw == -0x4000, "control yaw uses the get_camera angle convention");
     api.set_camera_fov(500); WorldCamera view; g.viewCamera(view);

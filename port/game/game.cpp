@@ -359,6 +359,21 @@ bool Game::screenToWorld(float x, float y, int W, int H, float out[3]) const {
     return true;
 }
 
+bool Game::worldToScreen(const float p[3], int W, int H, float out[2]) const {
+    if (W <= 0 || H <= 0) return false;
+    WorldCamera cam;
+    viewCamera(cam);
+    const float v[3] = {p[0] - cam.eye[0], p[1] - cam.eye[1], p[2] - cam.eye[2]};
+    const float z = v[0] * cam.fwd[0] + v[1] * cam.fwd[1] + v[2] * cam.fwd[2];
+    if (z < 0.05f) return false;
+    const float ty = tanf(cam.fovY * 3.14159265f / 360.f), tx = ty * W / (float)H;
+    const float x = (v[0] * cam.right[0] + v[1] * cam.right[1] + v[2] * cam.right[2]) / (z * tx);
+    const float y = (v[0] * cam.up[0] + v[1] * cam.up[1] + v[2] * cam.up[2]) / (z * ty);
+    out[0] = (x + 1.f) * .5f * W;
+    out[1] = (1.f - y) * .5f * H;
+    return true;
+}
+
 void Game::updateView() {   // the game camera (not a mod's free camera), as cBaseCam::RecalculateMatrix sets it up
     int32_t eye[3];
     uint16_t yaw, pitch;
@@ -544,6 +559,10 @@ void Game::startEnter(int target) {   // FindSuitableVehicles (within 10 units) 
     for (int i = 0; i < (int)cars.size(); ++i) {
         if (target >= 0 && i != target) continue;
         if (cars[i].dead()) continue;
+        if (cars[i].seatUser[0] >= 0) {   // (another player's vehicle in a multiplayer game cannot be taken)
+            const Pedestrians::Ped* driver = peds.find((uint32_t)cars[i].seatUser[0]);
+            if (driver && driver->puppet.on) continue;
+        }
         int64_t dx = cars[i].pos[0] - player.pos[0], dy = cars[i].pos[1] - player.pos[1];
         int64_t d2 = dx * dx + dy * dy;
         if (d2 < (int64_t)0xA000 * 0xA000 && (best < 0 || d2 < bestD)) { best = i; bestD = d2; }
@@ -1105,6 +1124,18 @@ void Game::takeMoney(uint32_t amount) {   // cPlayer::TakeMoney
     money = std::max(std::min((int32_t)((uint32_t)money - amount), 99999999), 0);
 }
 
+bool Game::damagePlayer(int amount) {
+    if (amount <= 0 || player.dead || arrested_) return false;
+    if (playerCar >= 0 && playerCar < (int)cars.size()) {   // armour first, then out of the vehicle dead
+        player.health = std::max(0, player.health - (int)player.fixDamageForArmour((unsigned)amount));
+        if (!player.health) killInVehicle(cars[playerCar]);
+        return true;
+    }
+    player.takeDamage(amount);
+    addBlood(player.pos, 3);
+    return true;
+}
+
 bool Game::giveWeapon(int type, int ammo, bool replace) {   // cPlayer::GiveWeapon
     if (!playerWeapons.give(type, ammo, replace)) return false;
     stats.incWeaponsPickedUp();
@@ -1507,6 +1538,15 @@ void Game::render(int W, int H) {
     glEnable(GL_DEPTH_TEST);
     const float characterAlpha = interpolate && interp_.valid ? renderAlpha : 1.f;
     peds.render(&pedSprites, &light, characterAlpha);
+    for (const Pedestrians::Ped& p : peds.peds) {   // mods' puppets riding bikes, drawn as the player is below
+        if (!p.puppet.on || !p.vehicle) continue;
+        for (const Vehicle& c : cars) {
+            if (c.uid != p.vehicle || !c.isBike()) continue;
+            int32_t up[3], legs[3];
+            c.riderRenderPos(up, legs);
+            p.body.renderRiding(&pedSprites, &light, up, legs, c.heading());
+        }
+    }
     if (!player.hidden) {
         auto pose=player.renderPose(&pedSprites,0,13,CTW_CHARACTER_PLAYER,characterAlpha);
         if (player.attached && task.car >= 0 && task.car < (int)cars.size()) {

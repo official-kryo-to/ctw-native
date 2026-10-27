@@ -19,7 +19,7 @@
 #include <stddef.h>
 #include "ctw_types.h"
 
-#define CTW_PLUGIN_API_VERSION 12
+#define CTW_PLUGIN_API_VERSION 13
 #define CTW_HOST_HAS(api, member) ((api) && (api)->size >= offsetof(CtwHostApi, member) + sizeof((api)->member) && (api)->member)
 
 #ifdef _WIN32
@@ -204,6 +204,23 @@ typedef struct CtwHostApi {
        original. get_prop_physics returns the current mode. */
     void (*set_prop_physics)(int full);
     int (*get_prop_physics)(void);
+    /* Version 13: multiplayer. Puppets (CtwPuppetState) are characters the plugin moves; they last until removed
+       (or the game is left) and are never hurt here: take_puppet_damage returns what the player has done to one
+       since the last call. spawn_puppet returns 0 on failure. */
+    CtwPuppet (*spawn_puppet)(const float xyz[3], float heading, int body_set, int palette_upper, int palette_legs);
+    int (*set_puppet_state)(CtwPuppet puppet, const CtwPuppetState* state);
+    int (*remove_puppet)(CtwPuppet puppet);
+    int (*take_puppet_damage)(CtwPuppet puppet);
+    /* The HUD pixel a world point is drawn at; 0 when it is behind the camera. */
+    int (*world_to_screen)(const float xyz[3], float out_xy[2]);
+    /* The player's health and armour (0..127) and how fast he moves on foot (0 standing .. 3 sprinting). */
+    int (*get_player_vitals)(int* health, int* armour, int* move);
+    /* Hurt the player as a shot does (armour first; it can kill). 1 = ok. */
+    int (*damage_player)(int amount);
+    /* A vehicle's full pose: position, rotation (quaternion x, y, z, w) and velocity. Setting it keeps the vehicle
+       under physics with that motion (for vehicles a remote player drives); not the player's own vehicle. */
+    int (*get_vehicle_pose)(CtwVehicle vehicle, float xyz[3], float quat[4], float velocity[3]);
+    int (*set_vehicle_pose)(CtwVehicle vehicle, const float xyz[3], const float quat[4], const float velocity[3]);
 } CtwHostApi;
 
 /* Exported by a plugin DLL. Return 0 from ctw_plugin_init to stay loaded. */

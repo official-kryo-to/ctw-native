@@ -30,6 +30,7 @@ mods/
   ModMenu.dll
   CheatExample/    mod.ini, cheat_example.dll
   Enhancements/    mod.ini, enhancements.dll
+  Multiplayer/     mod.ini, multiplayer.dll
   Trumpify/        mod.ini, textures/*.png
 ```
 
@@ -42,6 +43,7 @@ switch, description and options on the right.
 | --- | --- |
 | `Enhancements` | PC extras, one feature per source file: a third-person camera (**V**), PSP-style lighting and optional imported LCS 3D people. Remembers its options. |
 | `CheatExample` | Cheats, a spawn menu for vehicles and weapons (F7) and a free camera (F8). |
+| `Multiplayer` | Play together: up to eight players in one city over UDP (**F9** to host or join, **T** to chat). See [Playing together](#playing-together). |
 | `Trumpify` | Transparent texture layers over the city's adverts. |
 
 The Porter lets you choose the premade mods and installs `ModMenu.dll` when mods are enabled. They also come from building
@@ -176,12 +178,13 @@ colours `0xRRGGBBAA`, screen coordinates pixels from the top left.
 | Character models (v7/v8/v9) | `load_character_model`, `release_character_model`, `draw_character_model`, `on_character_render`: skinned mobile DFF/ANPK/PVR resources and interpolated player/pedestrian poses; v8 adds dimensions, elapsed clips and fallen-body grounding; v9 adds native attachment frames, vehicle identity, continuous reaction/recovery clocks and `draw_character_model_attached` for animated-joint anchors |
 | Camera shake (v6) | `get_camera_shake`: interpolated world-space explosion offset for a custom camera |
 | Prop physics (v12) | `set_prop_physics`, `get_prop_physics`: hit street furniture comes loose and tumbles instead of the original's fixed tilt |
+| Multiplayer (v13) | Puppets, characters your mod moves (`spawn_puppet`, `set_puppet_state` with `CtwPuppetState`: position, heading, velocity, walk/run/sprint, dead, the vehicle it drives; `remove_puppet`). The game never hurts a puppet: `take_puppet_damage` returns what the player did to it. Also `world_to_screen`, `get_player_vitals`, `damage_player` and `get/set_vehicle_pose` (position, quaternion, velocity) |
 | Look (v5) | `set_render_style` (`CtwRenderStyle`: street light and headlight pools at night, tint, sepia, saturation, contrast, brightness, vignette; `NULL` = the game's own) |
 
 Keys are SDL scancodes (<https://wiki.libsdl.org/SDL2/SDL_Scancode>). Read the mouse and typed text inside
 `on_draw_hud`. `examples/cheat_example` uses most of this: study it next.
 
-**Versions.** `api->version` is 7 for this game. Functions are only ever added at the end of `CtwApi`, so a mod built
+**Versions.** `api->version` is 13 for this game. Functions are only ever added at the end of `CtwApi`, so a mod built
 for an older version keeps working; if your mod needs a newer function, check `api->version` or `api->size` in
 `ctw_mod_init` and return non-zero to refuse loading on an older game.
 
@@ -256,6 +259,20 @@ tracked in [STATUS.md](../STATUS.md); access to the source does not make those m
 See [third-person character support](THIRD_PERSON_ASSETS.md) for the local LCS importer, character API and remaining
 animation/appearance limitations.
 
+### Playing together
+
+The `Multiplayer` example is a complete mod built on the v13 functions. One player opens it with **F9**, types a
+name and presses **Host**; the others enter the host's address and press **Join**. Everyone sees the others walk,
+drive and ride with their names over them, shooting or hitting another player hurts that player in their own game
+(with "was killed by" in the chat), **T** opens the chat and joiners take the host's time of day and weather.
+Traffic, pedestrians, the police and pickups stay each player's own.
+
+The host must be reachable on UDP port 7777 (changeable in the window). On one network that just works. Over the
+internet forward the port on the host's router, or put everyone on a virtual network such as Tailscale, ZeroTier
+or Radmin VPN and use the host's address there. A shortcut can start straight into a game: set `CTW_MULTIPLAYER` to
+`host` or `join <address>` (and optionally `CTW_MULTIPLAYER_NAME`) before starting the game. Messages are described
+in `examples/multiplayer/protocol.h`.
+
 ## 6. Windows and menus with ctw_ui.h
 
 `include/ctw_ui.h` is optional, plain C and header-only: windows, buttons, switches, sliders, option pickers,
@@ -314,7 +331,7 @@ include/ctw_types.h     shared gameplay handles, state structs, capabilities and
 include/ctw_ui.h        optional UI helpers
 include/ctw_plugin.h    the game's plugin interface, used by ModMenu.dll only
 modmenu/                source of ModMenu.dll
-examples/               Enhancements, Cheat Example and Trumpify
+examples/               Enhancements, Cheat Example, Multiplayer and Trumpify
 ```
 
 The game loads every DLL directly in `mods/` as a *plugin* (`ctw_plugin_init`, see `ctw_plugin.h`). `ModMenu.dll`

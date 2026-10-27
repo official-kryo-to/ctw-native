@@ -101,6 +101,7 @@ public:
     bool attached = false;
     bool hidden = false;   // inside a vehicle
     bool dead = false;
+    bool invulnerable = false;   // PC: a mod's puppet (another player's character) ignores damage and knockdowns here
     void setHeading(int16_t h);
     void playOneShot(int upper, int legs, bool flip, bool preserveSpeed = false); // body-set-0 animation ids
     bool stepOneShot(const PedSprites* sprites);        // true when both halves have finished

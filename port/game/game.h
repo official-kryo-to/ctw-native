@@ -117,12 +117,14 @@ public:
     void giveMoney(uint32_t amount);         // cPlayer::GiveMoney
     void takeMoney(uint32_t amount);         // cPlayer::TakeMoney
     bool giveWeapon(int type, int ammo, bool replace);   // cPlayer::GiveWeapon: counts the weapons picked up
+    bool damagePlayer(int amount);           // PC (multiplayer mods): a hit another player's game reports
     Pickups pickups;                         // gPickupManager (pickups.h)
     Projectiles projectiles;                 // grenades, molotovs, flashbangs, mines and rockets (projectiles.cpp)
     int weaponCycle = 0;                     // input: -1 previous / +1 next weapon this frame
     // mods (PC aiming): fire at this world point instead of along the facing; the upper body turns to it
     struct AimOverride { bool on = false; int32_t target[3] = {0, 0, 0}; } aimOverride;
     bool screenToWorld(float x, float y, int width, int height, float out[3]) const;   // the drawn camera's ray
+    bool worldToScreen(const float p[3], int width, int height, float out[2]) const;   // false: behind the camera
     // The player's view of the world for the game logic (localarea.h): the frame scheduler, the loaded sectors,
     // the camera frustum and the cLocalAreaKnowledge pavement links.
     FrameScheduler scheduler;

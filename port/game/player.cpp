@@ -176,7 +176,7 @@ void Player::dynamicContact(const int32_t normal[3], const int32_t otherVelocity
 }
 
 bool Player::vehicleImpact(const Vehicle& car, const int32_t normal[3], bool isPlayer) {
-    if (dead || attached || hidden) return false;
+    if (dead || attached || hidden || invulnerable) return false;
     // cPed::ApplyCollisionEffect: only the vehicle's central width/front can
     // apply damage; the surrounding dynamic sphere is just contact.
     int32_t rel[3]; int64_t across = 0, along = 0, forwardVelocity = 0;
@@ -278,7 +278,7 @@ void Player::resetDamageState() {
 }
 
 bool Player::takeDamage(int damage, bool bypassArmour) {
-    if (dead || attached || hidden) return false;
+    if (dead || attached || hidden || invulnerable) return false;
     if (damage <= 0) return false;
     if (!bypassArmour) damage = (int)fixDamageForArmour((unsigned)damage);
     health = std::max(0, health - damage);
@@ -291,7 +291,7 @@ bool Player::takeDamage(int damage, bool bypassArmour) {
 }
 
 bool Player::explosionHit(int damage, const int32_t direction[3]) {
-    if (dead || attached || hidden) return false;
+    if (dead || attached || hidden || invulnerable) return false;
     const bool hadReaction = reacting();
     takeDamage(damage);
     if (hadReaction) return false;
@@ -309,7 +309,7 @@ bool Player::explosionHit(int damage, const int32_t direction[3]) {
 }
 
 bool Player::waterHit(const int32_t direction[3]) {
-    if (dead || attached || hidden || reacting()) return false;   // FindTask(cAnimation) refuses a second one
+    if (dead || attached || hidden || invulnerable || reacting()) return false;   // FindTask(cAnimation) refuses a second one
     reactionAge_ = 0;
     // ApplyDamageResponse: +0x348 bit 4 is set when the jet points along the facing
     reactionForward_ = (int64_t)direction[0]*fwd[0] + (int64_t)direction[1]*fwd[1] + (int64_t)direction[2]*fwd[2] > 0;
@@ -322,7 +322,7 @@ bool Player::waterHit(const int32_t direction[3]) {
 }
 
 bool Player::knockedOff(const int32_t direction[3]) {
-    if (dead || attached || hidden) return false;
+    if (dead || attached || hidden || invulnerable) return false;
     const bool hadReaction = reacting();
     takeDamage(1);
     if (hadReaction) return false;   // FindTask(cAnimation) refuses a second one
