@@ -138,7 +138,7 @@ bool Game::init(const std::string& data, const std::string& mods) {
     if (!loadingFrame()) return false;
     Plugins_Init(modsDir);
     if (!loadingFrame()) return false;
-    if (loading.finish()) return true;
+    if (!startupScreens || loading.finish()) return true;
     quitRequested = true;
     return false;
 }

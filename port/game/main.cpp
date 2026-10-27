@@ -14,7 +14,6 @@
 #include "gfx/assets.h"
 #include "loadingscreen.h"
 #include "video/movie.h"
-#include "audio/audio.h"
 #include <SDL.h>   // SDL_main
 #include <glad/gl.h>
 #include <cstdio>
@@ -188,6 +187,7 @@ int main(int argc, char** argv) {
         return count ? 0 : 2;
     }
     Game& game = TheGame();
+    game.startupScreens = !shot;   // automated runs do not wait for the five-second legal splash
     if (!game.init(data, mods)) {
         game.shutdown();
         if (game.quitRequested) { Host_Shutdown(); return 0; }

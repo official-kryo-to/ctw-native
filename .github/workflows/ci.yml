@@ -63,12 +63,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
             libxi-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libgl1-mesa-dev libegl1-mesa-dev \
-            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev
+            libasound2-dev libpulse-dev libudev-dev libdbus-1-dev xvfb xauth libgl1-mesa-dri
+      # Without a display SDL falls back to its offscreen driver, which cannot capture the mouse; the mouse-look
+      # tests need a real (virtual) X server. Mesa's llvmpipe draws in it.
       - name: Build game, showcase and mod kit (no game data needed)
         run: |
           cmake -S . -B port/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build port/build
-          ctest --test-dir port/build --output-on-failure
+          xvfb-run -a -s '-screen 0 1280x720x24' ctest --test-dir port/build --output-on-failure
       - name: Report failing tests
         if: failure()
         run: |

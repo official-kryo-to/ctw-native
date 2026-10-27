@@ -190,6 +190,7 @@ public:
     bool pauseOpen = false;
     PauseScreen pauseScreen;
     bool quitRequested = false;
+    bool startupScreens = true;          // init holds the legal splash and the loading app (off for shot tests)
     void setPause(bool open);
     bool pauseKey(int scancode);
     void renderPause(int W, int H);
