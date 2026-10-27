@@ -265,6 +265,8 @@ void GameplayApi_Fill(CtwHostApi& api) {
         p->puppet.move = std::clamp(s->move, 0, 3);
         p->puppet.dead = (s->flags & CTW_PUPPET_DEAD) != 0;
         p->puppet.vehicle = s->vehicle && vehicle(s->vehicle) ? s->vehicle : 0;
+        p->puppet.weapon = s->weapon >= 0 && s->weapon < 25 ? s->weapon : 0;
+        p->puppet.firing = (s->flags & CTW_PUPPET_FIRING) != 0;
         return 1;
     };
     api.remove_puppet = [](CtwPuppet handle) -> int { return TheGame().peds.removePuppet(TheGame(), handle) ? 1 : 0; };
@@ -279,11 +281,12 @@ void GameplayApi_Fill(CtwHostApi& api) {
         if (!vectorValid(xyz) || !out) return 0;
         return TheGame().worldToScreen(xyz, (int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight(), out) ? 1 : 0;
     };
-    api.get_player_vitals = [](int* health, int* armour, int* move) -> int {
+    api.get_player_vitals = [](int* health, int* armour, int* move, int* firing) -> int {
         const Game& g = TheGame();
         if (health) *health = g.player.health;
         if (armour) *armour = g.player.armour;
         if (move) *move = g.playerCar >= 0 ? 0 : std::clamp(g.player.level(), 0, 3);
+        if (firing) *firing = g.playerCar < 0 && g.playerFiring ? 1 : 0;
         return 1;
     };
     api.damage_player = [](int amount) -> int { return TheGame().damagePlayer(amount) ? 1 : 0; };

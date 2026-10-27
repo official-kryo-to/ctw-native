@@ -111,6 +111,9 @@ const WeaponTables& Weapons_Tables();
 std::string Weapons_Name(int type);                               // e_main.gxt via cWeaponInfo +0x28
 int Weapons_DefaultAmmo(int type);                                // cWeaponManager::GetDefaultWeaponAmmo
 bool Weapons_Fires(int type);                                     // the bullet weapons this port can shoot
+// PC (multiplayer mods): another player's gunshot as it looks and sounds here, the fire sound, the muzzle flash and
+// the trace to the first wall, hitting nothing (that player's own game decides the hits)
+void Weapons_CosmeticShot(Game& g, Player& shooter, int type, uint32_t uid);
 
 // cBulletTraces: 16 lines that shrink from the muzzle towards the hit over their lifetime.
 class BulletTraces {

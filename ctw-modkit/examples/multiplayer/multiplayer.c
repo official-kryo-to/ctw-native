@@ -242,8 +242,9 @@ static void update_remote(int slot) {
     }
     ps.heading = s->heading;
     ps.move = s->move;
-    ps.flags = s->flags & MP_DEAD ? CTW_PUPPET_DEAD : 0;
+    ps.flags = (s->flags & MP_DEAD ? CTW_PUPPET_DEAD : 0) | (s->flags & MP_FIRING ? CTW_PUPPET_FIRING : 0);
     ps.vehicle = p->car && !p->car_leaving ? p->car : 0;
+    ps.weapon = s->weapon;
     api->set_puppet_state(p->puppet, &ps);
 }
 
@@ -286,15 +287,16 @@ static void own_state(MpState* s) {
     memset(&ps, 0, sizeof ps);
     ps.size = sizeof ps;
     api->get_player_state(&ps);
-    int health = 0, armour = 0, move = 0, weapon = 0;
-    api->get_player_vitals(&health, &armour, &move);
+    int health = 0, armour = 0, move = 0, firing = 0, weapon = 0;
+    api->get_player_vitals(&health, &armour, &move, &firing);
     if (CTW_MOD_HAS(api, get_player_weapon)) api->get_player_weapon(&weapon, NULL, NULL);
     s->slot = (uint8_t)my_slot;
     s->seq = ++my_seq;
     for (int k = 0; k < 3; ++k) { s->pos[k] = ps.position[k]; s->vel[k] = ps.velocity[k]; }
     s->heading = ps.heading;
     s->move = (uint8_t)move;
-    s->flags = (uint8_t)((ps.flags & CTW_PLAYER_DEAD ? MP_DEAD : 0) | (ps.flags & CTW_PLAYER_IN_VEHICLE ? MP_IN_VEHICLE : 0));
+    s->flags = (uint8_t)((ps.flags & CTW_PLAYER_DEAD ? MP_DEAD : 0) | (ps.flags & CTW_PLAYER_IN_VEHICLE ? MP_IN_VEHICLE : 0) |
+                         (firing ? MP_FIRING : 0));
     s->health = (uint8_t)health;
     s->armour = (uint8_t)armour;
     s->body = (uint8_t)ps.body_set;

@@ -118,6 +118,7 @@ public:
     void takeMoney(uint32_t amount);         // cPlayer::TakeMoney
     bool giveWeapon(int type, int ammo, bool replace);   // cPlayer::GiveWeapon: counts the weapons picked up
     bool damagePlayer(int amount);           // PC (multiplayer mods): a hit another player's game reports
+    bool playerFiring = false;               // the fire button is held on foot this frame (multiplayer mods)
     Pickups pickups;                         // gPickupManager (pickups.h)
     Projectiles projectiles;                 // grenades, molotovs, flashbangs, mines and rockets (projectiles.cpp)
     int weaponCycle = 0;                     // input: -1 previous / +1 next weapon this frame

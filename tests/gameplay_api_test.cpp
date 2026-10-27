@@ -184,7 +184,7 @@ int main() {
         check(g.worldToScreen(ahead, 1280, 720, screen) && screen[0] > 0 && screen[0] < 1280 && screen[1] > 0 && screen[1] < 720 &&
               !api.world_to_screen(ahead, nullptr), "the followed player is on screen");
         int health = 0, armour = -1, move = -1;
-        check(api.get_player_vitals(&health, &armour, &move) && health == g.player.health && armour == g.player.armour,
+        check(api.get_player_vitals(&health, &armour, &move, nullptr) && health == g.player.health && armour == g.player.armour,
               "the player's vitals are readable");
         const int before = g.player.health;
         check(api.damage_player(10) && g.player.health < before && !api.damage_player(0), "another player's hits hurt the player");

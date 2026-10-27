@@ -24,7 +24,7 @@
 enum { MP_VERSION = 1, MP_MAX_PLAYERS = 8, MP_NAME = 16, MP_CHAT = 96, MP_PACKET = 512 };
 enum MpType { MP_HELLO = 1, MP_WELCOME, MP_REFUSE, MP_STATE, MP_ROSTER, MP_CHAT_MSG, MP_HIT, MP_WORLD, MP_BYE };
 enum MpRefusal { MP_FULL = 1, MP_WRONG_VERSION = 2 };
-enum MpStateFlags { MP_DEAD = 1, MP_IN_VEHICLE = 2 };
+enum MpStateFlags { MP_DEAD = 1, MP_IN_VEHICLE = 2, MP_FIRING = 4 };
 
 typedef struct MpState {
     uint8_t slot;

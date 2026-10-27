@@ -1245,6 +1245,21 @@ void Pedestrians::puppetStep(Game& g, Ped& p) {
     in.sprint = t.move >= 3;
     in.heading = in.moving ? padAngle((float)dx, (float)dy) : t.heading;
     if (!in.moving) p.body.setHeading(t.heading);
+    // the weapon it holds, and its gun shooting along its facing as its own game says (harmlessly here), at the
+    // weapon's rate (cWeapon::SetState's timer counts down by two a frame)
+    const bool gun = t.weapon >= 5 && Weapons_Ok();
+    p.body.weaponType = t.weapon;
+    p.body.upperAim = t.firing && gun;
+    for (int k = 0; k < 3; ++k) p.body.fireDir[k] = p.body.fwd[k];
+    if (t.firing && gun) {
+        if (t.cooldown > 0) --t.cooldown;
+        else {
+            Weapons_CosmeticShot(g, p.body, t.weapon, p.uid);
+            t.cooldown = std::max(Weapons_Info(t.weapon).fireDelay / 2, 2);
+        }
+    } else {
+        t.cooldown = 0;
+    }
     p.body.act(in, &g.pedSprites);
     p.movementPrepared = true;
 }

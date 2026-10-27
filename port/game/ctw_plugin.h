@@ -213,8 +213,9 @@ typedef struct CtwHostApi {
     int (*take_puppet_damage)(CtwPuppet puppet);
     /* The HUD pixel a world point is drawn at; 0 when it is behind the camera. */
     int (*world_to_screen)(const float xyz[3], float out_xy[2]);
-    /* The player's health and armour (0..127) and how fast he moves on foot (0 standing .. 3 sprinting). */
-    int (*get_player_vitals)(int* health, int* armour, int* move);
+    /* The player's health and armour (0..127), how fast he moves on foot (0 standing .. 3 sprinting) and whether he
+       holds the fire button (1). */
+    int (*get_player_vitals)(int* health, int* armour, int* move, int* firing);
     /* Hurt the player as a shot does (armour first; it can kill). 1 = ok. */
     int (*damage_player)(int amount);
     /* A vehicle's full pose: position, rotation (quaternion x, y, z, w) and velocity. Setting it keeps the vehicle

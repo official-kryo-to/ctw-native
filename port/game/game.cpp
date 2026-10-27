@@ -1425,6 +1425,7 @@ void Game::tick() {
             PadInput_Weapons(Host_Pad(), fire, throwing);   // a controller: RT fires, LT throws (hold for power)
         }
         if (scriptedInput) { fire = scriptedFire; throwing = scriptedThrow; }
+        playerFiring = fire && !busy;
         Weapons_PlayerFrame(*this, fire && !busy, weaponCycle, throwing && !busy);
         weaponCycle = 0;
     }

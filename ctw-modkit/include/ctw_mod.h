@@ -246,7 +246,7 @@ typedef struct CtwApi {
     int (*remove_puppet)(CtwPuppet puppet);
     int (*take_puppet_damage)(CtwPuppet puppet);
     int (*world_to_screen)(const float xyz[3], float out_xy[2]);   /* HUD pixels; 0 = behind the camera */
-    int (*get_player_vitals)(int* health, int* armour, int* move); /* 0..127, 0..127, 0 standing .. 3 sprinting */
+    int (*get_player_vitals)(int* health, int* armour, int* move, int* firing); /* 0..127, 0..127, 0..3 sprinting, fire held */
     int (*damage_player)(int amount);                               /* armour first, can kill; 1 = ok */
     /* position, rotation (quaternion x, y, z, w) and velocity; set: not the player's own vehicle */
     int (*get_vehicle_pose)(CtwVehicle vehicle, float xyz[3], float quat[4], float velocity[3]);

@@ -135,6 +135,9 @@ public:
             bool dead = false;
             uint32_t vehicle = 0;      // the vehicle it drives
             int damage = 0;            // what the player did to it since the mod last asked
+            int weapon = 0;            // the weapon it holds
+            bool firing = false;       // its gun shoots (Weapons_CosmeticShot, at the weapon's fire rate)
+            int cooldown = 0;          // frames to the next cosmetic shot
         } puppet;
         int weapon = 0;
         uint8_t moneyTier = 0;

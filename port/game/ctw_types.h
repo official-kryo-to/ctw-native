@@ -118,7 +118,7 @@ typedef int (*CtwCharacterCallback)(const CtwCharacterPose* pose, void* user);
    pedestrian, walks to the position it is given and sits in the vehicle it is given; the game neither moves it on
    its own nor hurts it (take_puppet_damage reports what the player did to it). */
 typedef uint32_t CtwPuppet;
-enum CtwPuppetFlags { CTW_PUPPET_DEAD = 1 };
+enum CtwPuppetFlags { CTW_PUPPET_DEAD = 1, CTW_PUPPET_FIRING = 2 };
 typedef struct CtwPuppetState {
     uint32_t size;                  /* sizeof(CtwPuppetState) */
     float position[3];              /* where its feet should be */
@@ -127,5 +127,6 @@ typedef struct CtwPuppetState {
     int32_t move;                   /* 0 standing, 1 walking, 2 running, 3 sprinting */
     uint32_t flags;                 /* CtwPuppetFlags */
     CtwVehicle vehicle;             /* the vehicle it drives, 0 on foot */
+    int32_t weapon;                 /* the weapon it holds (eWeaponType, 0 fists); FIRING: its gun shoots (harmlessly) */
 } CtwPuppetState;
 #endif

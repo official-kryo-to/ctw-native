@@ -425,7 +425,8 @@ int64_t cylinderDistance(const int32_t pos[3], int32_t radius, const int32_t sta
 
 // HelperMakeTraceAndFlash for an on-foot shooter (the player); returns true if something was hit
 void traceAndFlash(Game& g, Weapon& w, const int32_t origin[3], int32_t dir[3], int32_t range, int traceKind,
-                   int damage, bool accuracy, int flash, Player* shooter = nullptr, uint32_t uid = 0) {
+                   int damage, bool accuracy, int flash, Player* shooter = nullptr, uint32_t uid = 0,
+                   bool harmless = false) {   // harmless (PC multiplayer): the trace and flash only
     const Player& body = shooter ? *shooter : g.player;
     if (range < 40) return;
     const WeaponInfo& info = Weapons_Info(w.type);
@@ -477,7 +478,7 @@ void traceAndFlash(Game& g, Weapon& w, const int32_t origin[3], int32_t dir[3], 
     const int32_t reach2 = (int32_t)((uint64_t)((int64_t)reach * reach) >> 12);
     Hit best;
     int64_t closest = reach2;
-    if (reach >= 409) {
+    if (reach >= 409 && !harmless) {
         int32_t d2[2] = {vec[0], vec[1]};
         if (!d2[0] && !d2[1]) { d2[0] = (98304 * body.fwd[0]) >> 16; d2[1] = (98304 * body.fwd[1]) >> 16; }
         Normalise2(d2);
@@ -555,12 +556,13 @@ void traceAndFlash(Game& g, Weapon& w, const int32_t origin[3], int32_t dir[3], 
     }
 }
 
+const int kFireSfx[19][3] = {   // cAudioManager::AddSoundEvent(event, volume, radius) per FireSfx
+    {}, {}, {}, {}, {}, {0, 100, 1000}, {0, 100, 1000}, {34, 100, 1000}, {39, 100, 1000}, {39, 100, 1000},
+    {1, 40, 200}, {1, 40, 200}, {1, 100, 1000}, {3, 100, 1000}, {3, 100, 1000}, {38, 70, 1000}, {}, {}, {45, 100, 1000}};
+
 // the gun's CreateBullet: FireSfx, then one trace (three for the shotguns)
 void createBullet(Game& g, Weapon& w, Player* shooter = nullptr, uint32_t uid = 0) {
     const Player& body = shooter ? *shooter : g.player;
-    static const int kFireSfx[19][3] = {   // cAudioManager::AddSoundEvent(event, volume, radius) per FireSfx
-        {}, {}, {}, {}, {}, {0, 100, 1000}, {0, 100, 1000}, {34, 100, 1000}, {39, 100, 1000}, {39, 100, 1000},
-        {1, 40, 200}, {1, 40, 200}, {1, 100, 1000}, {3, 100, 1000}, {3, 100, 1000}, {38, 70, 1000}, {}, {}, {45, 100, 1000}};
     if (w.type == 17) { g.projectiles.fireRocket(g); return; }   // cRocketLauncher (FireSfx: event 44)
     if (w.type == 23) { g.projectiles.dropMine(g); return; }     // cMineLauncher
     if (w.type >= 20 && w.type <= 22) { g.projectiles.throwGrenade(g, w.type, g.player.throwPower); return; }
@@ -789,6 +791,16 @@ uint8_t gBurst = 0;   // cPed +0x364 (+0x363, the burst length, is 1 for every p
 }   // namespace
 
 int Weapons_ThrowPower() { return gThrow.held ? gThrow.power : -1; }
+
+void Weapons_CosmeticShot(Game& g, Player& shooter, int type, uint32_t uid) {
+    if (!gOk || type < 5 || type > 15) return;   // the guns that leave a trace (not the rocket, sniper or throws)
+    if (kFireSfx[type][2]) weaponSound(&shooter, uid, kFireSfx[type][0], kFireSfx[type][1], kFireSfx[type][2]);
+    Weapon w(type);
+    int32_t d[3] = {shooter.fireDir[0], shooter.fireDir[1], shooter.fireDir[2]};
+    const int kind = type == 15 ? 2 : (type == 13 || type == 14) ? 1 : 0;
+    const int flash = type == 15 ? 4 : (type == 13 || type == 14) ? 0 : 2;
+    traceAndFlash(g, w, shooter.pos, d, Weapons_Info(type).range, kind, 0, true, flash, &shooter, uid, true);
+}
 
 void Weapons_NpcFrame(Game& g, Player& shooter, Weapon& weapon, bool fireHeld, uint32_t uid) {
     // Share the native cWeapon state machine and the on-foot damage geometry.
