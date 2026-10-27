@@ -133,6 +133,7 @@ static void pixel(int x, int y, int height, uint8_t out[4]) {
     glReadPixels(x, height - 1 - y, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, out);
 }
 int main() {
+    SDL_setenv("SDL_AUDIODRIVER", "dummy", 1);   // (no sound device needed)
     if (!Host_Init("Gameplay HUD rendering regression", 640, 768)) {
         std::fprintf(stderr, "SKIP: no OpenGL test context: %s\n", SDL_GetError());
         Host_Shutdown(); return 77;

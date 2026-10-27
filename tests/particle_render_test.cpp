@@ -38,6 +38,7 @@ static void pixel(const Particles& particles, const float expected[3], const cha
 }
 
 int main() {
+    SDL_setenv("SDL_AUDIODRIVER", "dummy", 1);   // (no sound device needed)
     if (!Host_Init("Particle rendering regression",64,64)) {
         std::fprintf(stderr,"SKIP: no OpenGL test context: %s\n",SDL_GetError());
         Host_Shutdown();

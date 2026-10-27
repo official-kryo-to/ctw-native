@@ -45,9 +45,9 @@ int main(void) {
     memset(&m, 0, sizeof m);
     m.type = MP_HELLO; m.sender = 0xFF;
     m.u.hello.api = 13;
-    strcpy(m.u.hello.name, "A name that is far too long for it");
+    memset(m.u.hello.name, 'x', MP_NAME);   /* a full field without its terminator */
     check(round_trip(&m, &r) && r.u.hello.api == 13 && strlen(r.u.hello.name) == MP_NAME - 1,
-          "a long name is cut to fit");
+          "a name filling its field is cut to fit");
 
     memset(&m, 0, sizeof m);
     m.type = MP_ROSTER;
