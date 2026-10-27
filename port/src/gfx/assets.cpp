@@ -29,6 +29,8 @@ static std::map<int, bool> g_patched;   // ids whose texture now holds mod pixel
 static RenderTables g_renderTables;
 static int g_effectTexture = -1;
 static std::vector<std::array<uint16_t, 4>> g_effectRects;
+static int g_pickupTexture = -1;
+static std::vector<std::array<uint16_t, 4>> g_pickupRects;
 
 bool Assets_Open(const std::string& dataDir) {
     if (g_open) return true;
@@ -51,6 +53,17 @@ bool Assets_Open(const std::string& dataDir) {
             g_effectRects.resize(kSprites);
             std::memcpy(g_effectRects.data(), effects.data() + 4, kSprites * 8);
         }
+        // cAssetManager::LoadAssets loads 0x14C bytes of gGameDir[12] at +0xF0: the pickup sheet's texture id, u16 pad
+        // and 41 rects, one per ePickupTexture (cBasePickup::ManagedRender, RenderWorldScaleCamAligned's sheet).
+        std::vector<uint8_t> pickups;
+        const size_t kPickups = 41, kPickupEnd = 4 + kPickups * 8;
+        if (g_pak.read(gameDir[12], pickups) && pickups.size() >= kPickupEnd) {
+            uint16_t texture;
+            std::memcpy(&texture, pickups.data(), 2);
+            g_pickupTexture = texture;
+            g_pickupRects.resize(kPickups);
+            std::memcpy(g_pickupRects.data(), pickups.data() + 4, kPickups * 8);
+        }
     }
     bool dxt = g_dxt.open(dataDir + "/dxt.bin");
     g_loader.init(&g_pak, dxt ? &g_dxt : nullptr);
@@ -65,6 +78,13 @@ bool Assets_EffectSprite(int sprite, int& texture, uint16_t rect[4]) {
     if (sprite < 0 || sprite >= static_cast<int>(g_effectRects.size())) sprite = 0;
     texture = g_effectTexture;
     std::memcpy(rect, g_effectRects[sprite].data(), sizeof(uint16_t) * 4);
+    return true;
+}
+
+bool Assets_PickupSprite(int sprite, int& texture, uint16_t rect[4]) {
+    if (g_pickupTexture < 0 || sprite < 0 || sprite >= static_cast<int>(g_pickupRects.size())) return false;
+    texture = g_pickupTexture;
+    std::memcpy(rect, g_pickupRects[sprite].data(), sizeof(uint16_t) * 4);
     return true;
 }
 

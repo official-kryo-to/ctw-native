@@ -12,7 +12,11 @@
 //   +0x100 meshes    u32 count, meshes {i32 minX, minY, maxX, maxY, u16 nVerts, u16 nTris,
 //                    nVerts x i32[3], nTris x 40-byte triangles} - triangle: i32[3] plane point, u8 v0 v1 v2,
 //                    u8 radius, i16 normal[3], i16 edgeNormal[3][3]; point/radius/normals are computed at load.
-//   +0x108 .. +0x118 (pickups, ... - not used yet)
+//   +0x108 pavement network (see pedPaths)
+//   +0x110 pickups (cPickupManager::LoadPickupGridCell): u32 count, count x 16 bytes sSectorPickupData {i16 amount
+//          (ammo or money), u8 flags (bits 0-5 pickup type, 0x40 needs the script flag, 0x80 in a dumpster),
+//          u8 dumpster parameter, i32 x, y, z}
+//   +0x118 (not used yet)
 //   +0x120 props: u32 count, count x 20 bytes sPackedPropData (see props.h); their collision shapes are added to
 //          the cell when a PropLibrary is set
 //   +0x128 car generators (cCarGenManager::SpawnAllCarGensInSector): u32 count, count x 20 bytes sPackedCarGenData
@@ -58,6 +62,9 @@ public:
     struct CityEmitter { uint8_t type, pad[3]; int32_t x, y, z; };                     // sSectorEmitterData
     static_assert(sizeof(CityEmitter) == 16, "sSectorEmitterData");
     const std::vector<CityEmitter>* emitters(int cx, int cy);
+    struct PickupPlacement { int16_t amount; uint8_t flags, param; int32_t x, y, z; };   // sSectorPickupData
+    static_assert(sizeof(PickupPlacement) == 16, "sSectorPickupData");
+    const std::vector<PickupPlacement>* pickups(int cx, int cy);   // the map's pickups in a 50-unit cell
     // cSectorNodeData (sector chunk 3): the pavement network peds wander on. Nodes use the cBaseNode layout of the
     // road network (positions in 1/8 units, z in 1/2 units, links in links[first .. first + count)). Bridge nodes
     // (flag bit 7) sit on the sector edge; bridges lists {node, neighbouring sector index (y * 140 + x)} and the
@@ -135,6 +142,7 @@ private:
                             std::vector<Box> savedBoxes; std::vector<Cyl> savedCyls; bool solid = true, physical = false; };
         std::vector<PropShapes> propShapes;   // per prop: its shapes in boxes / cyls
         std::vector<CityEmitter> emitters;
+        std::vector<PickupPlacement> pickups;
         PedPaths pedPaths;
         std::vector<uint16_t> roadNodes;
         bool loaded = false;              // false = no data (off-map)

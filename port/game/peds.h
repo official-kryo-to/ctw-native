@@ -56,6 +56,7 @@
 #include <string>
 #include <vector>
 #include <array>
+#include <functional>
 
 class Game;
 class PedSprites;
@@ -122,6 +123,12 @@ public:
             int32_t from[3] = {0, 0, 0};
             uint32_t fromCar = 0;
         } exitFlee;
+        // cPed::SetPedType: the weapon pedinfo assigns (0 none), cPed::AssociateWithPlayer: the money carried (+0x35E
+        // bits 6-7: none, $10, $30 or $60); cPed::Reset sets dropping the weapon or the money (+0x338 bits 7 and 8),
+        // cPed::SetDead asks for it (bit 28) and cPed::DropGoodiesWhenDead does it once the body has settled
+        int weapon = 0;
+        uint8_t moneyTier = 0;
+        bool dropWeapon = true, dropMoney = true, dropPending = false, deathSeen = false;
         uint32_t socialFriend = 0;
         bool socialFriendVehicle = false;
         uint16_t talkingCooldown = 0;
@@ -159,9 +166,20 @@ public:
         uint8_t type, subtype, maleOnly, femaleOnly, legsPalette, upperPalette;
         std::vector<Reaction> reactions;
         std::array<uint8_t,7> enemies{}, friends{}; // cThreats: masks of native pedinfo record indices
+        uint8_t weapons[2] = {0xFF, 0xFF}, chances[2] = {0, 0};   // sPedSubTypeInfo +0x20 / +0x22 (file +0x14 / +0x16)
+        bool dropWeapon = true;                                  // +0x29 (file +0x1D)
     };
     const Record* record(int type, int subtype) const;
-    void dress(Ped& p, int zoneSex) const;   // cPed::cPed + SetPedType + SetMale (looks only)
+    // cPed::cPed + SetPedType + SetMale (looks only); betweenTypeAndSex runs where CreateRandomPed's own work ends,
+    // before the zone's sex makeup is applied
+    void dress(Ped& p, int zoneSex, const std::function<void()>& betweenTypeAndSex = {}) const;
+    // cPedInfoManager::sPedSubTypeInfo::GetAssignedWeapon: one of the record's two weapons by their chances (0x1C:
+    // none)
+    static int assignedWeapon(const Record& r);
+    // cPed::AssociateWithPlayer: the money a new ped carries in a zone of this affluence (it rolls whatever the
+    // affluence; other affluences keep `current`)
+    static uint8_t moneyTier(int affluence, uint8_t current);
+    void dropGoodies(Game& g, Ped& p);   // cPed::DropGoodiesWhenDead
     enum ReactionKind { None = 0, Flee = 1, Attack = 2, VehicleReaction = 3, FleeOrGetIn = 4, Roll = 5, Idle = 6 };
     // cPed::GetReactionHelper: the first record for the action (or any action, 9) whose Rand32Critical(100) roll is
     // within its chance; then AdjustPedInVehicleReaction (a vehicle reaction makes a driver drive away, a passenger

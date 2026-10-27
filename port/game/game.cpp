@@ -127,6 +127,8 @@ bool Game::init(const std::string& data, const std::string& mods) {
     skidSmoke = TheParticles().add<SkidSmokeEmitter>(player.pos);
     LoadVehicleInfos(vehicleInfos);   // parked cars come from the map's car generators (cargens.cpp)
     carGens.reset();
+    pickups.reset();
+    money = 0;
     // cPlayer::cPlayer: cPopulationManager's schedules (peds 64, vehicles 32), then cLocalAreaKnowledge's (16)
     scheduler.reset();
     scheduler.create(pedSchedule, 64);
@@ -266,6 +268,7 @@ void Game::updateCityEmitters() {   // cWorldSector::DataLoaded -> cCityEmitters
 
 void Game::updateWorldObjects() {   // once per game frame, after the vehicles moved
     traces.update();
+    pickups.update(*this);
     fires.process(*this);
     if (blood) {   // the general particle controller follows the player, like the rain
         int32_t at[3];
@@ -1094,6 +1097,20 @@ void Game::processTimeCycle() {   // cTimeCycle::Process: the clock, the weather
     weather.tick(*this);
 }
 
+void Game::giveMoney(uint32_t amount) {   // cPlayer::GiveMoney: clamped to 0 .. 99,999,999
+    money = std::max(std::min((int32_t)((uint32_t)money + amount), 99999999), 0);
+}
+
+void Game::takeMoney(uint32_t amount) {   // cPlayer::TakeMoney
+    money = std::max(std::min((int32_t)((uint32_t)money - amount), 99999999), 0);
+}
+
+bool Game::giveWeapon(int type, int ammo, bool replace) {   // cPlayer::GiveWeapon
+    if (!playerWeapons.give(type, ammo, replace)) return false;
+    stats.incWeaponsPickedUp();
+    return true;
+}
+
 uint16_t Game::cameraYaw() const {   // the active camera's yaw (cBaseCam +0xE8)
     return playerCar >= 0 ? carCam.yaw() : camera.yaw;
 }
@@ -1141,8 +1158,9 @@ void Game::updateDeath() {
             std::abs(deathEye_[2] - player.pos[2] - 0x8000) < 0x800;
     } else deathEye_[2] = std::min(deathEye_[2] + 0x333, 100 * 4096);
     // State 4, about 60 frames in (state 2 waits for its timer, which counts two a frame, to reach 0x76): six hours
-    // pass and the player is reborn at the nearest hospital (the $200 fee is not taken: the port has no money yet).
-    // The app then makes way for the game, which fades in over 12 frames (state 6: cScreenFade::FadeIn(12)).
+    // pass and the player is reborn at the nearest hospital for $200, or the nearest police station for $100 (the
+    // stats count what he could pay). The app then makes way for the game, which fades in over 12 frames (state 6:
+    // cScreenFade::FadeIn(12)).
     if (deathFrames_ == respawnFrame()) {
         deathScreen.close();
         deathStarted_ = false;
@@ -1160,6 +1178,10 @@ void Game::updateDeath() {
         player.health = 127;
         player.resetReaction();
         if (arrested_) playerWeapons.clearAll();
+        const uint32_t fee = arrested_ ? 100 : 200, paid = std::min((uint32_t)money, fee);
+        takeMoney(fee);
+        if (arrested_) stats.addSpentOnBribingCops(paid);
+        else stats.addSpentOnHealthCare(paid);
         wanted.reset();   // a new life starts unwanted
         arrestingCop = 0;
         arrested_ = arrestGrabbed = arrestStopVehicle = false;
@@ -1477,6 +1499,7 @@ void Game::render(int W, int H) {
     traces.render();
     muzzleFlashes.render();
     fires.render(cam);
+    pickups.render(*this, cam);
     if (playerCar < 0) FlameThrower_RenderJet(*playerWeapons.current());   // cFlameThrower::Render
     if (playerCar < 0) Tazer_RenderWire(*playerWeapons.current());          // cTazer::Render
     Weapons_RenderThrowArc(*this);

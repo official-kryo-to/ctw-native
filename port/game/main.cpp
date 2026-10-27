@@ -60,6 +60,7 @@ int main(int argc, char** argv) {
     int forceWeather = -1;
     int forceWanted = -1;
     int dieAt = -1;   // --die N: the player dies on frame N (testing the death sequence)
+    int startMoney = -1;   // --money N: start with this much money (testing the HUD's cash)
     const char* giveWeapons = nullptr;
     int fireFrom = -1, throwFrom = -1, throwTo = -1;
     for (int i = 1; i < argc; ++i) {
@@ -73,7 +74,7 @@ int main(int argc, char** argv) {
         else if (strcmp(option, "--data") && strcmp(option, "--mods") && strcmp(option, "--shot") &&
                  strcmp(option, "--frames") && strcmp(option, "--keys") && strcmp(option, "--export-textures") && strcmp(option, "--loading-shot") && strcmp(option, "--movie-shot") && strcmp(option, "--ui") && strcmp(option, "--state") &&
                  strcmp(option, "--enter") && strcmp(option, "--handbrake") && strcmp(option, "--burnout") && strcmp(option, "--hour") &&
-                 strcmp(option, "--weather") && strcmp(option, "--weapon") && strcmp(option, "--fire") && strcmp(option, "--throw") && strcmp(option, "--wanted") && strcmp(option, "--die") &&
+                 strcmp(option, "--weather") && strcmp(option, "--weapon") && strcmp(option, "--fire") && strcmp(option, "--throw") && strcmp(option, "--wanted") && strcmp(option, "--die") && strcmp(option, "--money") &&
                  strcmp(option, "--shot-every")) {
             fprintf(stderr, "Unknown option: %s\n", option);
             return 4;
@@ -121,6 +122,7 @@ int main(int argc, char** argv) {
         if (!strcmp(argv[i], "--weather")) forceWeather = atoi(argv[i + 1]);   // testing: ForceWeather(0..7)
         if (!strcmp(argv[i], "--wanted")) forceWanted = atoi(argv[i + 1]);     // testing: SetLevel(0..6)
         if (!strcmp(argv[i], "--die")) dieAt = atoi(argv[i + 1]);
+        if (!strcmp(argv[i], "--money")) startMoney = atoi(argv[i + 1]);
         if (!strcmp(argv[i], "--weapon")) giveWeapons = argv[i + 1];   // testing: give these weapon types (comma-separated)
         if (!strcmp(argv[i], "--throw")) {   // testing: hold the throw button over frames A:B
             if (sscanf(argv[i + 1], "%d:%d", &throwFrom, &throwTo) != 2) throwTo = throwFrom + 1;
@@ -203,6 +205,7 @@ int main(int argc, char** argv) {
     }
     if (forceWeather >= 0) game.weather.force(game, forceWeather & 7);
     if (forceWanted >= 0) game.wanted.setLevel(forceWanted, false, false);
+    if (startMoney >= 0) game.giveMoney((uint32_t)startMoney);
     for (const char* p = giveWeapons; p && *p;) {
         const int type = atoi(p);
         game.playerWeapons.give(type, Weapons_DefaultAmmo(type), true);
@@ -260,9 +263,10 @@ int main(int argc, char** argv) {
             } else if (trace) {
                 float p[3];
                 game.player.posf(p);
-                printf("f%3d pos %.3f %.3f %.3f lvl %d ground %d vz %.2f head %d cam %d pitch %d wanted %d\n", f, p[0], p[1], p[2], game.player.level(),
-                       game.player.onGround(), game.player.vel[2] / 4096.f, game.player.heading(), (int16_t)game.camera.yaw, (int16_t)game.camera.pitch(),
-                       game.wanted.level());
+                printf("f%3d pos %.3f %.3f %.3f lvl %d ground %d vz %.2f head %d cam %d pitch %d wanted %d hp %d%s%s\n", f, p[0], p[1], p[2],
+                       game.player.level(), game.player.onGround(), game.player.vel[2] / 4096.f, game.player.heading(),
+                       (int16_t)game.camera.yaw, (int16_t)game.camera.pitch(), game.wanted.level(), game.player.health,
+                       game.player.dead ? " dead" : "", game.arrested() ? " arrested" : "");
             }
         }
         if (keys)
@@ -287,6 +291,13 @@ int main(int argc, char** argv) {
             printf("%c", 10);
         }
         if (trace) printf("world blocks loaded: %zu\n", game.world.stats().blocks);
+        if (trace) {
+            printf("money %d, pickups %zu:", game.money, game.pickups.list().size());
+            for (const Pickups::Pickup& p : game.pickups.list())
+                printf(" [type %d amount %d at %.1f %.1f %.1f state %d]", p.type, p.amount, p.pos[0] / 4096.f, p.pos[1] / 4096.f,
+                       p.pos[2] / 4096.f, p.state);
+            printf("%c", 10);
+        }
         bool ok = saveBmp(shot);
         game.shutdown();
         Host_Shutdown();

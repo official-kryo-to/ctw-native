@@ -31,6 +31,7 @@
 #include "sniper.h"
 #include "stats.h"
 #include "projectiles.h"
+#include "pickups.h"
 #include "targeting.h"
 #include "world/worldrenderer.h"
 #include <cstdint>
@@ -111,6 +112,12 @@ public:
     bool policeRestartsAvailable() const { return !restart_.police.empty(); }
     bool beginArrest(uint32_t cop);         // cPlayer::Arrested, after the arrest task's countdown
     PlayerTargeting targeting;               // the player's auto-aim (cPlayerSensorCone, targeting.cpp)
+    // cPlayer +0x112C: the player's money, 0 .. 99,999,999 (a new game starts with none)
+    int32_t money = 0;
+    void giveMoney(uint32_t amount);         // cPlayer::GiveMoney
+    void takeMoney(uint32_t amount);         // cPlayer::TakeMoney
+    bool giveWeapon(int type, int ammo, bool replace);   // cPlayer::GiveWeapon: counts the weapons picked up
+    Pickups pickups;                         // gPickupManager (pickups.h)
     Projectiles projectiles;                 // grenades, molotovs, flashbangs, mines and rockets (projectiles.cpp)
     int weaponCycle = 0;                     // input: -1 previous / +1 next weapon this frame
     // mods (PC aiming): fire at this world point instead of along the facing; the upper body turns to it

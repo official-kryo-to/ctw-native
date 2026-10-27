@@ -3,6 +3,8 @@
 // See LICENSE in the repository root.
 #include "gamehud.h"
 #include "game.h"
+#include "hud.h"
+#include "sound.h"
 #include "gfx/assets.h"
 #include "os/datafile.h"
 #include "os/gamefs.h"
@@ -181,6 +183,7 @@ void GameplayHud::render(const Game& game, int width, int height) const {
     projection.worldOffset(north, pos, nx, ny, diameter * .5f);
     sprite(107, cx + nx * k, cy + ny * k, k);
     renderWantedStars(game, k, width, height);
+    renderCash(game, k);
     glPopAttrib();
 }
 
@@ -217,4 +220,53 @@ void GameplayHud::renderWantedStars(const Game& game, float k, int width, int he
         const float alpha = lit && i >= litCount && i != 0 ? 0.5f : 1.f;   // stars taken down are dimmed
         sprite(lit ? 124 : 125, (x0 + 22.f * i) * k, 12.f * k, k * starScale_[i], 0.f, alpha);
     }
+}
+
+bool CashMeter::step(int32_t money, bool titleShown) {   // cHudApp::UpdateCash
+    if (money == shown_) slide_ = slide_ < 0x28 ? slide_ + 2 : 0x2A;
+    else slide_ = std::max(slide_ - 2, 0);
+    if (money != shown_) text_ = shown_;   // the text sprite is made again, with the amount shown so far
+    // Gui::cCashMeter::Process(show: in view without a mission title, count: in view)
+    const bool count = slide_ == 0;
+    delta_ = false;
+    if (money == shown_) return false;
+    if (count && target_ != money) { target_ = money; start_ = shown_; progress_ = 0; }
+    const int32_t next = shown_ + (progress_ >> 12);
+    const bool past = (money > shown_ && next > money) || (money < shown_ && next < money);
+    const int32_t value = past ? money : next;
+    const int32_t span = target_ - start_;
+    progress_ += span > 500000 ? 0x3E8000 : (int32_t)(((int64_t)span << 44) / (span < 5 ? 0x64000 : 0x1F4000) >> 20);
+    bool sound = false;
+    if (count) {
+        sound = value != shown_;   // cAudioManager::PlayHudSfx(0x193, 0x14)
+        shown_ = value;
+    }
+    delta_ = count && !titleShown && money != shown_;
+    return sound;
+}
+
+int32_t CashMeter::widthTemplate(int32_t shown) {   // UpdateCash's thresholds (from a million up it stays at 1000000)
+    if (shown > 99999999) return 10000000;
+    if (shown > 99999) return shown > 999999 ? 1000000 : 100000;
+    if (shown > 9999) return 10000;
+    if (shown > 999) return 1000;
+    if (shown > 99) return 100;
+    return shown < 10 ? 0 : 10;
+}
+
+void GameplayHud::renderCash(const Game& game, float k) const {
+    if (game.frame != cashFrame_) {   // once per game frame (cHudApp::Process)
+        cashFrame_ = game.frame;
+        if (cash_.step(game.money)) TheSound().playHud(0x193, 0x14);
+    }
+    if (cash_.slide() >= 0x2A && !cash_.delta()) return;
+    // font 5 is the game's large font and font 3 its small one; the port draws both with the HUD font
+    const float big = 2.f * k, small = 1.5f * k;
+    const uint32_t green = 0x00FC84FFu;   // RGB555 0x3F0
+    const float x = 280.f * k, y = (8.f - cash_.slide()) * k;
+    Hud_Text(x, y, big, green, "$" + std::to_string(cash_.text()));
+    if (!cash_.delta()) return;
+    const int32_t left = game.money - cash_.shown();
+    const float right = x + Hud_TextWidth("$" + std::to_string(CashMeter::widthTemplate(cash_.shown())), big);
+    Hud_Text(right + 8.f * k, 12.f * k, small, green, (left < 0 ? "-$" : "+$") + std::to_string(std::abs(left)));
 }

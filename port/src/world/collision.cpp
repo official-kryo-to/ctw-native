@@ -138,6 +138,10 @@ const Collision::Cell* Collision::cell(int cx, int cy) {
         C.emitters.resize(k);
         memcpy(C.emitters.data(), &sec[8][4], k * 16);
     }
+    if (uint32_t k = count(sec[4]); k && sec[4].size() >= 4 + k * 16) {
+        C.pickups.resize(k);
+        memcpy(C.pickups.data(), &sec[4][4], k * 16);
+    }
     // cWorldSector::DataLoaded: u32 node table offset at +0x20, u16 link count +0x24, u16 node count +0x26,
     // u8 bridge count +0x2A; bridges {u16 node, u16 sector} from +0; u16 links from +0x2C.
     if (const std::vector<uint8_t>& s = sec[3]; s.size() >= 0x2C) {
@@ -216,6 +220,11 @@ const std::vector<Collision::CityEmitter>* Collision::emitters(int cx, int cy) {
 const std::vector<Collision::Prop>* Collision::props(int cx, int cy) {
     const Cell* C = cell(cx, cy);
     return C && !C->props.empty() ? &C->props : nullptr;
+}
+
+const std::vector<Collision::PickupPlacement>* Collision::pickups(int cx, int cy) {
+    const Cell* C = cell(cx, cy);
+    return C && !C->pickups.empty() ? &C->pickups : nullptr;
 }
 
 const std::vector<Collision::CarGen>* Collision::carGens(int cx, int cy) {

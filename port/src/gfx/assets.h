@@ -13,6 +13,8 @@ bool Assets_Open(const std::string& dataDir);   // opens game.pak (required) and
 Pak& Assets_Pak();
 const RenderTables& Assets_RenderTables();
 bool Assets_EffectSprite(int sprite, int& texture, uint16_t rect[4]);
+// A pickup sprite (ePickupTexture 0..40) on the pickup sheet: its texture id and {x, y, w, h} in pixels
+bool Assets_PickupSprite(int sprite, int& texture, uint16_t rect[4]);
 unsigned Assets_Texture(int resourceId);        // 0 if the id has no texture data
 bool Assets_TextureSize(int resourceId, int* width, int* height);   // loads the texture if needed
 // Replaces a game texture with a PNG (mods). UVs are normalised, so any resolution works. A PNG with transparent

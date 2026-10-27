@@ -106,8 +106,9 @@ bool Pedestrians::init(const std::string& dataDir) {
     if (!fs.open(dataDir) || !fs.read("pedinfo.bin", d) || d.size() < 8 + 20 * 4) return false;
     // cPedInfoManager::Init: u32 at +4 = the 32-byte records; from +8 one u32 per ped type, the low half being the
     // type's first record. In a record: +8 file offset of the reactions (3 bytes each: chance, reaction, action),
-    // +0xC their count, +0xD type, +0xE subtype, +0x19 male only, +0x1A female only, +0x1B / +0x1C fixed legs /
-    // upper palette + 1 (0: none).
+    // +0xC their count, +0xD type, +0xE subtype, +0x14 / +0x15 assigned weapons (0xFF: none), +0x16 / +0x17 their
+    // chances, +0x19 male only, +0x1A female only, +0x1B / +0x1C fixed legs / upper palette + 1 (0: none), +0x1D drop
+    // the weapon. (In memory a record is 48 bytes: the file's +0xC.. are copied to +0x18.)
     uint32_t recOffset;
     memcpy(&recOffset, &d[4], 4);
     for (int t = 0; t < 20; ++t) {
@@ -116,7 +117,8 @@ bool Pedestrians::init(const std::string& dataDir) {
         firstRecord_.push_back((uint16_t)v);
     }
     for (size_t o = recOffset; o + 32 <= d.size(); o += 32) {
-        Record r{d[o + 0xD], d[o + 0xE], d[o + 0x19], d[o + 0x1A], d[o + 0x1B], d[o + 0x1C], {}};
+        Record r{d[o + 0xD], d[o + 0xE], d[o + 0x19], d[o + 0x1A], d[o + 0x1B], d[o + 0x1C], {}, {}, {},
+                 {d[o + 0x14], d[o + 0x15]}, {d[o + 0x16], d[o + 0x17]}, d[o + 0x1D] != 0};
         uint32_t enemies, friends;
         memcpy(&enemies,&d[o],4);memcpy(&friends,&d[o+4],4);
         if ((size_t)enemies+7<=d.size()) std::copy_n(d.data()+enemies,7,r.enemies.begin());
@@ -143,7 +145,7 @@ int Pedestrians::alive() const {
     return n;
 }
 
-void Pedestrians::dress(Ped& p, int zoneSex) const {
+void Pedestrians::dress(Ped& p, int zoneSex, const std::function<void()>& betweenTypeAndSex) const {
     // The palette bytes as the original keeps them: u = the upper sprite's (+0x3D and +0x3E), a and l = the legs
     // sprite's +0x3E (its first layer) and +0x3D (the rest).
     int body = 0, u, a, l;
@@ -184,12 +186,56 @@ void Pedestrians::dress(Ped& p, int zoneSex) const {
     if (r && r->maleOnly) body = 1;
     else if (r && r->femaleOnly) { body = 0; femaleChoice(); }
     if (r && r->upperPalette) { u = a = r->upperPalette - 1; l = r->legsPalette - 1; }
+    if (r) {   // SetPedType: the assigned weapon (GiveWeapon(weapon, 999)) and dropping it
+        const int w = assignedWeapon(*r);
+        p.weapon = w == 0x1C ? 0 : w;
+        p.dropWeapon = r->dropWeapon;
+    }
+    if (betweenTypeAndSex) betweenTypeAndSex();
     // cPopulationManager::CreateRandomPed: a civilian takes the zone's sex makeup
     if (t == 1 && (zoneSex == 1 || zoneSex == 2)) setMale(zoneSex == 1, t, sub);
     p.male = body != 0;
     p.body.bodySet = body;   // cPed +0x220 selects the body set (0x113 animations each)
     p.body.palUpper = u;     // (a is always u here: the legs' first layer is drawn in palUpper)
     p.body.palLegs = l;
+}
+
+int Pedestrians::assignedWeapon(const Record& r) {   // cPedInfoManager::sPedSubTypeInfo::GetAssignedWeapon
+    if (r.weapons[0] == 0xFF) return 0x1C;
+    if (r.chances[0] >= Rand16Critical(100)) return r.weapons[0];
+    for (int i = 0;;) {   // until a roll passes, alternating with the second weapon when there is one
+        i = r.weapons[1] != 0xFF && i == 0 ? 1 : 0;
+        if (r.chances[i] >= Rand16Critical(100)) return r.weapons[i];
+    }
+}
+
+uint8_t Pedestrians::moneyTier(int affluence, uint8_t current) {   // cPed::AssociateWithPlayer
+    const unsigned r = Rand16Critical(100);
+    switch (affluence) {
+    case 0: return r > 69 ? 1 : 0;
+    case 1: return r <= 59 ? 0 : r <= 79 ? 1 : 2;
+    case 2: return r <= 49 ? 0 : r <= 84 ? 2 : 3;
+    case 3: return r <= 49 ? 0 : r <= 64 ? 2 : 3;
+    default: return current;
+    }
+}
+
+void Pedestrians::dropGoodies(Game& g, Ped& p) {   // cPed::DropGoodiesWhenDead
+    // (+0x338 bit 9, set by cPed::Reset, lets it happen in the air too) not before the body has slowed to a unit a
+    // second; nothing while the player's cPlayer +0x118A is set (never, here)
+    const int64_t speed2 = (int64_t)p.body.vel[0] * p.body.vel[0] + (int64_t)p.body.vel[1] * p.body.vel[1] +
+                           (int64_t)p.body.vel[2] * p.body.vel[2];
+    if (speed2 > 0x1000000) return;
+    p.dropPending = false;
+    // the primary weapon, if it is not the fists (an enforcer's is the one its task holds)
+    const int weapon = p.type == 10 && p.enforcer.weapon.type ? p.enforcer.weapon.type : p.weapon;
+    if (p.dropWeapon && weapon > 0) {
+        g.pickups.addDroppedWeapon(weapon, p.body.pos);
+        return;
+    }
+    // cPlayer +0x3F9 (WorldImpl::AllowMoneyPickups): only rampages switch it off and their end switches it back on
+    static const int kMoney[4] = {0, 10, 30, 60};
+    if (p.dropMoney && g.pickups.allowMoney && p.moneyTier) g.pickups.addDroppedMoney(kMoney[p.moneyTier & 3], p.body.pos);
 }
 
 void Pedestrians::setTarget(Game& g, Ped& p) {   // cWanderPath::SetNext
@@ -405,7 +451,11 @@ bool Pedestrians::appearance(Game& g, Ped& p, int type, const Traffic::ZoneInfo&
         p.subtype = 0;
         if (!record(p.type, 0)) return false;
     }
-    dress(p, z.sex);
+    dress(p, z.sex, [&] {   // CreateRandomPed: AssociateWithPlayer with the player's zone
+        int32_t at[3];
+        g.focus(at);
+        p.moneyTier = moneyTier(g.traffic.zones().affluenceAt(at[0], at[1]), p.moneyTier);
+    });
     p.body.playerControlled = false;
     p.wander.socialStart = (uint16_t)g.frame;
     p.wander.initialized = true;
@@ -1014,6 +1064,10 @@ void Pedestrians::update(Game& g) {
         const int health = g.player.health;
         g.player.vehicleImpact(car, normal, true);
         if (g.player.health != health) g.addBlood(g.player.pos, 1);
+    }
+    for (Ped& p : peds) {   // cPed::SetDead asks every ped but the player to drop its goodies; cPed::Process drops them
+        if (p.body.dead && !p.deathSeen) p.deathSeen = p.dropPending = true;
+        if (p.dropPending && !p.vehicle && !p.body.hidden) dropGoodies(g, p);
     }
     // cPed::ShouldBeDestroyed: about 85 units from the player and off screen
     int32_t f[3];
