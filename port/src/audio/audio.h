@@ -5,6 +5,7 @@
 // The original plays its radio stations / music MP3s through OpenAL + mpg123 (cAudioManager); this is the
 // platform side of that, the game's own mixing logic comes with the audio-manager port.
 #pragma once
+#include <cstdint>
 #include <string>
 
 bool Audio_Init();
@@ -36,3 +37,11 @@ void Audio_SetSfxVolume(float v);        // master 0..1
 void Audio_SetSfxPaused(bool paused);    // suspend voices without advancing their samples
 int Audio_SfxActive();                   // voices playing (the debug overlay)
 bool Audio_SfxPaused();
+
+// A pushed PCM stream (the intro movie's soundtrack): 16-bit interleaved samples at their own rate, resampled to
+// the output and mixed with music and effects. Position counts the source frames the device has played.
+void Audio_PcmBegin(int rate, int channels);
+void Audio_PcmPush(const int16_t* samples, int frames);
+int Audio_PcmQueued();                   // source frames waiting to be played
+double Audio_PcmPosition();              // seconds played since Audio_PcmBegin
+void Audio_PcmEnd();

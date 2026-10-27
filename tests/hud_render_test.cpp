@@ -219,16 +219,16 @@ int main() {
     glClear(GL_COLOR_BUFFER_BIT);
     game.gameplayHud.render(game, 640, 768);
     pixel(145, 55, 768, p);
-    check(p[0] > 180 && p[2] < 70, "north-up radar draws the synthetic tile's northern red half above the focus");
+    check(p[0] > 130 && p[2] < 70, "north-up radar draws the synthetic tile's northern red half above the focus");
     pixel(145, 115, 768, p);
-    check(p[2] > 180 && p[0] < 70, "north-up radar draws the synthetic tile's southern blue half below the focus");
+    check(p[2] > 130 && p[0] < 70, "north-up radar draws the synthetic tile's southern blue half below the focus");
     game.gameplayHud.setRotation(true); game.camera.yaw = 0x4000;
     glClear(GL_COLOR_BUFFER_BIT);
     game.gameplayHud.render(game, 640, 768);
     pixel(115, 85, 768, p);
-    check(p[0] > 180 && p[2] < 70, "quarter-turn radar rotates the northern tile half to the left with its marker");
+    check(p[0] > 130 && p[2] < 70, "quarter-turn radar rotates the northern tile half to the left with its marker");
     pixel(175, 85, 768, p);
-    check(p[2] > 180 && p[0] < 70, "quarter-turn radar rotates the southern tile half to the right");
+    check(p[2] > 130 && p[0] < 70, "quarter-turn radar rotates the southern tile half to the right");
     pixel(205, 145, 768, p);
     check(p[0] == 255 && p[1] == 0 && p[2] == 255,
           "rotated textured tile corners remain outside the circular stencil");

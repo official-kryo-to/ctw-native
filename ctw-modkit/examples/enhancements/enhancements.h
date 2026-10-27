@@ -34,6 +34,7 @@ extern const CtwFeature third_person;
 extern const CtwFeature psp_lighting;
 extern const CtwFeature lcs_characters;
 extern const CtwFeature pc_aiming;
+extern const CtwFeature prop_physics;
 int enh_third_person_active(void);
 
 #endif

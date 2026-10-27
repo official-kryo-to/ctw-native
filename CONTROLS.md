@@ -1,5 +1,7 @@
 # Controls
 
+The intro movie stops when any key, mouse button or controller button is held for more than a second.
+
 | On foot | |
 | --- | --- |
 | W A S D / arrows | Move |

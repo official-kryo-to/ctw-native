@@ -5,6 +5,13 @@ compatibility with the original.
 
 ## What works
 
+- **Start-up:** as on Android: the English legal screen (LegalScreens_ENG.png, fitted and centred on black) for
+  exactly five seconds with the game halted, then the loading app (cLoadingAppRing): background 87 and the ring,
+  which makes its half-turn over eight frames and holds it until loading is done (at least nine frames). Then the
+  new game's intro movie (kena01::cIntroDrive::StartMovie: CTW_iPhone_intro.mp4 with its soundtrack, stretched over
+  the window like Android's movie view, the game's music paused) plays until its end, or until something is held for
+  more than a second (UpdateMovieCallback). It is decoded by Windows (Media Foundation); other platforms skip it. The
+  in-engine plane prologue before it and the rest of the first mission (KEN_A01) are not ported yet.
 - **The city:** streets and buildings with their textures, water, animated signs, weather, day and night,
   street furniture, street lights, steam vents and fountains.
 - **On foot:** the player character with movement, sprinting and collision. The follow camera counts consecutive
@@ -12,11 +19,14 @@ compatibility with the original.
   Movement now integrates once per tick; weapon-dependent footsteps use the correct upper/leg animation cycle.
 - **Gameplay HUD:** the original north-up radar tiles, frame, north marker, rotating player/vehicle arrow and
   health semicircle. The map follows the controlled character or vehicle and uses the original map coordinates,
-  clipping and colours. The PC uses the phone radar size.
+  clipping and colours. The PC uses the phone radar size. While wanted the map flashes as cRadar does: steady blue
+  with one star, blue and red every twelve frames once two stars are lit or a chasing cop sees the player, each colour
+  fading in over a few frames, with the map premultiplied by its 0.75 alpha as RenderRadar draws it.
   The weapon wheel pauses world sounds as well as simulation, accepts clicks completed between display frames,
   and releases its pause and textures when closed, reloaded or shut down. Multiline font drawing and measurement
   now agree; a failed font replacement preserves the loaded font.
 - **Vehicles:** cars and bikes with the game's handling, getting in and out, damage, lights, skidmarks and sounds.
+  Bikes are mounted from the nearer side, as the seat plans' ops 9 and 10 do.
   Skid marks follow cWheeledVehicle / cBike::AddSkidmarks: both back wheels of a car (one track for a bike),
   front marks only while those wheels spin, traffic marking on alternate frames, tyre smoke
   (cParticleEmitterSkidSmoke) and sparks from a burst tyre's rim above 10 units a second. Burnouts work as in the
@@ -116,7 +126,7 @@ compatibility with the original.
   are drawn between ticks, so motion is smooth at any refresh rate.
 - **Mods:** the mod menu (**F4**). A mod is one folder with any mix of texture replacements and a C or C++ DLL.
   The API covers vehicles, the player, pedestrians, the world, traffic, radio, custom cameras, game events, saved
-  settings and menu items. The bundled **Enhancements** mod adds an optional third-person camera (**V**) and
+  settings and menu items. The bundled **Enhancements** mod adds an option (on by default) that makes hit street furniture come loose and tumble (API v12 `set_prop_physics`) instead of the original's fixed tilts, and an optional third-person camera (**V**) and
   PSP-style lighting. API v6 exposes interpolated explosion shake; Enhancements applies it to third person.
   API v7 adds skinned character resources and interpolated player/pedestrian render overrides. The Porter offers
   optional user-supplied LCS Android 2.4.379 character import and lets users choose premade mods.

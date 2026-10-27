@@ -3,6 +3,7 @@
 // See LICENSE in the repository root.
 #include "game.h"
 #include "loadingscreen.h"
+#include "intro.h"
 #include "weaponhud.h"
 #include "hud.h"
 #include "particles.h"
@@ -136,7 +137,10 @@ bool Game::init(const std::string& data, const std::string& mods) {
     updateSectors();
     if (!loadingFrame()) return false;
     Plugins_Init(modsDir);
-    return loadingFrame();
+    if (!loadingFrame()) return false;
+    if (loading.finish()) return true;
+    quitRequested = true;
+    return false;
 }
 
 const Model* Game::carModel(int infoId) {
@@ -552,7 +556,6 @@ void Game::startEnter(int target) {   // FindSuitableVehicles (within 10 units) 
     // across, {100} warp in. Passenger's side: {6, 1}, then {1}, then {100}. ({2, 1} validates as {6, 1} does for the
     // player and is left out.) Bikes and single seaters use the bike plans (ops 9 and 10): straight on.
     Vehicle& c = cars[best];
-    if (c.isBike() || c.numSeats() <= 1) return;
     int32_t local[3], d0[3], d1[3];
     c.doorSpawnPoint(0, local); c.localToWorld(local, d0);
     c.doorSpawnPoint(1, local); c.localToWorld(local, d1);
@@ -561,13 +564,16 @@ void Game::startEnter(int target) {   // FindSuitableVehicles (within 10 units) 
         return dx * dx + dy * dy + dz * dz;
     };
     const bool driverSide = dist2(d1) >= dist2(d0);
+    // op 9 gets on from the left at door 0's spawn point, op 10 from the right at door 1's
+    // (cNewGetInVehicle::GetSeatDoorOffsetFromOp); walking round to the far side stuck the player against the bike
+    if (c.isBike() || c.numSeats() <= 1) { task.door = driverSide ? 0 : 1; return; }
     // op 6 tests the passenger door without allowing an occupied passenger seat. The subsequent op 1 calls
     // CanBeUsedForPlan(driver, true): cGetInVehiclePlayer allows jacking, including across from the passenger
     // side. Requiring an empty driver here sent the player straight into the car's body towards the far door.
     const bool viaPassenger = c.seatUser[0] != -2 && c.seatUser[1] == -1 && doorClear(c, 1);
     const bool driverDoor = doorClear(c, 0);
     if (driverSide ? driverDoor : !viaPassenger && driverDoor) return;
-    if (viaPassenger) { task.seat = 1; task.shuffle = true; return; }
+    if (viaPassenger) { task.seat = task.door = 1; task.shuffle = true; return; }
     // {100}: cNewGetInVehicle::HandleWarp (valid while the doors are not locked: cSeats +0x23, never set here)
     if (c.seatUser[0] >= 0) jackCrime(c);
     if (!peds.exitOccupant(*this, c, 0)) { task = CarTask{}; return; }
@@ -654,7 +660,7 @@ bool Game::tickTask(bool stickHeld, int16_t stickHeading) {
             if ((int64_t)player.fwd[0] * s + (int64_t)player.fwd[1] * co < 0) { task.op = CarTask::None; return false; }
         }
         int32_t sp[3], w[3];
-        c.doorSpawnPoint(task.seat, sp);
+        c.doorSpawnPoint(task.door, sp);
         c.localToWorld(sp, w);
         if (dist2d(player.pos, w) > 0x2000) return false;   // the normal on-foot update walks there (see tick)
         task.off[0] = sp[0]; task.off[1] = sp[1]; task.off[2] = sp[2];
@@ -1327,7 +1333,7 @@ void Game::tick() {
     if (task.op == CarTask::GotoDoor) {   // cGotoTargetOnFootStraightLine: head for the door (running at most)
         const Vehicle& c = cars[task.car];
         int32_t sp[3], w[3];
-        c.doorSpawnPoint(task.seat, sp);
+        c.doorSpawnPoint(task.door, sp);
         c.localToWorld(sp, w);
         in.moving = true;
         in.heading = padAngle((float)(w[0] - player.pos[0]), (float)(w[1] - player.pos[1]));
@@ -1543,6 +1549,7 @@ void Game::render(int W, int H) {
 }
 
 void Game::run() {
+    if (!IntroMovie::play(dataDir)) return;   // the new game's intro (the port starts a new game every time)
     const double step = 1.0 / 30.0;   // OS_ApplicationTick: the game logic runs at 30 fps
     double acc = 0, last = OS_TimeAccurate();
     bool running = true;

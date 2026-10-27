@@ -51,13 +51,16 @@ int main(int argc, char** argv) {
     const auto enabled = (int (*)())SDL_LoadFunction(probe,"ctw_test_enabled");
     const auto probeMod = (CtwMod* (*)())SDL_LoadFunction(probe,"ctw_test_mod");
     if (!init || !shutdown || !getApi || !events || !toggles || !ticks || !enabled || !probeMod) return 2;
-    CtwHostApi host{}; host.version = 11; host.size = sizeof host;
+    CtwHostApi host{}; host.version = 12; host.size = sizeof host;
     host.weapon_type_count = [] { return 25; };
     host.weapon_name = [](int t) -> const char* { return t == 5 ? "Pistol" : nullptr; };
     host.weapon_givable = [](int t) { return t == 5 ? 1 : 0; };
     host.give_weapon = [](int t, int ammo) { return t == 5 && ammo == 0 ? 1 : 0; };
     host.get_player_weapon = [](int* t, int* a, int* c) { if (t) *t = 5; if (a) *a = 30; if (c) *c = 17; return 1; };
     host.cycle_weapon = [](int d) { return d ? 1 : 0; };
+    static int propPhysics = 0;
+    host.set_prop_physics = [](int full) { propPhysics = full; };
+    host.get_prop_physics = [] { return propPhysics; };
     host.mods_dir = [] { return modsDir.c_str(); }; host.log = [](const char*) {};
     host.override_texture_png = [](int id,const char*) -> int { if (id != 42) return 0; ++textureLoads; return 1; };
     host.restore_texture = [](int id) { if (id == 42) ++textureRestores; };
@@ -105,13 +108,15 @@ int main(int argc, char** argv) {
     check(init(&host) == 0, "v9 host loads the mod kit");
     check(textureLoads == 1, "the same mod folder loads its textures and its DLL");
     const CtwApi* api = getApi();
-    check(api && api->version == 11 && api->size == sizeof(CtwApi), "a mod's DLL receives the complete v11 table");
+    check(api && api->version == 12 && api->size == sizeof(CtwApi), "a mod's DLL receives the complete v12 table");
     if (api) {
         int t = 0, a = 0, c = 0;
         check(CTW_MOD_HAS(api, give_weapon) && api->give_weapon(5, 0) && !api->give_weapon(6, 0) &&
               api->weapon_type_count() == 25 && api->weapon_name(5) && api->weapon_givable(5) &&
               api->get_player_weapon(&t, &a, &c) && t == 5 && a == 30 && c == 17, "weapon functions forward to the host");
         check(CTW_MOD_HAS(api, cycle_weapon) && api->cycle_weapon(1) && !api->cycle_weapon(0), "v11 weapon switch forwards");
+        check(CTW_MOD_HAS(api, set_prop_physics) && (api->set_prop_physics(1), api->get_prop_physics() == 1),
+              "v12 prop physics forwards");
     }
     if (api) {
         CtwCharacterPose pose{}; pose.size=sizeof pose; pose.id=42;
@@ -168,6 +173,12 @@ int main(int argc, char** argv) {
     shutdown();
     { std::ifstream saved(dir / "Probe/settings.ini"); std::string text((std::istreambuf_iterator<char>(saved)), {});
       check(text.find("speed=2.25") != std::string::npos && text.find("bad") == std::string::npos, "settings are written at shutdown"); }
+    host.version = 11; host.size = offsetof(CtwHostApi,set_prop_physics);
+    check(init(&host) == 0, "truncated v11 host remains supported");
+    api = getApi();
+    check(api && api->version == 11 && CTW_MOD_HAS(api,cycle_weapon) && !CTW_MOD_HAS(api,set_prop_physics),
+          "v11 host cannot expose v12 prop physics");
+    shutdown();
     host.version = 10; host.size = offsetof(CtwHostApi,cycle_weapon);
     check(init(&host) == 0, "truncated v10 host remains supported");
     api = getApi();

@@ -50,6 +50,10 @@ public:
     bool onProbation() const { return state_ == 2; }
     bool copInView(uint32_t frame) const { return frame - copInViewFrame_ < 5; }   // IsCopInView
     bool pursuingCopInView(uint32_t frame) const { return (int32_t)(frame - pursuingFrame_) < 5; }
+    // cWantedManager::ShowCopIndicator: two or more lit stars, or a pursuing cop saw the player in the last five frames
+    bool showCopIndicator(uint32_t frame) const {
+        return state_ != 2 && level_ && (starsLit() > 1 || pursuingCopInView(frame));
+    }
     uint32_t rating() const { return rating_; }
     int takeDowns() const { return takeDowns_; }
     const WantedTables& tables() const { return tables_; }

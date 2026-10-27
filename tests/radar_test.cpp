@@ -72,5 +72,34 @@ int main() {
     check(x == 0 && y < -3.99f && y > -4.f, "nearby markers remain inside the circle without stretching");
     northUp.worldOffset(focus, focus, x, y, 75.f);
     check(x == 0 && y == 0, "the focus marker stays centred without dividing by zero");
+
+    RadarFlash flash;
+    float rgb[3];
+    flash.tint(rgb);
+    check(rgb[0] == 1 && rgb[1] == 1 && rgb[2] == 1 && flash.colour() == 0, "the radar starts untinted");
+    flash.setStyle(1, 12);
+    flash.process();
+    check(flash.style() == 1 && flash.colour() == 0, "a requested style is taken on the next frame");
+    flash.process();
+    check(flash.colour() == 1, "style 1 holds the radar blue");
+    for (int i = 0; i < 4; ++i) flash.stepTint();
+    flash.tint(rgb);
+    check(rgb[0] > 0 && rgb[1] > 0 && std::fabs(rgb[2] - 192 / 255.f) < 1e-6f, "the tint moves 0x3F a frame");
+    flash.stepTint();
+    flash.tint(rgb);
+    check(rgb[0] == 0 && rgb[1] == 0 && std::fabs(rgb[2] - 192 / 255.f) < 1e-6f, "the blue is reached in five frames");
+    flash.setStyle(5, 12);
+    flash.process();
+    int frames = 0;
+    while (flash.colour() == 1 && frames < 100) { flash.process(); ++frames; }
+    check(flash.colour() == 2 && frames == 13, "style 5 turns red after its twelve-frame period has run out");
+    frames = 0;
+    while (flash.colour() == 2 && frames < 100) { flash.process(); ++frames; }
+    check(flash.colour() == 1 && frames == 13, "and alternates blue and red every thirteen frames");
+    flash.setStyle(0, 12);
+    for (int i = 0; i < 14; ++i) flash.process();
+    check(flash.style() == 0 && flash.colour() == 0, "losing the stars ends the flashing once the current flash is over");
+    flash.setStyle(6, 12);
+    check(flash.colour() == 0, "the tutorial flash restarts from the normal colour");
     return failures ? 1 : 0;
 }

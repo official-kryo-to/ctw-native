@@ -30,7 +30,7 @@
 #include <stddef.h>
 #include "ctw_types.h"
 
-#define CTW_MOD_API_VERSION 11
+#define CTW_MOD_API_VERSION 12
 #define CTW_MOD_HAS(api, member) ((api) && (api)->size >= offsetof(CtwApi, member) + sizeof((api)->member) && (api)->member)
 
 #ifdef _WIN32
@@ -234,6 +234,9 @@ typedef struct CtwApi {
     int (*screen_to_world)(float x, float y, float out[3]);        /* the world point under a screen pixel */
     /* --- version 11 ------------------------------------------------------------------------------------- */
     int (*cycle_weapon)(int direction);   /* the next (> 0) or previous (< 0) weapon, on foot; 1 = ok */
+    /* --- version 12 ------------------------------------------------------------------------------------- */
+    void (*set_prop_physics)(int full);   /* 1: hit props come loose and tumble; 0: the original (default) */
+    int (*get_prop_physics)(void);
 } CtwApi;
 
 /*

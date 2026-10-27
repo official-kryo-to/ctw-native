@@ -203,10 +203,90 @@ void Audio_SetSfxPaused(bool paused) {
     SDL_UnlockAudioDevice(g_dev);
 }
 
+// ---- the pushed PCM stream (Audio_Pcm*) ---------------------------------------------------------------------
+struct PcmStream {
+    bool on = false;
+    int rate = 0, channels = 0;
+    std::vector<int16_t> samples;   // queued interleaved samples; `start` frames of them already played
+    size_t start = 0;
+    double pos = 0;                 // fractional frame within the queue (resampling)
+    uint64_t played = 0;            // source frames consumed
+};
+static PcmStream g_pcm;
+
+static void mixPcm(int16_t* out, int frames) {
+    PcmStream& p = g_pcm;
+    if (!p.on || p.channels <= 0) return;
+    const double step = (double)p.rate / kOutRate;
+    const size_t queued = p.samples.size() / p.channels;
+    const float vol = g_volume.load();
+    for (int i = 0; i < frames; ++i) {
+        const size_t i0 = p.start + (size_t)p.pos;
+        if (i0 + 1 >= queued) break;   // starved: silence until the decoder catches up
+        const float t = (float)(p.pos - std::floor(p.pos));
+        for (int c = 0; c < 2; ++c) {
+            const int sc = p.channels == 1 ? 0 : c;
+            const float a = p.samples[i0 * p.channels + sc], b = p.samples[(i0 + 1) * p.channels + sc];
+            const float v = out[i * 2 + c] + (a + (b - a) * t) * vol;
+            out[i * 2 + c] = (int16_t)std::max(-32768.f, std::min(32767.f, v));
+        }
+        const double before = std::floor(p.pos);
+        p.pos += step;
+        p.played += (uint64_t)(std::floor(p.pos) - before);
+    }
+    const size_t whole = (size_t)p.pos;   // drop what has been played
+    p.start += whole;
+    p.pos -= (double)whole;
+    if (p.start > 1 << 16) {
+        p.samples.erase(p.samples.begin(), p.samples.begin() + (ptrdiff_t)(p.start * p.channels));
+        p.start = 0;
+    }
+}
+
+void Audio_PcmBegin(int rate, int channels) {
+    if (!g_dev) return;
+    SDL_LockAudioDevice(g_dev);
+    g_pcm = PcmStream{};
+    g_pcm.on = rate > 0 && channels > 0;
+    g_pcm.rate = rate; g_pcm.channels = channels;
+    SDL_UnlockAudioDevice(g_dev);
+}
+
+void Audio_PcmPush(const int16_t* samples, int frames) {
+    if (!g_dev || !samples || frames <= 0) return;
+    SDL_LockAudioDevice(g_dev);
+    if (g_pcm.on) g_pcm.samples.insert(g_pcm.samples.end(), samples, samples + (size_t)frames * g_pcm.channels);
+    SDL_UnlockAudioDevice(g_dev);
+}
+
+int Audio_PcmQueued() {
+    if (!g_dev) return 0;
+    SDL_LockAudioDevice(g_dev);
+    const int n = g_pcm.on ? (int)(g_pcm.samples.size() / g_pcm.channels - g_pcm.start) : 0;
+    SDL_UnlockAudioDevice(g_dev);
+    return n;
+}
+
+double Audio_PcmPosition() {
+    if (!g_dev) return 0;
+    SDL_LockAudioDevice(g_dev);
+    const double s = g_pcm.on && g_pcm.rate ? (double)g_pcm.played / g_pcm.rate : 0;
+    SDL_UnlockAudioDevice(g_dev);
+    return s;
+}
+
+void Audio_PcmEnd() {
+    if (!g_dev) return;
+    SDL_LockAudioDevice(g_dev);
+    g_pcm = PcmStream{};
+    SDL_UnlockAudioDevice(g_dev);
+}
+
 static void SDLCALL mix(void*, Uint8* out8, int len) {
     int16_t* out = (int16_t*)out8;
     int frames = len / 4;
     memset(out8, 0, (size_t)len);
+    mixPcm(out, frames);
     struct SfxAfter { int16_t* o; int f; ~SfxAfter() { mixSfx(o, f); } } sfxAfter{out, frames};
     if (!g_music || !g_music->open || g_music->paused) {
         g_level = 0.f;

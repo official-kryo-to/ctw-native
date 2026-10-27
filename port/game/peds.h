@@ -141,6 +141,7 @@ public:
             // Native arrest task: 0 combat, 1 guard, 2 step aside, 3 approach, 4 car door, 5 countdown.
             int state = 0;
             uint16_t arrestTimer = 20;
+            int64_t grabDistance = 0;   // the squared distance the arrest began at (it holds within it)
             bool animation = false;
             Weapon weapon{0};
         } enforcer;
@@ -209,6 +210,8 @@ private:
     bool appearance(Game& g, Ped& p, int type, const Traffic::ZoneInfo& z, int subtype = -1);
     void updateOccupant(Game& g, Ped& p);
     void wander(Game& g, Ped& p);
+    // the dynamic body spheres touch this tick (contacts' swept test, either way round)
+    static bool touching(const Player& a, const Player& b);
     bool policeStep(Game& g, Ped& p);   // supported on-foot enforcer/arrest task branches (police.cpp)
     bool rejoin(Game& g, Ped& p);
     bool idle(Game& g, Ped& p);

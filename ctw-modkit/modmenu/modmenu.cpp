@@ -709,6 +709,8 @@ extern "C" CTW_PLUGIN_EXPORT int ctw_plugin_init(const CtwHostApi* host) {
     g_api.set_aim_override = gameplay && CTW_HOST_HAS(H,set_aim_override) ? H->set_aim_override : nullptr;
     g_api.screen_to_world = gameplay && CTW_HOST_HAS(H,screen_to_world) ? H->screen_to_world : nullptr;
     g_api.cycle_weapon = gameplay && CTW_HOST_HAS(H,cycle_weapon) ? H->cycle_weapon : nullptr;
+    g_api.set_prop_physics = gameplay && CTW_HOST_HAS(H,set_prop_physics) ? H->set_prop_physics : nullptr;
+    g_api.get_prop_physics = gameplay && CTW_HOST_HAS(H,get_prop_physics) ? H->get_prop_physics : nullptr;
 #undef FORWARD_V4
 #undef FORWARD_V5
     g_api.on_game_event = gameplay && H->on_game_event ? api_on_event : nullptr;

@@ -22,6 +22,13 @@ public:
     void update(Game& game);
     void render(Game& game) const;   // between the last two ticks when game.interpolate is on
     int looseCount() const { return (int)loose_.size(); }   // the debug overlay
+    // PC option (mods: set_prop_physics), off by default. The original keeps many props in place when hit: lamps
+    // and signs bend to a fixed angle, hydrants tilt about their base, benches and kiosks only tilt or break. With
+    // full physics every breakable prop that is hit hard enough to smash comes loose and tumbles instead (props
+    // with infinite mass get kFullPhysicsMass); it still smashes, sprays and burns as the original does.
+    void setFullPhysics(bool on) { fullPhysics_ = on; }
+    bool fullPhysics() const { return fullPhysics_; }
+    static constexpr int32_t kFullPhysicsMass = 0x2000;
     // a prop's identity for the things attached to it (fires), and where it is now
     static uint32_t key(int cx, int cy, int index) { return (uint32_t)(cx * 100 + cy) << 12 | (uint32_t)index; }
     bool position(uint32_t key, int32_t out[3]) const;   // false: not a moving body (it has not moved)
@@ -57,6 +64,7 @@ private:
                               int32_t point[3], int32_t forceA[3], int32_t forceB[3]);
     static const Model* drawnModel(Game& game, const Loose& prop);
     std::vector<Loose> loose_;
+    bool fullPhysics_ = false;
     struct DamageState { int8_t health; int32_t pos[3]; };
     // Partial damage to standing furniture must not replace its static shapes or create a second body.
     std::map<std::pair<int,int>, DamageState> damaged_;

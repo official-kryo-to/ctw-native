@@ -21,10 +21,13 @@ target_include_directories(glad PUBLIC third_party/glad/include)
 add_library(ctw_engine STATIC
     src/os/os_sdl.cpp src/os/wad.cpp src/os/gamefs.cpp src/os/dxtbin.cpp src/os/pak.cpp src/os/datafile.cpp
     src/gfx/spriteset.cpp src/gfx/font.cpp src/gfx/model.cpp src/gfx/character.cpp src/gfx/texload.cpp src/gfx/assets.cpp src/gfx/stb_impl.cpp src/gfx/pedsprites.cpp src/gfx/rendertables.cpp
-    src/text/gxt.cpp src/audio/audio.cpp
+    src/text/gxt.cpp src/audio/audio.cpp src/video/movie.cpp
     src/world/worldmap.cpp src/world/timecycle.cpp src/world/worldrenderer.cpp src/world/collision.cpp src/world/collisionsweep.cpp src/world/props.cpp)
 target_include_directories(ctw_engine PUBLIC src third_party/stb third_party/minimp3)
 target_link_libraries(ctw_engine PUBLIC glad SDL2::SDL2-static)
+if(WIN32)   # Media Foundation decodes the intro movie (part of Windows; no extra runtime)
+    target_link_libraries(ctw_engine PUBLIC mfplat mfreadwrite mfuuid shlwapi ole32)
+endif()
 
 # ---- showcase: the asset viewer (textures, text, models, audio, fly-through city) ------------------------
 add_executable(ctw_showcase showcase/main.cpp showcase/viewer.cpp showcase/modelview.cpp showcase/worldview.cpp)
@@ -55,6 +58,7 @@ endif()
 add_library(ctw_gameplay STATIC game/game.cpp game/followcam.cpp game/player.cpp game/hud.cpp game/plugins.cpp game/vehicle.cpp game/carcam.cpp game/cargens.cpp game/random.cpp game/peds.cpp game/interpolation.cpp game/debughud.cpp game/postfx.cpp game/weather.cpp game/localarea.cpp game/weapons.cpp game/flamethrower.cpp game/fire.cpp game/taser.cpp game/sniper.cpp game/projectiles.cpp game/targeting.cpp game/weaponhud.cpp game/roads.cpp game/aispline.cpp game/traffic.cpp game/particles.cpp game/sound.cpp game/skidmarks.cpp game/lookups.cpp game/watercannon.cpp game/propdynamics.cpp game/rigidbody.cpp game/radio.cpp game/stats.cpp)
 target_sources(ctw_gameplay PRIVATE game/pedsocial.cpp)
 target_sources(ctw_gameplay PRIVATE game/zones.cpp)
+target_sources(ctw_gameplay PRIVATE game/intro.cpp)
 target_sources(ctw_gameplay PRIVATE game/pedcomments.cpp)
 target_sources(ctw_gameplay PRIVATE game/police.cpp game/policedriving.cpp)
 target_include_directories(ctw_gameplay PUBLIC game)
@@ -114,6 +118,9 @@ if(BUILD_TESTING)
     add_executable(radartest ../tests/radar_test.cpp game/radar.cpp)
     target_include_directories(radartest PRIVATE game)
     add_test(NAME radar_map COMMAND radartest)
+    add_executable(introtest ../tests/intro_test.cpp)
+    target_link_libraries(introtest PRIVATE ctw_gameplay)
+    add_test(NAME intro_movie COMMAND introtest)
     add_executable(hudrendertest ../tests/hud_render_test.cpp)
     target_link_libraries(hudrendertest PRIVATE ctw_gameplay)
     add_test(NAME gameplay_hud_rendering COMMAND hudrendertest)

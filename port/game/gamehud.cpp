@@ -36,6 +36,12 @@ void meterArc(float x, float y, float inner, float outer, int value, float side)
     }
     glEnd();
 }
+// cHudApp::SyncRadarToWantedState, as cHudApp::Process does it every frame: steady blue while wanted, blue and red
+// once two stars are lit or a pursuing cop has seen the player
+int wantedFlashStyle(const WantedManager& w, uint32_t frame) {
+    if (!w.ok() || w.onProbation() || !w.actualLevel()) return 0;
+    return w.starsLit() > 1 || w.showCopIndicator(frame) ? 5 : 1;
+}
 }
 
 bool GameplayHud::init(const std::string& dir) {
@@ -104,6 +110,12 @@ void GameplayHud::render(const Game& game, int width, int height) const {
     RadarMap::worldToMap(pos, mx, my);
     const uint16_t yaw = rotation_ ? game.cameraYaw() : 0;
     const RadarProjection projection(yaw);
+    if (game.frame != flashFrame_) {   // once per game frame: cHudApp::Process, cRadar::Render and RenderRadar
+        flashFrame_ = game.frame;
+        flash_.setStyle(wantedFlashStyle(game.wanted, game.frame), 0xC);
+        flash_.process();
+        flash_.stepTint();
+    }
     glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT | GL_CURRENT_BIT | GL_TEXTURE_BIT);
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_ALPHA_TEST);
@@ -131,6 +143,8 @@ void GameplayHud::render(const Game& game, int width, int height) const {
     glColor4f(.02f, .1f, .13f, 1.f);
     disc(cx, cy, radius);
 
+    float tint[3];
+    flash_.tint(tint);
     const float reach = diameter * .5f;
     const int firstCol = (int)std::floor((mx - reach - map_.originX()) / 256.f);
     const int lastCol = (int)std::floor((mx + reach - map_.originX()) / 256.f);
@@ -146,7 +160,8 @@ void GameplayHud::render(const Game& game, int width, int height) const {
             const float px[4] = {x0, x0 + 256, x0 + 256, x0}, py[4] = {y0, y0, y0 + 256, y0 + 256};
             glEnable(GL_TEXTURE_2D);
             glBindTexture(GL_TEXTURE_2D, tex);
-            glColor4f(1, 1, 1, .75f);
+            // RenderRadar premultiplies the tint by the map's 0.75 alpha
+            glColor4f(.75f * tint[0], .75f * tint[1], .75f * tint[2], .75f);
             glBegin(GL_QUADS);
             for (int v = 0; v < 4; ++v) {
                 glTexCoord2f(v == 1 || v == 2 ? 1.f : 0.f, v >= 2 ? 1.f : 0.f);

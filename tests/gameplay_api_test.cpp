@@ -39,10 +39,14 @@ int main() {
     SDL_Init(0);
     Game& g = TheGame();
     const auto& api = Plugins_HostApi();
-    check(api.version == 11 && CTW_HOST_HAS(&api, cycle_weapon) && CTW_HOST_HAS(&api, consume_mouse_wheel) && CTW_HOST_HAS(&api, world_line) &&
+    check(api.version == 12 && CTW_HOST_HAS(&api, set_prop_physics) && CTW_HOST_HAS(&api, cycle_weapon) && CTW_HOST_HAS(&api, consume_mouse_wheel) && CTW_HOST_HAS(&api, world_line) &&
           CTW_HOST_HAS(&api, get_camera_shake) && CTW_HOST_HAS(&api, get_character_bounds) &&
           CTW_HOST_HAS(&api, draw_character_model_at_time) && CTW_HOST_HAS(&api, draw_character_model_attached) &&
-          CTW_HOST_HAS(&api, give_weapon) && CTW_HOST_HAS(&api, get_player_weapon), "v11 append-only host is available");
+          CTW_HOST_HAS(&api, give_weapon) && CTW_HOST_HAS(&api, get_player_weapon), "v12 append-only host is available");
+    check(!api.get_prop_physics(), "props keep the original physics by default");
+    api.set_prop_physics(1);
+    check(api.get_prop_physics() && g.propDynamics.fullPhysics(), "mods can switch on full prop physics");
+    api.set_prop_physics(0);
     check(!api.cycle_weapon(1), "without weapon_tables.bin the weapon cannot be switched");
     check(!api.give_weapon(5, 10) && !api.weapon_name(5) && api.weapon_type_count() == 0,
           "without weapon_tables.bin no weapon can be given");

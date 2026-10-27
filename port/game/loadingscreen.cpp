@@ -60,14 +60,31 @@ bool LoadingScreen::init(const std::string& dir) {
             stbi_image_free(pixels);
         }
     }
+    // The legal splash is a loose asset; the port's text is English, so it is the English one (GameActivity picks
+    // it by the device language).
+    std::vector<uint8_t> legal;
+    int channels;
+    if (Data_ReadAll(dir + "/LegalScreens_ENG.png", legal))
+        if (auto* pixels = stbi_load_from_memory(legal.data(), (int)legal.size(), &legalWidth_, &legalHeight_,
+                                                 &channels, 4)) {
+            glGenTextures(1, &legal_);
+            glBindTexture(GL_TEXTURE_2D, legal_);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, legalWidth_, legalHeight_, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+            stbi_image_free(pixels);
+        }
     return background_ && ring_;
 }
 
 void LoadingScreen::shutdown() {
     if (background_) glDeleteTextures(1, &background_);
     if (ring_) glDeleteTextures(1, &ring_);
-    background_ = ring_ = 0;
-    backgroundWidth_ = backgroundHeight_ = ringWidth_ = ringHeight_ = 0;
+    if (legal_) glDeleteTextures(1, &legal_);
+    background_ = ring_ = legal_ = 0;
+    backgroundWidth_ = backgroundHeight_ = ringWidth_ = ringHeight_ = legalWidth_ = legalHeight_ = 0;
     sprites_ = SpriteSet{};
 }
 
@@ -78,7 +95,11 @@ int16_t LoadingScreen::rotation(unsigned frames) {
     return (int16_t)(frames / 16.f * -65535.f);
 }
 
-void LoadingScreen::render(int width, int height, double seconds) const {
+void LoadingScreen::render(int width, int height, double seconds) const { draw(width, height, false, seconds); }
+
+void LoadingScreen::renderLegal(int width, int height) const { draw(width, height, true, 0); }
+
+void LoadingScreen::draw(int width, int height, bool legal, double seconds) const {
     if (width <= 0 || height <= 0) return;
     GLint oldMode, oldProgram, oldActive, oldDraw, oldRead;
     glGetIntegerv(GL_MATRIX_MODE, &oldMode);
@@ -99,14 +120,6 @@ void LoadingScreen::render(int width, int height, double seconds) const {
     glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity();
     glOrtho(0, width, height, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity();
-    // Desktop adaptation: centre the native 480 x 320 loading layout and preserve
-    // its aspect ratio on resize. Its background is padded to a 512 x 512 texture.
-    const float k = std::min(width / 480.f, height / 320.f);
-    glTranslatef((width - 480 * k) * .5f, (height - 320 * k) * .5f, 0);
-    glScalef(k, k, 1);
-    glEnable(GL_TEXTURE_2D);
-    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-    glColor4f(1, 1, 1, 1);
     auto quad = [](float x, float y, float w, float h, float u0, float v0, float u1, float v1) {
         glBegin(GL_QUADS);
         glTexCoord2f(u0, v0); glVertex2f(x, y);
@@ -115,25 +128,39 @@ void LoadingScreen::render(int width, int height, double seconds) const {
         glTexCoord2f(u0, v1); glVertex2f(x, y + h);
         glEnd();
     };
-    if (background_) {
-        glBindTexture(GL_TEXTURE_2D, background_);
-        quad(0, 0, 480, 320, 0, 0, 480.f / backgroundWidth_, 320.f / backgroundHeight_);
-    }
-    if (ring_ && !sprites_.sprites().empty()) {
-        const auto& s = sprites_.sprites()[0];
-        glBindTexture(GL_TEXTURE_2D, ring_);
-        glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glTranslatef(240, 160, 0);
-        // Desktop startup may take longer than the native transition. Repeat its
-        // nine-frame half-turn at 30 Hz, continuing the next half-turn from 180
-        // degrees so the loop never snaps back to its initial orientation.
-        const double ticks = std::max(seconds, 0.0) * 30.0;
-        const unsigned frame = (unsigned)std::fmod(ticks, 9.0);
-        const float halfTurn = (float)std::fmod(std::floor(ticks / 9.0), 2.0) * 180.f;
-        glRotatef(rotation(frame) * 360.f / 65536.f - halfTurn, 0, 0, 1);
-        quad(-(float)s.offX, -(float)s.offY, s.w + 1.f, s.h + 1.f,
-             2.f * s.x / ringWidth_, 2.f * s.y / ringHeight_,
-             2.f * (s.x + s.w + 1.f) / ringWidth_, 2.f * (s.y + s.h + 1.f) / ringHeight_);
+    glEnable(GL_TEXTURE_2D);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    glColor4f(1, 1, 1, 1);
+    if (legal) {   // ImageView's default FIT_CENTER over the still black game surface
+        if (legal_) {
+            const float k = std::min((float)width / legalWidth_, (float)height / legalHeight_);
+            glBindTexture(GL_TEXTURE_2D, legal_);
+            glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            quad((width - legalWidth_ * k) * .5f, (height - legalHeight_ * k) * .5f, legalWidth_ * k, legalHeight_ * k,
+                 0, 0, 1, 1);
+        }
+    } else {
+        // Desktop adaptation: centre the native 480 x 320 loading layout and preserve
+        // its aspect ratio on resize. Its background is padded to a 512 x 512 texture.
+        const float k = std::min(width / 480.f, height / 320.f);
+        glTranslatef((width - 480 * k) * .5f, (height - 320 * k) * .5f, 0);
+        glScalef(k, k, 1);
+        if (background_) {
+            glBindTexture(GL_TEXTURE_2D, background_);
+            quad(0, 0, 480, 320, 0, 0, 480.f / backgroundWidth_, 320.f / backgroundHeight_);
+        }
+        if (ring_ && !sprites_.sprites().empty()) {
+            const auto& s = sprites_.sprites()[0];
+            glBindTexture(GL_TEXTURE_2D, ring_);
+            glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glTranslatef(240, 160, 0);
+            // the front end's 30 Hz frames since the app started: a half-turn, then it holds however long loading takes
+            const unsigned frame = (unsigned)std::min(std::max(seconds, 0.0) * 30.0, 1e6);
+            glRotatef(rotation(frame) * 360.f / 65536.f, 0, 0, 1);
+            quad(-(float)s.offX, -(float)s.offY, s.w + 1.f, s.h + 1.f,
+                 2.f * s.x / ringWidth_, 2.f * s.y / ringHeight_,
+                 2.f * (s.x + s.w + 1.f) / ringWidth_, 2.f * (s.y + s.h + 1.f) / ringHeight_);
+        }
     }
     glMatrixMode(GL_MODELVIEW); glPopMatrix();
     glMatrixMode(GL_PROJECTION); glPopMatrix();
@@ -157,7 +184,18 @@ bool LoadingScreen::present() {
     Host_PopText();
     float dx, dy;
     Host_PopMouseDelta(&dx, &dy);
-    render((int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight(), OS_TimeAccurate() - start_);
+    const double now = OS_TimeAccurate();
+    if (legal_ && now < ringStart()) renderLegal((int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());
+    else render((int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight(), now - ringStart());
     OS_ScreenSwapBuffers();
+    return true;
+}
+
+bool LoadingScreen::finish() {
+    // the splash stays for its full five seconds, and the loading app ends once more than eight frames have passed
+    while (OS_TimeAccurate() < ringStart() + 9.0 / 30.0) {
+        if (!present()) return false;
+        OS_ThreadSleep(1000000 / 30);
+    }
     return true;
 }

@@ -26,6 +26,8 @@ private:
     mutable uint32_t starFrame_ = 0;                     // the game frame the stars last stepped
     mutable int flashCount_ = 0;                         // cSprite +0x1B (flashing speed 5: 7 frames a phase)
     mutable bool flashOn_ = true, wasFlashing_ = false;
+    mutable RadarFlash flash_;
+    mutable uint32_t flashFrame_ = 0;                    // the game frame the radar's flashing last stepped
     RadarMap map_;
     SpriteSet sprites_;
     unsigned texture_ = 0;

@@ -57,6 +57,8 @@ int main() {
     {
         // Exercise normal approach, movement, dynamic body contacts and countdown together. Calling policeStep
         // on actors already overlapping misses a reach smaller than the collision solver permits them to reach.
+        // The body contact is swept, so a running cop arrives up to one step (under half a unit) before the
+        // spheres overlap.
         Game g; prepare(g,dir.string(),1);
         g.scriptedInput = true; g.clockRunning = false;
         g.peds.densityScale = g.traffic.densityScale = 0;
@@ -82,7 +84,7 @@ int main() {
             }
         }
         check(approached && reachedContact && contactDistance > (int64_t)(2*Player::kSphere)*(2*Player::kSphere) &&
-              contactDistance <= (int64_t)(2*Player::kRadius)*(2*Player::kRadius),
+              contactDistance <= (int64_t)(2*Player::kRadius+0x800)*(2*Player::kRadius+0x800),
               "a cop walking from ten units can arrive at the actual dynamic-contact boundary");
         check(g.arrested() && !g.player.dead && g.arrestingCop == cop.uid,
               "normal game ticks complete the approach-to-arrest sequence without teleporting either actor into overlap");

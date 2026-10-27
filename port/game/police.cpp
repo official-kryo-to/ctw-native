@@ -138,17 +138,21 @@ bool Pedestrians::policeStep(Game& g, Ped& p) {
     }
     g.arrestStopVehicle = false;
     // Native entity targets can complete on a swept crossing. The port's symmetric dynamic body solver keeps
-    // actors apart; accepting physical contact is its equivalent arrival boundary (no reach through walls).
+    // actors apart; accepting physical contact is its equivalent arrival boundary (no reach through walls). That
+    // contact is swept too: a running cop meets the player up to a step before the spheres overlap, and once
+    // stopped there he holds the arrest until the player moves away.
     constexpr int32_t reach = 2 * Player::kRadius;
     const int32_t start[3] = {p.body.pos[0], p.body.pos[1], p.body.pos[2]+0x1000};
     const int32_t end[3] = {target[0], target[1], target[2]+0x1000};
     const bool clear = !g.collision.staticLine(start, end, 0x40001E00);
-    if (distance > (int64_t)reach*reach || !clear) {
+    const bool holding = g.arrestGrabbed && distance <= task.grabDistance;
+    if (!clear || (distance > (int64_t)reach*reach && !holding && !Pedestrians::touching(p.body, g.player))) {
         g.arrestGrabbed = false;
         task.state = 3; task.arrestTimer = 20;
         gotoTarget(g, p, target, 2);
         return true;
     }
+    if (!g.arrestGrabbed) task.grabDistance = std::max(distance, (int64_t)reach*reach);
     task.state = 5;
     g.arrestGrabbed = true;
     wait();

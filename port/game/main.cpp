@@ -12,6 +12,9 @@
 #include "audio/audio.h"
 #include "os/license.h"
 #include "gfx/assets.h"
+#include "loadingscreen.h"
+#include "video/movie.h"
+#include "audio/audio.h"
 #include <SDL.h>   // SDL_main
 #include <glad/gl.h>
 #include <cstdio>
@@ -49,6 +52,8 @@ int main(int argc, char** argv) {
     const char* keys = nullptr;
     const char* ui = nullptr;   // shot mode: "frame:key=N;frame:click=x,y;frame:mouse=x,y;frame:wheel=x,y,n" (UI tests)
     bool trace = false;
+    const char* movieShot = nullptr;        // --movie-shot BMP: the intro movie --frames frames in (testing)
+    const char* loadingShot = nullptr;      // --loading-shot BMP: the loading screen after --frames frames (testing)
     const char* exportTextures = nullptr;   // --export-textures DIR: every game texture as <id>.png (for modders)
     struct XC { float x, y, h; int id = 0; };
     std::vector<XC> extraCars;
@@ -67,7 +72,7 @@ int main(int argc, char** argv) {
         else if (!strcmp(option, "--car")) values = 3;
         else if (!strcmp(option, "--veh")) values = 4;
         else if (strcmp(option, "--data") && strcmp(option, "--mods") && strcmp(option, "--shot") &&
-                 strcmp(option, "--frames") && strcmp(option, "--keys") && strcmp(option, "--export-textures") && strcmp(option, "--ui") && strcmp(option, "--state") &&
+                 strcmp(option, "--frames") && strcmp(option, "--keys") && strcmp(option, "--export-textures") && strcmp(option, "--loading-shot") && strcmp(option, "--movie-shot") && strcmp(option, "--ui") && strcmp(option, "--state") &&
                  strcmp(option, "--enter") && strcmp(option, "--handbrake") && strcmp(option, "--burnout") && strcmp(option, "--hour") &&
                  strcmp(option, "--weather") && strcmp(option, "--weapon") && strcmp(option, "--fire") && strcmp(option, "--throw") && strcmp(option, "--wanted") && strcmp(option, "--die") &&
                  strcmp(option, "--shot-every")) {
@@ -85,6 +90,8 @@ int main(int argc, char** argv) {
         if (!strcmp(argv[i], "--shot-every")) shotEvery = atoi(argv[i + 1]);
         if (!strcmp(argv[i], "--ui")) ui = argv[i + 1];
         if (!strcmp(argv[i], "--export-textures")) exportTextures = argv[i + 1];
+        if (!strcmp(argv[i], "--loading-shot")) loadingShot = argv[i + 1];
+        if (!strcmp(argv[i], "--movie-shot")) movieShot = argv[i + 1];
         if (!strcmp(argv[i], "--keys")) keys = argv[i + 1];   // shot mode: comma-separated SDL scancodes to press
         if (!strcmp(argv[i], "--walk") && i + 2 < argc) {       // shot mode: hold this input (x y, -1..1) all frames
             TheGame().scriptedInput = true;
@@ -140,6 +147,35 @@ int main(int argc, char** argv) {
     OS_SetDocumentsRoot((base + "saves").c_str());
     if (!Host_Init("GTA: Chinatown Wars (PC port)", 1280, 720)) return 1;
     OS_SetResourceRoot(data.c_str());
+    if (movieShot) {   // plays the intro's sound and picture in real time up to the requested point
+        Audio_Init();
+        Movie movie;
+        bool ok = movie.open(data + "/ctw_iphone_intro.mp4");
+        const double start = OS_TimeAccurate();
+        while (ok && movie.clock() < frames / 30.0 && movie.update(OS_TimeAccurate() - start)) OS_ThreadSleep(2000);
+        printf("movie %dx%d, at %.2f s, %u pictures\n", movie.width(), movie.height(), movie.clock(), movie.pictures());
+        if (ok && movie.frameReady()) {
+            glViewport(0, 0, (int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());
+            glClearColor(0, 0, 0, 1); glClear(GL_COLOR_BUFFER_BIT);
+            glRasterPos2f(-1, 1); glPixelZoom((float)OS_ScreenGetWidth() / movie.width(), -(float)OS_ScreenGetHeight() / movie.height());
+            glDrawPixels(movie.width(), movie.height(), GL_RGBA, GL_UNSIGNED_BYTE, movie.rgba().data());
+            ok = saveBmp(movieShot);
+        } else ok = false;
+        movie.close();
+        Host_Shutdown();
+        return ok ? 0 : 3;
+    }
+    if (loadingShot) {
+        LoadingScreen loading;
+        if (!loading.init(data)) fprintf(stderr, "loading screen artwork missing\n");
+        const double at = frames / 30.0;   // from start-up: the legal splash first, then the loading app
+        if (at < LoadingScreen::kLegalSeconds) loading.renderLegal((int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());
+        else loading.render((int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight(), at - LoadingScreen::kLegalSeconds);
+        const bool ok = saveBmp(loadingShot);
+        loading.shutdown();
+        Host_Shutdown();
+        return ok ? 0 : 3;
+    }
     if (exportTextures) {   // modding help: dump the textures, then quit
         std::error_code ec;
         std::filesystem::create_directories(exportTextures, ec);

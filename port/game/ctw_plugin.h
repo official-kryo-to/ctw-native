@@ -19,7 +19,7 @@
 #include <stddef.h>
 #include "ctw_types.h"
 
-#define CTW_PLUGIN_API_VERSION 11
+#define CTW_PLUGIN_API_VERSION 12
 #define CTW_HOST_HAS(api, member) ((api) && (api)->size >= offsetof(CtwHostApi, member) + sizeof((api)->member) && (api)->member)
 
 #ifdef _WIN32
@@ -199,6 +199,11 @@ typedef struct CtwHostApi {
     int (*screen_to_world)(float x, float y, float out[3]);
     /* Version 11: switch the held weapon like the game's next / previous weapon buttons (on foot). 1 = ok. */
     int (*cycle_weapon)(int direction);              /* > 0 next, < 0 previous */
+    /* Version 12: PC prop physics. 1: every breakable prop that is hit hard enough to smash comes loose and tumbles
+       (hydrants, lamps, signs, benches...) instead of staying in place as in the original; 0 (default) restores the
+       original. get_prop_physics returns the current mode. */
+    void (*set_prop_physics)(int full);
+    int (*get_prop_physics)(void);
 } CtwHostApi;
 
 /* Exported by a plugin DLL. Return 0 from ctw_plugin_init to stay loaded. */

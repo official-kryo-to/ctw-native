@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 #include "radar.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -58,4 +59,55 @@ void RadarProjection::worldOffset(const int32_t pos[3], const int32_t focus[3],
         x *= radius / length;
         y *= radius / length;
     }
+}
+
+void RadarFlash::setStyle(int style, int period) {
+    requested_ = (uint8_t)style;
+    requestedPeriod_ = (uint8_t)period;
+    if (style == 6) colour_ = 0;
+}
+
+void RadarFlash::process() {
+    // (the original also reloads the blips' palette whenever the colour changes, and starting style 1 sends the
+    // player's script listener an event)
+    auto change = [&](uint8_t style) { style_ = style; period_ = requestedPeriod_; countdown_ = (int8_t)requestedPeriod_; };
+    switch (style_) {
+    case 0:
+        if (colour_) colour_ = 0, countdown_ = 0;
+        if (requested_) change(requested_);
+        return;
+    case 1:
+        if (colour_ != 1) colour_ = 1, countdown_ = 0;
+        if (requested_ != 1) change(requested_);
+        return;
+    case 2:   // grey while it counts down, then back to normal
+        if (countdown_ > 0) { --countdown_; colour_ = 3; return; }
+        if (requested_ == 2) { requested_ = 0; change(0); }
+        else change(requested_);
+        return;
+    case 3: case 4: case 5: case 6:
+        if (countdown_ > 0) { --countdown_; return; }
+        if (requested_ != style_) { change(requested_); return; }
+        if (style_ == 6) {   // four quick grey flashes, then a two second pause
+            const uint32_t next = pulses_ + 1;
+            colour_ = colour_ != 3 ? 3 : 0;
+            pulses_ = next < 4 ? next : 0;
+            countdown_ = next < 4 ? 5 : 0x3C;
+            return;
+        }
+        countdown_ = (int8_t)period_;
+        if (style_ == 3) colour_ = colour_ != 1 ? 1 : 0;
+        else if (style_ == 4) colour_ = colour_ != 3 ? 3 : 0;
+        else colour_ = colour_ == 1 ? 2 : 1;
+        return;
+    default:
+        return;
+    }
+}
+
+void RadarFlash::stepTint() {
+    static const int targets[4][3] = {{255, 255, 255}, {0, 0, 0xC0}, {255, 0, 0}, {0x80, 0x80, 0x80}};
+    const int* target = targets[colour_ <= 3 ? colour_ : 0];
+    for (int k = 0; k < 3; ++k)
+        rgb_[k] = rgb_[k] < target[k] ? std::min(rgb_[k] + 0x3F, target[k]) : std::max(rgb_[k] - 0x3F, target[k]);
 }

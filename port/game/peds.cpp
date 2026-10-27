@@ -1023,6 +1023,11 @@ void Pedestrians::update(Game& g) {
     }), peds.end());
 }
 
+bool Pedestrians::touching(const Player& a, const Player& b) {
+    int32_t n[3];
+    return sphereContact(a, b, n) || sphereContact(b, a, n);
+}
+
 void Pedestrians::contacts(Game& g) {
     std::vector<Player*> bodies;
     if (g.playerCar < 0 && !g.player.hidden && !g.player.attached) bodies.push_back(&g.player);

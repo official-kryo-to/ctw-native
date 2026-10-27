@@ -175,6 +175,7 @@ colours `0xRRGGBBAA`, screen coordinates pixels from the top left.
 | Custom cameras (v5) | `set_control_yaw` (on-foot movement relative to your camera), `set_camera_fov`, `world_line` (nearest wall/ground hit with its distance) |
 | Character models (v7/v8/v9) | `load_character_model`, `release_character_model`, `draw_character_model`, `on_character_render`: skinned mobile DFF/ANPK/PVR resources and interpolated player/pedestrian poses; v8 adds dimensions, elapsed clips and fallen-body grounding; v9 adds native attachment frames, vehicle identity, continuous reaction/recovery clocks and `draw_character_model_attached` for animated-joint anchors |
 | Camera shake (v6) | `get_camera_shake`: interpolated world-space explosion offset for a custom camera |
+| Prop physics (v12) | `set_prop_physics`, `get_prop_physics`: hit street furniture comes loose and tumbles instead of the original's fixed tilt |
 | Look (v5) | `set_render_style` (`CtwRenderStyle`: street light and headlight pools at night, tint, sepia, saturation, contrast, brightness, vignette; `NULL` = the game's own) |
 
 Keys are SDL scancodes (<https://wiki.libsdl.org/SDL2/SDL_Scancode>). Read the mouse and typed text inside

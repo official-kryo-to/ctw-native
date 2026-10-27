@@ -147,6 +147,7 @@ public:
     struct CarTask {
         enum Op { None, GotoDoor, OpenDoor, SlideIn, Braking, ClimbOut } op = None;
         int car = -1, seat = 0;
+        int door = 0;                   // the door spawn point walked to (bikes: the nearer side)
         int32_t off[3] = {0, 0, 0};     // attached offset (car space)
         int16_t heading = 0;            // attached heading (relative to the car)
         int16_t vel[3] = {0, 0, 0};     // cOneShotAnimationTask::AddConstantVelocity, per frame

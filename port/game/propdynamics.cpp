@@ -43,9 +43,11 @@ void PropDynamics::smashParticles(Game& g, Loose& l, const int32_t point[3], con
                 return;
             }
             normalise(axis);
-            l.body.rotate(axis,(int16_t)((int64_t)std::min(strength,50*4096)*0x11C7/(50*4096)));
-            l.collidable = false;
-            l.body.setToPhysics(false);
+            if (!fullPhysics_) {   // (full physics: the hydrant is already loose; the water stays at its base)
+                l.body.rotate(axis,(int16_t)((int64_t)std::min(strength,50*4096)*0x11C7/(50*4096)));
+                l.collidable = false;
+                l.body.setToPhysics(false);
+            }
         }
         const int16_t velocity[3] = {(int16_t)(-direction[0]/4),(int16_t)(-direction[1]/4),0x1800};
         l.fountain.emplace(at,velocity);
@@ -165,7 +167,8 @@ PropDynamics::Loose PropDynamics::makeBody(Game& g,int cx,int cy,int index) cons
     PropLibrary::Physics shape{};
     const auto* kind=g.props.kindForProp(l.prop.prop);
     if(g.props.physics(l.prop.prop,shape) && kind)
-        l.body.init(l.prop,shape,l.prop.prop == 0x30 ? 0 : kind->mass,kind->planar);
+        l.body.init(l.prop,shape,l.prop.prop == 0x30 ? 0 : fullPhysics_ && kind->mass <= 0 ? kFullPhysicsMass : kind->mass,
+                    kind->planar);
     else { l.body.pos[0]=l.prop.x; l.body.pos[1]=l.prop.y; l.body.pos[2]=l.prop.z; }
     return l;
 }
@@ -175,13 +178,20 @@ void PropDynamics::applyForce(Game& g,Loose& l,const int32_t p[3],const int32_t 
     const auto* kind=g.props.kindForProp(l.prop.prop);
     if(!kind) return;
     const int32_t magnitude=mulq(length(f),0x111);
-    const bool uproot=kind->uprootForce >= 0 && magnitude >= (int32_t)std::lround(kind->uprootForce*4096);
     const bool smash=kind->smashForce >= 0 && magnitude >= (int32_t)std::lround(kind->smashForce*4096);
+    // full physics: a prop that never uproots comes loose when it smashes
+    const bool uproot=kind->uprootForce >= 0 ? magnitude >= (int32_t)std::lround(kind->uprootForce*4096) :
+                      fullPhysics_ && smash;
     if(l.uprooted) {
         l.body.setToPhysics(true); l.body.applyWorldForce(p,f,forceType); l.sleepCounter=15;
     } else if(uproot && l.body.mass_ > 0) {
         l.uprooted=true; l.body.setToPhysics(true);
-        if(kind->smashEffect == 8) {
+        if(fullPhysics_ && kind->uprootForce < 0) {
+            // pushed at the top, as UpRoot does for effect 38, so tall posts topple rather than slide upright
+            int32_t at[3]; l.body.worldCG(at); at[2]+=l.body.hz;
+            l.body.applyWorldForce(at,f,forceType);
+        }
+        else if(kind->smashEffect == 8) {
             int32_t reduced[3]; for(int k=0;k<3;++k) reduced[k]=mulq(f[k],0x4CC);
             l.body.applyWorldForce(p,reduced,forceType);
             int32_t cg[3]; l.body.worldCG(cg);
@@ -213,10 +223,15 @@ void PropDynamics::smash(Game& g, Loose& l, const int32_t p[3], const int32_t f[
     TheSound().propSmash(at,kind->smashEffect);
     smashParticles(g,l,p,f,kind->smashEffect,sourcePos,sourceVelocity,vehicleImpact,strength);
     int32_t axis[3] = {-f[1],f[0],0}; normalise(axis);
+    const bool loose = fullPhysics_ && l.uprooted;   // full physics: it falls over by itself instead
+    // a lamp starts its bend either way: a thin pole hardly turns from one push and would slide along upright
     if (kind->smashEffect == 7) { l.body.rotate(axis,0x16C); l.lampTimer=60; }
-    else if (kind->smashEffect == 8) l.body.rotate(axis,0x3C72);
-    else if (kind->smashEffect == 15 || kind->smashEffect == 25 || kind->smashEffect == 31) l.body.rotate(axis,0x1555);
-    if (l.broken && (kind->uprootForce < 0 || !drawnModel(g,l))) l.collidable=false;
+    else if (!loose) {
+        if (kind->smashEffect == 8) l.body.rotate(axis,0x3C72);
+        else if (kind->smashEffect == 15 || kind->smashEffect == 25 || kind->smashEffect == 31) l.body.rotate(axis,0x1555);
+    }
+    if (l.broken && !drawnModel(g,l)) l.collidable=false;
+    else if (l.broken && kind->uprootForce < 0 && !loose) l.collidable=false;
     if (l.broken || l.uprooted) {
         g.collision.setPropState(l.cx,l.cy,l.index,1);
         g.collision.setPropSolid(l.cx,l.cy,l.index,false);
@@ -499,7 +514,7 @@ void PropDynamics::update(Game& g) {
             if(horizontalUp > 0xFAE000 / (4096.0*4096)) {
                 l.lampTimer=0; TheSound().propSmash(l.body.pos,56,900);
             }
-            if(!l.lampTimer) l.body.setToPhysics(false);
+            if(!l.lampTimer && !(fullPhysics_ && l.uprooted)) l.body.setToPhysics(false);   // (loose: it falls on)
         }
         if(l.garbage) {   // the rubbish follows its bin while it rolls, and ends when it settles
             const int64_t s2=(int64_t)l.body.vel[0]*l.body.vel[0]+(int64_t)l.body.vel[1]*l.body.vel[1]+

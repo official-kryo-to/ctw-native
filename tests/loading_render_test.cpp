@@ -66,6 +66,7 @@ struct LoadingScreenTestAccess {
         put(toc, 0, Wad::hashName("SS_Loading.bin")); put(toc, 8, 20);
         write(dir / "rom.toc", toc); write(dir / "rom.wad", defs);
         write(dir / "ss_loading.png", png(256, 256, 255, 0, 0, true));
+        write(dir / "LegalScreens_ENG.png", png(1024, 512, 0, 200, 0));
         LoadingScreen loading;
         check(loading.init(dir.string()), "loading app reads WAD sprite, loose atlas and packed background directory");
         const unsigned firstBackground = loading.background_, firstRing = loading.ring_;
@@ -83,6 +84,11 @@ struct LoadingScreenTestAccess {
         };
         for (const auto view : {std::pair<int, int>{960, 640}, {1280, 720}, {480, 720}}) {
             const int w = view.first, h = view.second;
+            // GameActivity's legal splash: an ImageView fitting the 1024 x 512 image, centred, over black
+            loading.renderLegal(w, h);
+            const float legal = std::min(w / 1024.f, h / 512.f);
+            check(pixel(w / 2, h / 2, h, 0, 200, 0), "the legal splash covers the middle of the window");
+            if ((h - 512 * legal) / 2 > 1) check(pixel(w / 2, 0, h, 0, 0, 0), "the fitted legal splash leaves black bands");
             const float k = std::min(w / 480.f, h / 320.f);
             const float x = (w - 480 * k) / 2, y = (h - 320 * k) / 2;
             // Deliberately leave hostile world-render state active. The loading
@@ -112,7 +118,10 @@ struct LoadingScreenTestAccess {
                   "the native half-turn carries the asymmetric marker to the opposite side");
             loading.render(w, h, 9.0 / 30.0);
             check(pixel((int)(w / 2 + 45 * k), h / 2, h, 255, 255, 0),
-                  "repeating the native transition continues from its previous orientation without a snap");
+                  "the ring holds its half-turn after the native transition");
+            loading.render(w, h, 40.0);
+            check(pixel((int)(w / 2 + 45 * k), h / 2, h, 255, 255, 0),
+                  "a long desktop start-up keeps the ring at its half-turn instead of spinning it again");
             loading.render(w, h, 0); loading.render(0, h, 0); loading.render(w, 0, 0);
             check(glGetError() == GL_NO_ERROR, "resize and zero drawable dimensions produce no OpenGL errors");
         }

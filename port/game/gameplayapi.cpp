@@ -245,6 +245,8 @@ void GameplayApi_Fill(CtwHostApi& api) {
         g.weaponCycle = direction > 0 ? 1 : -1;
         return 1;
     };
+    api.set_prop_physics = [](int full) { TheGame().propDynamics.setFullPhysics(full != 0); };
+    api.get_prop_physics = [] { return TheGame().propDynamics.fullPhysics() ? 1 : 0; };
     api.get_player_weapon = [](int* type, int* ammo, int* clip) -> int {
         const Weapon* w = TheGame().playerWeapons.current();
         if (!w) return 0;
