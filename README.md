@@ -41,6 +41,11 @@ See [CONTROLS.md](CONTROLS.md) for the keys.
 Press **F4** in the game for the mod menu. A mod can contain texture changes, a C or C++ DLL, or both in one folder.
 The bundled **Enhancements** mod adds a third-person camera (**V**, then the mouse) and PSP-style lighting. See the [modding guide](ctw-modkit/README.md).
 
+**Play together:** the bundled **Multiplayer** mod puts up to eight players in one city. One player presses **F9** and
+**Host**; the others enter that player's address and press **Join** (the host's UDP port 7777 must be reachable: on
+one network it is, over the internet forward it or use a virtual network such as Tailscale or ZeroTier). **T** chats.
+See [playing together](ctw-modkit/README.md#playing-together).
+
 ## Build from source
 
 ### Windows

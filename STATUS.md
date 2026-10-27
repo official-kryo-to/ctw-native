@@ -95,9 +95,13 @@ compatibility with the original.
   probation sprite, flashing and popping in as cMiniHud does). The population answers it: WantedModifier puts
   more cop cars in the mix per star (capped per level, fewer while a star is dimmed), from two stars on every
   vehicle spawned is a cop (freeing the car off screen the longest when full), and the cop unit and vehicle come
-  from GetCopSubType / GetCopsVehicleId. Cops do not chase yet (cEnforcerWanderRoads, cArrestInCar,
-  cAggressiveDriving and cArrestOnFoot are next), and wanted cops spawn at the usual places, not on the original's
-  ring around the player.
+  from GetCopSubType / GetCopsVehicleId. Cop cars give chase (cAggressiveDriving's target sides, rams and
+  hold-offs, straight at the player: the road-network route search is not ported), stop within 20 units once the
+  player is slow, wrecked or overturned, and the cops get out. On foot they close in, punch at one star and shoot
+  pistols from two (cArrestOnFoot's AbortKillingOrder rule: an arrest needs the player below 21 health, and from two
+  stars standing still or already held). The arresting cop's countdown ends in the "Busted" screen; a cop at the
+  driver's door of a slow car (any speed at one star) makes the player get out. Wanted cops spawn at the usual places, not on the original's ring around the
+  player; road blocks, helicopters and the higher levels' units are not ported.
 - **Pedestrians:** civilians and cops walk the pavement network of each world sector, using the original zone
   population, spawn schedule, spawn ring, cleanup distance and `pedinfo.bin` looks (gender, body, colours).
   Joggers run, and everyone hurries in the rain. Nearby player vehicles retain the task's run-speed limit;
@@ -114,9 +118,18 @@ compatibility with the original.
   continue during pause while world sounds are suspended. Also: blocked traffic's horn patterns (cHorn), sirens
   (toggled with **Q** / **E** in a siren vehicle), weapon reloads and melee hits, the chainsaw's engine, fight
   grunts, pain comments for shot peds, the landing thud of a thrown player and the burnout launch.
-- **Death:** the original death app: the frame breaks into one of the nine shard sets and flies apart with the
-  "Wasted" jingle and the WASTED! text, then the player is reborn at the nearest hospital six hours later and the
-  game fades in. The hospital fee is not taken (the port has no money yet); arrests are not ported.
+- **Death and arrest:** the original death app: the frame breaks into one of the nine shard sets and flies apart with
+  the "Wasted" jingle and the WASTED! text (or "Busted"), then the player is reborn six hours later at the nearest
+  hospital for $200, or the nearest police station for $100 and without his weapons, and the game fades in.
+- **Money and pickups:** cPlayer's money (up to $99,999,999) and the HUD's cash: the green amount slides in, counts
+  towards the new total with the original's growing step and tick, shows what is left beside it and slides out
+  again (cHudApp::UpdateCash, Gui::cCashMeter). The map's pickups from every sector (health, armour and weapons,
+  with the collected-pickup store and five-minute respawns) are drawn from the game's pickup sheet, pulsing and
+  fading as cBasePickup::ManagedRender does. A weapon pickup adds ammo, fills an empty slot or upgrades a lesser
+  weapon of its kind (ShouldWeAutoPickupThisWeapon); otherwise it waits for the phone's swap box, which the port does
+  not have. Peds carry money by the zone's affluence ($10 to $60) and gang members their pedinfo weapon
+  (GetAssignedWeapon); a dead ped drops the weapon, or else the money, once the body is still, for about 17 seconds
+  while five of the 30 pickup slots are free. Dumpsters, luck lions and mission pickups are not ported.
 - **Random numbers:** the original four-stream generator and seed.
 - **Radio:** the original radio app (**Tab** in a car): the station carousel (the original's quarter-step scrolling,
   swipe sound and "Music Player" heading), the equaliser driven by the music, favourite stars and the volume meter,
@@ -124,6 +137,10 @@ compatibility with the original.
   around it is still drawn in a PC style.
 - **Smooth motion:** the game runs at the original 30 ticks a second; vehicles, people, loose props and the camera
   are drawn between ticks, so motion is smooth at any refresh rate.
+- **Multiplayer:** the bundled **Multiplayer** mod: up to eight players in one city over UDP (**F9** to host or
+  join, **T** to chat). Everyone sees the others walk, drive and ride with their names and health over them; hits
+  on another player are taken by that player's own game; joiners take the host's time and weather. Traffic,
+  pedestrians, the police and pickups stay each player's own. See the [modding guide](ctw-modkit/README.md#playing-together).
 - **Mods:** the mod menu (**F4**). A mod is one folder with any mix of texture replacements and a C or C++ DLL.
   The API covers vehicles, the player, pedestrians, the world, traffic, radio, custom cameras, game events, saved
   settings and menu items. The bundled **Enhancements** mod adds an option (on by default) that makes hit street furniture come loose and tumble (API v12 `set_prop_physics`) instead of the original's fixed tilts, and an optional third-person camera (**V**) and
@@ -135,7 +152,8 @@ compatibility with the original.
   multiplier. API v9 adds full vehicle attachment frames, the owning vehicle handle, animated-joint drawing and
   continuous impact/recovery clocks. Imported riders follow bike lean and pitch; the mod selects chopper,
   dirt-bike or sport-bike donor poses for the corresponding CTW bikes instead of using scooter poses everywhere.
-  See the [modding guide](ctw-modkit/README.md).
+  API v13 adds puppets (characters a mod moves, such as other players), screen projection, the player's vitals and
+  damage, and full vehicle poses. See the [modding guide](ctw-modkit/README.md).
 - **Stats:** cStatsManager's counters (kills, explosions, playing time, days, distances, time in a vehicle and more)
   are kept as in the original save section; there is no stats screen yet.
 - **Pause:** the original free-play HUD overlay, using local HUD artwork and GXT text, darkening, touch bounds
@@ -150,10 +168,10 @@ compatibility with the original.
 
 ## Not there yet
 
-- Missions, save games, full combat, the police response to a wanted level (cop pursuit, road blocks, arrests) and
-  the rest of the original gameplay HUD.
-- Radar GPS routes, mission/location blips, a control for the rotating-map setting (the rotation itself is ported), armour pickups, HUD fades,
-  cash and the full pause/PDA layout. The radar work is a subset of the HUD, not complete UI parity.
+- Missions, save games, full combat, the rest of the police response (road blocks, helicopters, SWAT and the
+  higher levels' units, route-finding pursuit) and the rest of the original gameplay HUD.
+- Radar GPS routes, mission/location blips, a control for the rotating-map setting (the rotation itself is ported), HUD fades,
+  the stats screen and the full pause/PDA layout. The radar work is a subset of the HUD, not complete UI parity.
 - Pedestrians do not talk, fight, or use building doors or attractors.
   Traffic is cars only.
 - Pedestrian physics still needs the full collision-cache ordering/limits, collision flags that stop AI movement,
@@ -173,8 +191,9 @@ compatibility with the original.
 - Scripted, aiming and specialised cameras, shake through camera-mode/death transitions, and the hidden-player
   visibility aid.
 - Boats, the jet ski, helicopters and the tank.
-- The SDK covers what is ported (v10 adds giving the player weapons, v11 switching them); wanted levels, missions, saves and custom audio remain unavailable.
-- Weapons: the weapon table, cWeaponManager (slots, switching, ammo and clips, reloads), the weapon wheel and HUD button, and firing for the pistols, SMGs, shotguns, rifles and the minigun (accuracy spread, wall hits, peds and vehicles hit, damage and deaths, bullet traces, fire sounds); fists, nightstick, bat and chainsaw hits; the original auto-aim (cPlayerSensorCone: target priorities and distance bands, the 45-degree fire cone, the turning fire direction and the target marker); the RPG, grenades, molotovs, flash bangs and proximity mines (cBaseProjectile physics, bounces, fuses, the throw power and its arc, explosion types 0 to 3); the sword's delayed swing hit; cMuzzleFlashes (per-weapon flash type, size and jitter, drawn additively); wall ricochet sounds (AddRicochet); armour absorption and the radar's armour arc; blood drops (cParticleEmitterBlood) for bullet, minigun, melee and run-over damage; the flamethrower (its pilot light, flame particles, smoke and setting people and vehicles on fire); burning (cFire: burning people take damage until they die, vehicle fires, molotov ground fires and petrol flames that ignite whoever walks into them, sliding fires that stop at walls, and the looping fire sound); the taser (its dart, wire, electric arc, sparks and steam, shocks that end with the victim on fire, and its charge); the sniper rifle's scope (the top-down scope camera and model, zoom, and shots that hit whoever is under the crosshair). Not yet: the sword's prop hits, the chainsaw's blood spray, the flash bang's daze, water splashes, the gamepad lock-on and target cycling, hit reactions, AI peds with guns and pickups. Muzzle flashes stay up for one simulation tick (the original clears them after one 30 Hz draw).
+- The SDK covers what is ported (v10 adds giving the player weapons, v11 switching them, v13 multiplayer); wanted
+  levels, money, missions, saves and custom audio remain unavailable to mods.
+- Weapons: the weapon table, cWeaponManager (slots, switching, ammo and clips, reloads), the weapon wheel and HUD button, and firing for the pistols, SMGs, shotguns, rifles and the minigun (accuracy spread, wall hits, peds and vehicles hit, damage and deaths, bullet traces, fire sounds); fists, nightstick, bat and chainsaw hits; the original auto-aim (cPlayerSensorCone: target priorities and distance bands, the 45-degree fire cone, the turning fire direction and the target marker); the RPG, grenades, molotovs, flash bangs and proximity mines (cBaseProjectile physics, bounces, fuses, the throw power and its arc, explosion types 0 to 3); the sword's delayed swing hit; cMuzzleFlashes (per-weapon flash type, size and jitter, drawn additively); wall ricochet sounds (AddRicochet); armour absorption and the radar's armour arc; blood drops (cParticleEmitterBlood) for bullet, minigun, melee and run-over damage; the flamethrower (its pilot light, flame particles, smoke and setting people and vehicles on fire); burning (cFire: burning people take damage until they die, vehicle fires, molotov ground fires and petrol flames that ignite whoever walks into them, sliding fires that stop at walls, and the looping fire sound); the taser (its dart, wire, electric arc, sparks and steam, shocks that end with the victim on fire, and its charge); the sniper rifle's scope (the top-down scope camera and model, zoom, and shots that hit whoever is under the crosshair). Not yet: the sword's prop hits, the chainsaw's blood spray, the flash bang's daze, water splashes, the gamepad lock-on and target cycling, hit reactions and AI peds using their guns. Muzzle flashes stay up for one simulation tick (the original clears them after one 30 Hz draw).
   Character model overrides work for mobile DFF/ANPK/PVR assets; general model/material/shader interfaces and
   rigid object spawning are still missing.
 - The third-person camera and imported LCS people are PC additions. The donor roster uses Toni and LCS civilian

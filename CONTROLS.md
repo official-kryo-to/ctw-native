@@ -70,3 +70,8 @@ The intro movie stops when any key, mouse button or controller button is held fo
 | Space / E, Ctrl / Q | Free camera: up, down |
 | Shift | Free camera: faster |
 | Page Up / Page Down | Free camera: render distance |
+
+| Multiplayer mod | |
+| --- | --- |
+| F9 | Host or join a game (name, address and port; Enter or Esc leaves a field) |
+| T | Chat (Enter sends, Esc closes) |
