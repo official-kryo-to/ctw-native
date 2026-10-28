@@ -1,0 +1,14 @@
+// CTW Online: the public server list and a relay, so players can host and join over the internet without
+// opening ports. Deploy with `npx wrangler deploy` (a free Cloudflare account is enough).
+{
+  "name": "ctw-online",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "LOBBY", "class_name": "Lobby" },
+      { "name": "ROOM", "class_name": "Room" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Lobby", "Room"] }]
+}

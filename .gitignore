@@ -53,3 +53,7 @@ Thumbs.db
 
 # The Porter's Windows icon (the rule above is for icons made from game files).
 !/porter/src-tauri/icons/icon.ico
+
+# CTW Online (the Cloudflare Worker) tooling
+/online/node_modules/
+/online/.wrangler/

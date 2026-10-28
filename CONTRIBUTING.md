@@ -21,6 +21,7 @@ Small, understood changes are welcome. For a larger feature, open an issue first
 | `ctw-modkit/` | Public mod interfaces, the mod menu and example mods |
 | `scripts/` | APK setup and the standalone export |
 | `porter/` | The Porter: the downloadable exe that makes the game from an APK |
+| `online/` | CTW Online: the public game list and relay for the Multiplayer mod (a Cloudflare Worker) |
 | `tests/` | Tests using synthetic data |
 
 `input/`, `port/data/`, `analysis/`, `tools/`, `dist/` and `portlogs/` are local and ignored. Do not force-add them.
