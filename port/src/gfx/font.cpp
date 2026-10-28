@@ -119,6 +119,27 @@ float BitmapFont::draw(const std::u16string& s, float x, float y, float scale, i
     return x;
 }
 
+std::u16string BitmapFont::wrap(const std::u16string& s, float maxWidth, float scale) const {
+    std::u16string out, line, word;
+    auto flushWord = [&]() {
+        if (word.empty()) return;
+        if (!line.empty() && (textWidth(line + word) * scale) > maxWidth) {
+            out += line;
+            out += u'\n';
+            line.clear();
+        }
+        line += word;
+        word.clear();
+    };
+    for (char16_t c : s) {
+        if (c == 0x0A) { flushWord(); out += line; out += u'\n'; line.clear(); continue; }
+        word += c;
+        if (c == u' ' || japanese_) flushWord();
+    }
+    flushWord();
+    return out + line;
+}
+
 float BitmapFont::drawWrapped(const std::u16string& s, float x, float y, float maxWidth, float scale) const {
     float cy = y, lineH = height_ * scale;
     int colour = 0;

@@ -33,6 +33,8 @@
 #include "projectiles.h"
 #include "pickups.h"
 #include "targeting.h"
+#include "sequence.h"
+#include "comicscreen.h"
 #include "world/worldrenderer.h"
 #include <cstdint>
 #include <map>
@@ -195,6 +197,19 @@ public:
     void addWaterSplash(const int32_t pos[3], int type, const int32_t velocity[3], int32_t sourceMass);
     void enableExplosionRadiusCheck(bool enable) { explosionRadiusCheck_ = enable; } // native script switch; off at Reset
     struct FreeCamera { bool on = false; WorldCamera cam; } freeCam;   // mods: replaces the game camera
+    // cutscenes (cutscene.cpp): the playing sequence (cSequenceManager), its camera and the comic overlay
+    std::unique_ptr<Sequence> sequence;
+    SequenceCamera seqCamera;
+    ComicScreen comic;
+    bool cutscene = false;               // CameraImpl::StartCutscene: no HUD and no player control
+    // cScriptSequenceBase::LoadSequence + cSequence::Play: null when the file is missing. The callbacks set on it
+    // before the first tick fire from frame 0 on.
+    Sequence* startSequence(const std::string& name, bool loop = false);
+    void stopSequence();
+    void updateSequence();               // cSequenceManager::Update, at the start of each game frame
+    void renderCutscene(int width, int height);
+    void gameCamera(int32_t eye[3], uint16_t& yaw, uint16_t& pitch) const;   // the camera updateView builds
+    bool cutsceneKey(int scancode);      // a tap moves on, Escape skips (the hold to skip)
     bool uiPaused = false;               // a full-screen app (the radio) has paused the game
     // The original HUD pause screen, opened by the PC binding Esc / controller Start.
     bool pauseOpen = false;
@@ -267,6 +282,10 @@ private:
     void updateDeath();
     bool arrested_ = false;
     bool bustedDisplay_ = false;
+    bool seqTap_ = false, seqSkip_ = false;   // cutscene input since the last frame
+    // sequences that ended, freed at the start of the next frame (their callbacks may still be running)
+    std::vector<std::unique_ptr<Sequence>> retiredSequences_;
+    void retireSequence();
     int deathFrames_ = -1;          // frames since the player died (the death paths set it to 0 with the camera)
     bool deathStarted_ = false;     // updateDeath has seen this death
     int wastedFrames_ = 0;          // HUDText's busted / wasted text: frames left

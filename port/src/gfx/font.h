@@ -22,6 +22,8 @@ public:
     // Returns the pen x after the final line.
     // `colour` is the active text-colour index (0 = caller's glColor); colour tags in the string update it.
     float draw(const std::u16string& s, float x, float y, float scale, int* colour = nullptr) const;
+    // The string with a newline where drawWrapped would break each line.
+    std::u16string wrap(const std::u16string& s, float maxWidth, float scale) const;
     // Word-wraps to maxWidth pixels (at the given scale) and draws; returns total height.
     float drawWrapped(const std::u16string& s, float x, float y, float maxWidth, float scale) const;
 private:

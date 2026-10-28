@@ -52,6 +52,7 @@ bool Game::init(const std::string& data, const std::string& mods) {
     world.setRadius(1);   // the game keeps a 3 x 3 sector window; one block ring around the player covers it
     if (!loadingFrame()) return false;
     Hud_Init(dataDir);
+    if (!comic.load(dataDir)) fprintf(stderr, "sequence image tables missing: no comic cutscenes\n");
     if (!pauseScreen.init(dataDir)) fprintf(stderr, "SS_Hud missing: pause-screen artwork unavailable\n");
     if (!gameplayHud.init(dataDir)) fprintf(stderr, "radar map / SS_AlwaysLoaded missing: no radar HUD\n");
     if (!loadingFrame()) return false;
@@ -310,7 +311,10 @@ void Game::focus(int32_t o[3]) const {
 void Game::viewCamera(WorldCamera& cam) const {
     if (renderCamValid_ && !freeCam.on) { cam = renderCam_; return; }   // interpolated while drawing
     if (freeCam.on) cam = freeCam.cam;
-    else if (player.dead || arrested_) {
+    else if (seqCamera.active) {   // a cutscene's sequence camera
+        for (int i = 0; i < 3; ++i) cam.eye[i] = seqCamera.eye[i] / 4096.f;
+        cam.setYawPitch(-(int16_t)seqCamera.yaw * 360.f / 65536, (int16_t)seqCamera.pitch * 360.f / 65536);
+    } else if (player.dead || arrested_) {
         for (int i = 0; i < 3; ++i) cam.eye[i] = deathEye_[i] / 4096.f;
         cam.setYawPitch(-(int16_t)deathYaw_ * 360.f / 65536, (int16_t)deathPitch_ * 360.f / 65536);
     }
@@ -377,23 +381,11 @@ bool Game::worldToScreen(const float p[3], int W, int H, float out[2]) const {
 void Game::updateView() {   // the game camera (not a mod's free camera), as cBaseCam::RecalculateMatrix sets it up
     int32_t eye[3];
     uint16_t yaw, pitch;
-    if (player.dead || arrested_) {
-        std::copy(deathEye_, deathEye_ + 3, eye);
-        yaw = deathYaw_;
-        pitch = deathPitch_;
-    } else if (playerCar >= 0) {
-        carCam.position(eye);
-        yaw = carCam.yaw();
-        pitch = carCam.pitch();
-    } else if (scope.active) {   // cSniperCam
-        std::copy(scope.pos, scope.pos + 3, eye);
-        yaw = scope.yaw;
-        pitch = 0xC000;
-    } else {
-        camera.position(eye);
-        yaw = camera.yaw;
-        pitch = camera.pitch();
-    }
+    if (seqCamera.active) {   // cSequenceLinCamera and the other sequence cameras
+        std::copy(seqCamera.eye, seqCamera.eye + 3, eye);
+        yaw = seqCamera.yaw;
+        pitch = seqCamera.pitch;
+    } else gameCamera(eye, yaw, pitch);   // (cSniperCam's pitch is 0xC000)
     view.set(eye, yaw, pitch, (int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());
     ExplosionTwirls::setViewAxis(view.m[6], view.m[7]);
 }
@@ -1226,6 +1218,7 @@ void Game::updateDeath() {
 
 void Game::tick() {
     snapshotPoses();
+    updateSequence();
     radio.update(*this);
     ++frame;
     muzzleFlashes.beginTick();
@@ -1260,9 +1253,10 @@ void Game::tick() {
         sprint = scriptedState == 3;
         walk = scriptedState == 1;
     }
-    if (arrested_ || arrestGrabbed) { mx = my = 0; sprint = walk = false; }
+    if (arrested_ || arrestGrabbed || cutscene) { mx = my = 0; sprint = walk = false; }
     bool enter = enterPressed || std::find(scriptedEnterFrames.begin(), scriptedEnterFrames.end(), (int)frame) != scriptedEnterFrames.end();
     enterPressed = false;
+    if (cutscene) enter = false;   // ScriptPlayer::EnableControls(false)
     if (enter && !player.dead && !arrested_ && !arrestGrabbed && !arrestStopVehicle) {
         if (task.op == CarTask::GotoDoor) task.op = CarTask::None;   // pressing again while walking there cancels
         else enterOrExit();
@@ -1272,7 +1266,7 @@ void Game::tick() {
     int16_t stickHeading = stickHeld ? (int16_t)(inputYaw + padAngle(mx, my)) : 0;
     if (playerCar >= 0) {   // driving: cPlayer::FillInDrivingYoke (accelerate / brake-reverse / steer / handbrake)
         Vehicle::Controls dc;
-        if (Plugins_GameInput()) {
+        if (Plugins_GameInput() && !cutscene) {
             const Uint8* ks = SDL_GetKeyboardState(nullptr);
             bool gas = ks[SDL_SCANCODE_W] || ks[SDL_SCANCODE_UP];
             bool brake = ks[SDL_SCANCODE_S] || ks[SDL_SCANCODE_DOWN];
@@ -1361,7 +1355,8 @@ void Game::tick() {
         world.tick();
         Stats_PlayerProcess(*this);
         processTimeCycle();
-        if (!freeCam.on) world.stream(me.pos[0] / 4096.f, me.pos[1] / 4096.f, 2);
+        if (seqCamera.active) world.stream(seqCamera.eye[0] / 4096.f, seqCamera.eye[1] / 4096.f, 2);   // a cutscene
+        else if (!freeCam.on) world.stream(me.pos[0] / 4096.f, me.pos[1] / 4096.f, 2);
         carGens.update(*this);
         removeFarCars();
         collectSectors();
@@ -1425,6 +1420,7 @@ void Game::tick() {
             PadInput_Weapons(Host_Pad(), fire, throwing);   // a controller: RT fires, LT throws (hold for power)
         }
         if (scriptedInput) { fire = scriptedFire; throwing = scriptedThrow; }
+        if (cutscene) fire = throwing = false;
         playerFiring = fire && !busy;
         Weapons_PlayerFrame(*this, fire && !busy, weaponCycle, throwing && !busy);
         weaponCycle = 0;
@@ -1469,7 +1465,8 @@ void Game::tick() {
     processTimeCycle();
     float p[3];
     player.posf(p);
-    if (!freeCam.on) world.stream(p[0], p[1], 2);   // (the free camera streams around itself in render)
+    if (seqCamera.active) world.stream(seqCamera.eye[0] / 4096.f, seqCamera.eye[1] / 4096.f, 2);   // a cutscene
+    else if (!freeCam.on) world.stream(p[0], p[1], 2);   // (the free camera streams around itself in render)
     carGens.update(*this);
     removeFarCars();
     collectSectors();
@@ -1584,9 +1581,11 @@ void Game::render(int W, int H) {
     glDisable(GL_DEPTH_TEST);
     applyGrade(W, H);
     deathScreen.render(W, H);   // the death app: the captured frame's shards over black
+    renderCutscene(W, H);       // the comic overlay and its subtitles
 
     Hud_Begin(W, H);
-    const bool hudShown = !pauseOpen && !deathScreen.active();   // cDeathArrestWatcher hides the mini HUD
+    // cDeathArrestWatcher hides the mini HUD; so does a cutscene (eHudCutsceneDisplay)
+    const bool hudShown = !pauseOpen && !deathScreen.active() && !cutscene;
     if (hudShown) gameplayHud.render(*this, W, H);
     if (showDebug) drawDebug(W, H);
     if (hudShown) WeaponHud_Render(*this, W, H);   // the game's HUD, under the mods' windows
@@ -1639,6 +1638,7 @@ bool Game::key(int k) {
     if (pauseOpen) return pauseKey(k);
     if (WeaponHud_WheelOpen() && WeaponHud_Key(*this, k)) return true;
     if (k == SDL_SCANCODE_F3) { showDebug = !showDebug; return true; }
+    if (cutsceneKey(k)) return true;
     if (Plugins_Key(k)) return true;   // (an open mod menu closes on Esc here)
     if (k == SDL_SCANCODE_ESCAPE && !radio.appOpen()) { setPause(true); return true; }
     if (!Plugins_GameInput()) return false;

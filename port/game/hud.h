@@ -10,6 +10,9 @@ bool Hud_Init(const std::string& dataDir);
 void Hud_Begin(int width, int height);   // ortho projection, pixels, origin top-left
 void Hud_End();
 void Hud_Text(float x, float y, float scale, uint32_t rgba, const std::string& utf8);
+// Game strings (UTF-16 with the game's colour tags): the line breaks for maxWidth pixels, and drawing
+std::u16string Hud_Wrap16(const std::u16string& s, float maxWidth, float scale);
+void Hud_Text16(float x, float y, float scale, uint32_t rgba, const std::u16string& s);
 float Hud_TextWidth(const std::string& utf8, float scale);
 float Hud_LineHeight(float scale);
 void Hud_Rect(float x, float y, float w, float h, uint32_t rgba);

@@ -59,6 +59,17 @@ void Hud_Text(float x, float y, float scale, uint32_t rgba, const std::string& u
     g_font.draw(Hud_Utf8To16(utf8), x, y, scale, &colour);
 }
 
+std::u16string Hud_Wrap16(const std::u16string& s, float maxWidth, float scale) {
+    return g_fontOk ? g_font.wrap(s, maxWidth, scale) : s;
+}
+
+void Hud_Text16(float x, float y, float scale, uint32_t rgba, const std::u16string& s) {
+    if (!g_fontOk) return;
+    glColor4ub((GLubyte)(rgba >> 24), (GLubyte)(rgba >> 16), (GLubyte)(rgba >> 8), (GLubyte)rgba);
+    int colour = 0;
+    g_font.draw(s, x, y, scale, &colour);
+}
+
 float Hud_TextWidth(const std::string& utf8, float scale) {
     return g_fontOk ? g_font.textWidth(Hud_Utf8To16(utf8)) * scale : 0.f;
 }
