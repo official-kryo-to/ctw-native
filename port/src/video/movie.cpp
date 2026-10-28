@@ -60,6 +60,7 @@ struct Movie::Impl {
     IMFSourceReader* video = nullptr;
     IMFSourceReader* audio = nullptr;
     int stride = 0, rate = 0, channels = 0;
+    bool rateChecked = false;       // the first sound sample's own duration has confirmed the rate
     bool videoEnded = false, audioEnded = true;
     IMFSample* pending = nullptr;   // the next picture, decoded but not yet due
     LONGLONG pendingTime = 0;
@@ -140,7 +141,21 @@ bool Movie::update(double elapsed) {
             BYTE* data = nullptr;
             DWORD length = 0;
             if (SUCCEEDED(buffer->Lock(&data, nullptr, &length))) {
-                Audio_PcmPush((const int16_t*)data, (int)(length / (2u * m.channels)));
+                const int frames = (int)(length / (2u * m.channels));
+                LONGLONG duration = 0;
+                if (!m.rateChecked && SUCCEEDED(sample->GetSampleDuration(&duration)) && duration > 0 && frames > 0) {
+                    // Windows' AAC decoder can describe its output at twice the stream's rate (as if the stream used
+                    // SBR) while it hands over the stream's own samples, which made the intro's song play twice as
+                    // fast. Trust the samples: the nearest common rate to what the first one holds.
+                    m.rateChecked = true;
+                    const double measured = frames * 1e7 / (double)duration;
+                    static const int kRates[] = {8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000};
+                    int best = m.rate;
+                    for (int r : kRates)
+                        if (std::abs(r - measured) < std::abs(best - measured)) best = r;
+                    if (best != m.rate) { m.rate = best; Audio_PcmBegin(m.rate, m.channels); }
+                }
+                Audio_PcmPush((const int16_t*)data, frames);
                 buffer->Unlock();
             }
         }
