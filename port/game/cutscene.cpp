@@ -6,6 +6,8 @@
 #include "hud.h"
 #include "os/gamefs.h"
 #include <SDL.h>
+#include <glad/gl.h>
+#include <cmath>
 #include <algorithm>
 #include <cstdio>
 
@@ -170,5 +172,33 @@ void Game::renderMissionHud(int W, int H) {
             from = to + 1;
         }
         Hud_End();
+    }
+}
+
+// ---- script props ----
+
+Game::ScriptProp* Game::scriptProp(int id) {
+    for (ScriptProp& p : scriptProps) if (p.id == id) return &p;
+    return nullptr;
+}
+
+void Game::removeScriptProp(int id) {
+    scriptProps.erase(std::remove_if(scriptProps.begin(), scriptProps.end(), [id](const ScriptProp& p) { return p.id == id; }),
+                      scriptProps.end());
+}
+
+void Game::renderScriptProps() {
+    for (const ScriptProp& p : scriptProps) {
+        const Model* m = props.model(p.prop);
+        if (!m) continue;
+        // heading about z, then the pitch about the prop's own y axis: a model's nose is its +x (cPlaneLand's
+        // plane flies south-west at heading 225 degrees), and a negative pitch lifts it (MovePlane's flare)
+        const float h = p.heading * 3.14159265f / 32768.f, a = -p.pitch * 3.14159265f / 32768.f;
+        const float ch = std::cos(h), sh = std::sin(h), ca = std::cos(a), sa = std::sin(a);
+        const float M[16] = {ch * ca, sh * ca, sa, 0,
+                             -sh, ch, 0, 0,
+                             -ch * sa, -sh * sa, ca, 0,
+                             p.pos[0] / 4096.f, p.pos[1] / 4096.f, p.pos[2] / 4096.f, 1};
+        PropLibrary::drawModel(*m, M);
     }
 }

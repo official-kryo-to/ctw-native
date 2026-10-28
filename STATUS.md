@@ -17,8 +17,8 @@ compatibility with the original.
   F or a click) finishes the line or moves on, Escape or holding skips.
 - **The first mission (KEN_A01, "Arrival in Liberty"):** the prologue on the plane, the landing, the port, the intro
   movie, Huang on the jetty, getting a car, Uncle Kenny's restaurant and the conversation there, and the apartment
-  and its tour, with the mission's objectives and radar blips. Not yet: the plane, clouds and contrails in the
-  prologue, the bodyguards and ambushers at the port, the credits drive, the sinking car and its minigame,
+  and its tour, with the mission's objectives and radar blips, and the plane over the sea and landing with its
+  shadow. Not yet: the clouds and contrails in the prologue, the bodyguards and ambushers at the port, the credits drive, the sinking car and its minigame,
   swimming to the jetty, the police on the shore, hotwiring and the GPS route.
 - **The city:** streets and buildings with their textures, water, animated signs, weather, day and night,
   street furniture, street lights, steam vents and fountains.

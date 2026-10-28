@@ -4,7 +4,7 @@
 // kena01::cKEN_A01, the first mission ("Arrival in Liberty"): the prologue on the plane, the landing, the ambush
 // at the port and the intro movie, then Huang on the jetty, a car, Uncle Kenny's restaurant and the apartment.
 //
-// Not ported yet, and passed over here: the plane, clouds and contrails of cPreIntro and cPlaneLand, the
+// Not ported yet, and passed over here: the clouds, contrails and fountains of cPreIntro, the plane's sound, the
 // bodyguards and ambushers that NewIntro2's callbacks move (cKenA01Intro), the credits drive (cIntroDrive's
 // DriveAround_01), the sinking car and its minigame (cCarInWater, cSinkingCarApp), swimming to the jetty, the
 // police on the shore (cPoliceChase), hotwiring (cHotWiringApp), the GPS route and the help texts' timing.
@@ -15,6 +15,8 @@
 
 namespace {
 constexpr int32_t fx(float v) { return (int32_t)(v * 4096.f); }
+constexpr int deg(int d) { return d * 0xB6; }   // SimpleMover::SetHeading / SetPitch take degrees
+enum { kPlane = 1, kShadow = 2 };                // the script's props
 
 class KenA01 : public Mission {
 public:
@@ -27,6 +29,13 @@ public:
 private:
     Game* g_ = nullptr;
     uint32_t carUid_ = 0;
+    int planeFrame_ = 0, planePitch_ = 0;   // cPlaneLand +0x330, +0x328
+    bool planeDone_ = false;                // +0x334
+
+    void placePlayer(float x, float y, float z) {   // Ped::SetPosition
+        const int32_t at[3] = {fx(x), fx(y), fx(z)};
+        std::copy(at, at + 3, g_->player.pos);
+    }
 
     // cKEN_A01::Init: the screen goes black, then FadedInit
     void init() {
@@ -49,16 +58,55 @@ private:
         return s;
     }
 
-    // DoPlaneIntro / cPreIntro::Begin: noon, Huang's monologue on the plane (NewIntro1), faded in
+    // DoPlaneIntro / cPreIntro::Begin: noon, Huang near the airport (so the city there is loaded), the plane over
+    // the sea under the first camera, then his monologue on the plane (NewIntro1), faded in
     void doPlaneIntro() {
         setTime(0xC000);
-        play("CSS_KEN_A01_NewIntro1.seq", [this] { doLandingIntro(); });
+        placePlayer(1762.45f, -66.53f, 2.f);
+        g_->scriptProps.push_back({kPlane, 8, {fx(1411.72f), fx(692.70f), fx(10.f)}, 0, 0});
+        play("CSS_KEN_A01_NewIntro1.seq", [this] { g_->removeScriptProp(kPlane); doLandingIntro(); });
         g_->screenFade.in(30);
     }
 
-    // DoLandingIntro / cPlaneLand: the runway (PlaneLand), then WaitAfterLanding's 30 frames
+    // DoLandingIntro / cPlaneLand::IntroSetup: the plane high over the bay heading south-west with its shadow on
+    // the water below; callback 0 starts it (StartPlane), then WaitAfterLanding's 30 frames
     void doLandingIntro() {
-        play("CSS_KEN_A01_PlaneLand.seq", [this] { wait(0x1E, [this] { doPortIntro(); }); });
+        g_->removeScriptProp(kPlane);
+        g_->scriptProps.push_back({kPlane, 8, {fx(2085.08f), fx(-71.64f), fx(80.f)}, (uint16_t)deg(0xE1), 0});
+        g_->scriptProps.push_back({kShadow, 0x8D, {fx(2085.08f), fx(-71.64f), fx(2.f)}, (uint16_t)deg(0xE1), 0});
+        placePlayer(1752.17f, 21.06f, 0.f);
+        planeFrame_ = planePitch_ = 0;
+        planeDone_ = false;
+        Sequence* s = play("CSS_KEN_A01_PlaneLand.seq", [this] {
+            g_->removeScriptProp(kPlane);
+            g_->removeScriptProp(kShadow);
+            wait(0x1E, [this] { doPortIntro(); });
+        });
+        if (s) s->setCallback(0, [this] { wait(1, [this] { movePlane(); }); });   // StartPlane
+    }
+
+    // cPlaneLand::MovePlane, every frame: down the glide path, the shadow under it, the nose lifting for the last
+    // seventy frames; gone after 181
+    void movePlane() {
+        const int n = planeFrame_;
+        if (Game::ScriptProp* plane = g_->scriptProp(kPlane)) {
+            plane->pos[0] = fx(2085.08f) + n * fx(-1.445f);
+            plane->pos[1] = fx(-71.64f) + n * fx(-1.45f);
+            plane->pos[2] = 0x50000 + n * (int32_t)0xFFFFF8E4;
+            if (Game::ScriptProp* shadow = g_->scriptProp(kShadow)) {
+                shadow->pos[0] = plane->pos[0];
+                shadow->pos[1] = plane->pos[1];
+                shadow->pos[2] = 0x2000;
+            }
+        }
+        if (++planeFrame_ >= 0xB5) {
+            g_->removeScriptProp(kPlane);
+            planeDone_ = true;
+        } else if (!planeDone_) wait(1, [this] { movePlane(); });
+        if (planeFrame_ >= 0x6F) {
+            if (Game::ScriptProp* plane = g_->scriptProp(kPlane)) plane->pitch = (int16_t)deg(planePitch_);
+            if (planeFrame_ & 1) --planePitch_;
+        }
     }
 
     // DoPortIntro / cKenA01Intro: the port and the ambush (NewIntro2)

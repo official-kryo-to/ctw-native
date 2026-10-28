@@ -225,6 +225,13 @@ public:
     void addBlip(const int32_t pos[3], uint32_t rgba, int id);
     void removeBlip(int id);
     std::u16string mainText(int id) const;   // e_main.gxt
+    // WorldImpl::CreateDynamicProp for scripts: a prop model (ePropModel = the prop definition) placed by the
+    // mission, turned by SimpleMover::SetHeading / SetPitch (65536 = a full turn), drawn with the world
+    struct ScriptProp { int id, prop; int32_t pos[3]; uint16_t heading; int16_t pitch; };
+    std::vector<ScriptProp> scriptProps;
+    ScriptProp* scriptProp(int id);
+    void removeScriptProp(int id);
+    void renderScriptProps();
     bool uiPaused = false;               // a full-screen app (the radio) has paused the game
     // The original HUD pause screen, opened by the PC binding Esc / controller Start.
     bool pauseOpen = false;

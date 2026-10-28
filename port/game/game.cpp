@@ -1510,6 +1510,7 @@ void Game::render(int W, int H) {
     PedLight light = PedLight::fromTimeCycle(tc);
     TheSkidmarks().render();
     for (const Vehicle& c : cars) c.render(carModel(c.infoId));   // (lit by the world renderer's lights)
+    renderScriptProps();
     projectiles.render(*this);
     {   // cCar::UpdateHeadLights: headlights on outside 07:00 .. 20:00
         bool night = t - 0x7000u >= 0xD000u;
