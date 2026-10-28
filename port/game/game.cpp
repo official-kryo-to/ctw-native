@@ -312,8 +312,10 @@ void Game::focus(int32_t o[3]) const {
 }
 
 void Game::viewCamera(WorldCamera& cam) const {
-    if (renderCamValid_ && !freeCam.on) { cam = renderCam_; return; }   // interpolated while drawing
-    if (freeCam.on) cam = freeCam.cam;
+    // a cutscene's camera wins over a mod's free camera (the third-person view)
+    const bool free = freeCam.on && !seqCamera.active;
+    if (renderCamValid_ && !free) { cam = renderCam_; return; }   // interpolated while drawing
+    if (free) cam = freeCam.cam;
     else if (seqCamera.active) {   // a cutscene's sequence camera
         for (int i = 0; i < 3; ++i) cam.eye[i] = seqCamera.eye[i] / 4096.f;
         cam.setYawPitch(-(int16_t)seqCamera.yaw * 360.f / 65536, (int16_t)seqCamera.pitch * 360.f / 65536);
@@ -325,7 +327,7 @@ void Game::viewCamera(WorldCamera& cam) const {
     else if (scope.active) scope.toWorldCamera(*this, cam);
     else camera.toWorldCamera(cam);
     if (fovOverride > 0.f) cam.fovY = fovOverride;
-    if (renderDistance > 120.f || freeCam.on)
+    if (renderDistance > 120.f || free)
         cam.zFar = std::max(cam.zFar, std::hypot(renderDistance * 1.414214f, cam.eye[2]) + 30.f);
 }
 
@@ -1495,7 +1497,7 @@ void Game::render(int W, int H) {
     Plugins_BeginFrame(W, H);   // input, then mods that place their camera before the world is drawn
     WorldCamera cam;
     viewCamera(cam);
-    if (freeCam.on) world.stream(cam.eye[0], cam.eye[1], 2);   // also while the game is paused
+    if (freeCam.on && !seqCamera.active) world.stream(cam.eye[0], cam.eye[1], 2);   // also while paused
     world.propLights.clear();
     world.lightPools = renderStyle.lightPools;
     renderProps(cam, false);   // their lights, drawn by the world renderer with its own

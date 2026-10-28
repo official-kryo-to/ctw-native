@@ -203,6 +203,9 @@ public:
     SequenceCamera seqCamera;
     ComicScreen comic;
     bool cutscene = false;               // CameraImpl::StartCutscene: no HUD and no player control
+    // a mission's StartCutscene that spans several sequences: cutscene stays on (and the sequence camera where the
+    // last one left it) between them
+    bool scriptCutscene = false;
     // cScriptSequenceBase::LoadSequence + cSequence::Play: null when the file is missing. The callbacks set on it
     // before the first tick fire from frame 0 on.
     Sequence* startSequence(const std::string& name, bool loop = false);

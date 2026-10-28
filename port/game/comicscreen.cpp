@@ -261,9 +261,12 @@ void ComicScreen::render(int W, int H) const {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDisable(GL_TEXTURE_2D);
-        glColor4f(0, 0, 0, fade_);   // the black page behind the panels
+        // the black page behind the panels (the phone's 1024-unit page; the display's wider sides are blacked too,
+        // as the world is not drawn on a phone's screen around it)
+        const float right = v.left + W / v.scale;
+        glColor4f(0, 0, 0, fade_);
         glBegin(GL_QUADS);
-        glVertex2f(0, 0); glVertex2f(1024, 0); glVertex2f(1024, 768); glVertex2f(0, 768);
+        glVertex2f(v.left, 0); glVertex2f(right, 0); glVertex2f(right, 768); glVertex2f(v.left, 768);
         glEnd();
         glEnable(GL_SCISSOR_TEST);
         scissor(3);
@@ -281,9 +284,15 @@ void ComicScreen::render(int W, int H) const {
     // the subtitle: under the comic strip, wrapped to the text box (AddSpriteImpl's 678 units)
     if (textShown_ && !text_.empty()) {
         Hud_Begin(W, H);
-        const float scale = v.scale * 1.5f, width = 678.f * v.scale;
-        const float x = (1024.f / 2 - 678.f / 2 - v.left) * v.scale, y = (768.f - 118.f) * v.scale;
+        const float scale = v.scale * 1.25f, width = 678.f * v.scale;
         const std::u16string wrapped = Hud_Wrap16(text_, width, scale);
+        // the text sprite sits above a line 1.2 font heights over the screen's bottom band (cTwoDSequenceApp::
+        // Process); the whole printed text is laid out at once so the block does not move while it types
+        int lines = 1;
+        for (char16_t c : wrapped) lines += c == u'\n';
+        const float lineH = Hud_LineHeight(scale);
+        const float x = (1024.f / 2 - 678.f / 2 - v.left) * v.scale;
+        const float y = std::max(645.f * v.scale + 0.25f * lineH, H - 0.9f * lineH - lines * lineH);
         int shown = 0, chars = 0;   // the printed share of the wrapped text (the wrap adds newlines)
         while (shown < (int)wrapped.size() && chars < printed_) {
             if (wrapped[shown] != u'\n' || (chars < (int)text_.size() && text_[chars] == u'\n')) ++chars;

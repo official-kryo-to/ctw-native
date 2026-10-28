@@ -23,8 +23,8 @@ Sequence* Game::startSequence(const std::string& name, bool loop) {
         if (sequence.get() == old) retireSequence();
     }
     // the sequence camera starts where the game's camera is, so a first key that is not a cut tweens from it
-    gameCamera(seqCamera.eye, seqCamera.yaw, seqCamera.pitch);
-    seqCamera.active = true;
+    if (!seqCamera.active) gameCamera(seqCamera.eye, seqCamera.yaw, seqCamera.pitch);
+    seqCamera.active = seq->hasCameras();   // (one without cameras leaves the game's camera on the player)
     seq->placeCamera = [this](const int32_t pos[3], uint16_t pitch, uint16_t yaw, int frames, int movement) {
         seqCamera.place(pos, pitch, yaw, frames, movement);
     };
@@ -41,8 +41,8 @@ Sequence* Game::startSequence(const std::string& name, bool loop) {
 void Game::retireSequence() {   // cSequence::Stop's end: EndCutscene, the player's controls back
     if (!sequence) return;
     retiredSequences_.push_back(std::move(sequence));
-    cutscene = false;
-    seqCamera.active = false;
+    cutscene = scriptCutscene;
+    if (!scriptCutscene) seqCamera.active = false;
     comic.end();
 }
 

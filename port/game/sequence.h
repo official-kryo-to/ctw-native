@@ -121,6 +121,7 @@ public:
     bool textPrinting = false;   // Gui::cTwoDSequenceApp::IsTextPrinting (the overlay sets it)
     bool skipTextPrinting = false;   // a tap asked the overlay to finish printing (SkipTextPrinting)
     bool hasOverlay() const { return !bgs.empty(); }
+    bool hasCameras() const { return !cameras_.empty(); }
 
     // CameraImpl::SeqPlace from the camera keys; the game applies it to its sequence camera
     std::function<void(const int32_t pos[3], uint16_t pitch, uint16_t yaw, int frames, int movement)> placeCamera;

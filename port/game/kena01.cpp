@@ -30,7 +30,7 @@ private:
 
     // cKEN_A01::Init: the screen goes black, then FadedInit
     void init() {
-        g_->cutscene = true;
+        g_->cutscene = g_->scriptCutscene = true;
         g_->screenFade.toBlack(1, [this] { doPlaneIntro(); });
     }
 
@@ -67,7 +67,7 @@ private:
     // StartIntro, NextPartStartIntro and cIntroDrive::StartMovie: the intro movie, then DoneIntro
     void startIntro() {
         g_->stopSequence();
-        g_->cutscene = true;
+        g_->cutscene = g_->scriptCutscene = true;
         wait(0xF, [this] {
             if (g_->startupScreens && !IntroMovie::play(g_->dataDir)) g_->quitRequested = true;
             doneIntro();
@@ -78,6 +78,7 @@ private:
     // -307.74, -40.05) and plays LeaveWater, his words as he climbs out
     void doneIntro() {
         g_->screenFade.toBlack(1);
+        g_->seqCamera.active = false;   // LeaveWater has no cameras: the game's camera on Huang
         int32_t at[3] = {fx(-307.74f), fx(-40.05f), fx(2.f)};
         std::copy(at, at + 3, g_->player.pos);
         g_->player.placeOnGround(&g_->collision);
@@ -90,7 +91,7 @@ private:
 
     // FindACar: cCarToSteal's car on the street behind the jetty, marked on the radar
     void findACar() {
-        g_->cutscene = false;
+        g_->cutscene = g_->scriptCutscene = false;
         if (!carUid_) {
             const int32_t at[3] = {fx(-281.78f), fx(-64.5f), 0};
             int info = 0;
@@ -133,6 +134,7 @@ private:
     void getToKennysComplete() {
         g_->removeBlip(2);
         g_->objective.frames = 0;
+        g_->cutscene = g_->scriptCutscene = true;
         g_->screenFade.toBlack(15, [this] {
             g_->screenFade.in(15);
             play("CSS_KEN_A01_SCENE_02.seq", [this] { cutsceneAtKennysDoFadeIn(); }, false);
@@ -141,7 +143,8 @@ private:
 
     // CutsceneAtKennysDoFadeIn: the apartment (364.08, 25.02), arrived at within 5 units
     void cutsceneAtKennysDoFadeIn() {
-        g_->cutscene = false;
+        g_->cutscene = g_->scriptCutscene = false;
+        g_->seqCamera.active = false;
         const int32_t home[3] = {fx(364.08f), fx(25.02f), 0};
         g_->addBlip(home, 0xFFE000FF, 3);
         g_->showObjective(text(0x53F));   // "Go to your apartment."
@@ -152,6 +155,7 @@ private:
     void parkAtSafehouseComplete() {
         g_->removeBlip(3);
         g_->objective.frames = 0;
+        g_->cutscene = g_->scriptCutscene = true;
         g_->screenFade.toBlack(15, [this] {
             g_->screenFade.in(15);
             play("CSS_Ken_A01_Safehouse.seq", [this] { passed(); }, false);
@@ -159,7 +163,8 @@ private:
     }
 
     void passed() {
-        g_->cutscene = false;
+        g_->cutscene = g_->scriptCutscene = false;
+        g_->seqCamera.active = false;
         g_->showObjective(g_->mainText(93), 150);   // "MISSION PASSED"
         finish();
     }
