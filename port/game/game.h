@@ -35,6 +35,7 @@
 #include "targeting.h"
 #include "sequence.h"
 #include "comicscreen.h"
+#include "mission.h"
 #include "world/worldrenderer.h"
 #include <cstdint>
 #include <map>
@@ -208,8 +209,19 @@ public:
     void stopSequence();
     void updateSequence();               // cSequenceManager::Update, at the start of each game frame
     void renderCutscene(int width, int height);
+    void renderMissionHud(int width, int height);
     void gameCamera(int32_t eye[3], uint16_t& yaw, uint16_t& pitch) const;   // the camera updateView builds
     bool cutsceneKey(int scancode);      // a tap moves on, Escape skips (the hold to skip)
+    // missions (mission.h): the running script, the screen fade, its objective line and radar blips
+    std::unique_ptr<Mission> mission;
+    bool startMission(const std::string& name);   // false: no such mission
+    ScreenFade screenFade;
+    Objective objective;
+    std::vector<RadarBlip> blips;
+    void showObjective(const std::u16string& text, int frames = 0xD2);   // HUDImpl::DisplayObjective(.., 210)
+    void addBlip(const int32_t pos[3], uint32_t rgba, int id);
+    void removeBlip(int id);
+    std::u16string mainText(int id) const;   // e_main.gxt
     bool uiPaused = false;               // a full-screen app (the radio) has paused the game
     // The original HUD pause screen, opened by the PC binding Esc / controller Start.
     bool pauseOpen = false;
@@ -290,6 +302,7 @@ private:
     bool deathStarted_ = false;     // updateDeath has seen this death
     int wastedFrames_ = 0;          // HUDText's busted / wasted text: frames left
     std::string wastedText_, bustedText_;   // e_main.gxt 0x62 / 0x63
+    std::vector<std::u16string> mainText_;   // e_main.gxt
     int respawnFrame() const { return deathScreen.ok() ? 62 : 72; }   // the frame the player is reborn on
     int32_t deathEye_[3] = {}, restartFallback_[3] = {};
     uint16_t deathYaw_ = 0, deathPitch_ = 0;

@@ -182,6 +182,15 @@ void GameplayHud::render(const Game& game, int width, int height) const {
     float nx, ny;
     projection.worldOffset(north, pos, nx, ny, diameter * .5f);
     sprite(107, cx + nx * k, cy + ny * k, k);
+    glDisable(GL_TEXTURE_2D);
+    for (const RadarBlip& b : game.blips) {   // HUDImpl::AddBlip (a dot in the blip's colour; at the edge when far)
+        float bx, by;
+        projection.worldOffset(b.pos, pos, bx, by, diameter * .45f);
+        glColor4f(0, 0, 0, .8f);
+        disc(cx + bx * k, cy + by * k, 6.5f * k);
+        glColor4ub((GLubyte)(b.colour >> 24), (GLubyte)(b.colour >> 16), (GLubyte)(b.colour >> 8), 255);
+        disc(cx + bx * k, cy + by * k, 5.f * k);
+    }
     renderWantedStars(game, k, width, height);
     renderCash(game, k);
     glPopAttrib();

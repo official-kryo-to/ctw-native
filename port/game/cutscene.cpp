@@ -6,6 +6,7 @@
 #include "hud.h"
 #include "os/gamefs.h"
 #include <SDL.h>
+#include <algorithm>
 #include <cstdio>
 
 Sequence* Game::startSequence(const std::string& name, bool loop) {
@@ -108,4 +109,66 @@ void Game::renderCutscene(int W, int H) {
         Hud_End();
     }
     comic.render(W, H);
+}
+
+// ---- missions (mission.h) ----
+
+bool Game::startMission(const std::string& name) {
+    std::unique_ptr<Mission> m = Mission_Create(name);
+    if (!m) { std::fprintf(stderr, "no mission %s\n", name.c_str()); return false; }
+    mission = std::move(m);
+    mission->start(*this);
+    return true;
+}
+
+void Game::showObjective(const std::u16string& text, int frames) {
+    objective.text = text;
+    objective.frames = text.empty() ? 0 : frames;
+}
+
+void Game::addBlip(const int32_t pos[3], uint32_t rgba, int id) {
+    removeBlip(id);
+    blips.push_back({{pos[0], pos[1], pos[2]}, rgba, id});
+}
+
+void Game::removeBlip(int id) {
+    blips.erase(std::remove_if(blips.begin(), blips.end(), [id](const RadarBlip& b) { return b.id == id; }), blips.end());
+}
+
+std::u16string Game::mainText(int id) const {
+    if (id < 0 || id >= (int)mainText_.size()) return {};
+    std::u16string s = mainText_[id];
+    while (!s.empty() && s.back() == 0) s.pop_back();
+    return s;
+}
+
+void Game::renderMissionHud(int W, int H) {
+    if (screenFade.alpha > 0.f) {   // cScreenFade: black over the picture
+        Hud_Begin(W, H);
+        Hud_Rect(0, 0, (float)W, (float)H, (uint32_t)(screenFade.alpha * 255.f));
+        Hud_End();
+    }
+    if (objective.frames > 0 && !objective.text.empty() && !(sequence && comic.active())) {
+        // HUDText's objective: centred under the middle of the screen, wrapped to two thirds of its width
+        Hud_Begin(W, H);
+        const float k = H / 768.f, scale = 1.5f * k, width = W * 0.66f;
+        const std::u16string wrapped = Hud_Wrap16(objective.text, width, scale);
+        int lines = 1;
+        for (char16_t c : wrapped) lines += c == u'\n';
+        const float y = H - (90.f * k + lines * Hud_LineHeight(scale));
+        // each line centred: drawn line by line
+        size_t from = 0;
+        for (int i = 0; i < lines; ++i) {
+            size_t to = wrapped.find(u'\n', from);
+            if (to == std::u16string::npos) to = wrapped.size();
+            const std::u16string line = wrapped.substr(from, to - from);
+            std::string ascii;
+            for (char16_t c : line) if (c < 0x80) ascii += (char)c;
+            const float w = Hud_TextWidth(ascii, scale);
+            Hud_Text16((W - w) * 0.5f + 2.f * k, y + i * Hud_LineHeight(scale) + 2.f * k, scale, 0x000000C0u, line);
+            Hud_Text16((W - w) * 0.5f, y + i * Hud_LineHeight(scale), scale, 0xFFFFFFFFu, line);
+            from = to + 1;
+        }
+        Hud_End();
+    }
 }

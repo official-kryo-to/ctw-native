@@ -99,7 +99,10 @@ bool Game::init(const std::string& data, const std::string& mods) {
     {   // GlobalText 0x62: "WASTED!", its colour tag kept for the HUD font (UTF-8 of the UTF-16 code units)
         GxtFile text;
         wastedText_.clear(); bustedText_.clear();
+        mainText_.clear();
         if (text.load(dataDir + "/e_main.gxt"))
+            for (size_t i = 0; i < text.count(); ++i) mainText_.push_back(text.get(i));
+        if (text.count())
           for (int id : {0x62, 0x63}) {
             std::string& target = id == 0x62 ? wastedText_ : bustedText_;
             if (text.count() <= (size_t)id) continue;
@@ -1219,6 +1222,12 @@ void Game::updateDeath() {
 void Game::tick() {
     snapshotPoses();
     updateSequence();
+    screenFade.tick();
+    if (objective.frames > 0) --objective.frames;
+    if (mission) {
+        mission->tick(*this);
+        if (mission && mission->finished()) mission.reset();
+    }
     radio.update(*this);
     ++frame;
     muzzleFlashes.beginTick();
@@ -1582,6 +1591,7 @@ void Game::render(int W, int H) {
     applyGrade(W, H);
     deathScreen.render(W, H);   // the death app: the captured frame's shards over black
     renderCutscene(W, H);       // the comic overlay and its subtitles
+    renderMissionHud(W, H);     // the screen fade and the objective line
 
     Hud_Begin(W, H);
     // cDeathArrestWatcher hides the mini HUD; so does a cutscene (eHudCutsceneDisplay)
@@ -1612,7 +1622,7 @@ void Game::render(int W, int H) {
 }
 
 void Game::run() {
-    if (!IntroMovie::play(dataDir)) return;   // the new game's intro (the port starts a new game every time)
+    startMission("kena01");   // a new game (the port starts one every time): the first mission and its intro
     const double step = 1.0 / 30.0;   // OS_ApplicationTick: the game logic runs at 30 fps
     double acc = 0, last = OS_TimeAccurate();
     bool running = true;

@@ -10,8 +10,16 @@ compatibility with the original.
   which makes its half-turn over eight frames and holds it until loading is done (at least nine frames). Then the
   new game's intro movie (kena01::cIntroDrive::StartMovie: CTW_iPhone_intro.mp4 with its soundtrack, stretched over
   the window like Android's movie view, the game's music paused) plays until its end, or until something is held for
-  more than a second (UpdateMovieCallback). It is decoded by Windows (Media Foundation); other platforms skip it. The
-  in-engine plane prologue before it and the rest of the first mission (KEN_A01) are not ported yet.
+  more than a second (UpdateMovieCallback). It is decoded by Windows (Media Foundation); other platforms skip it.
+- **Cutscenes:** the game's sequences (cSequence, CSS_*.seq): camera paths with their eased moves, frame callbacks
+  for the mission scripts and Gui::cTwoDSequenceApp's comic overlay (background panels lit by the time of day,
+  character sprites, typed subtitles with the speaker's name, the fade and the skip points). A tap (Enter, Space,
+  F or a click) finishes the line or moves on, Escape or holding skips.
+- **The first mission (KEN_A01, "Arrival in Liberty"):** the prologue on the plane, the landing, the port, the intro
+  movie, Huang on the jetty, getting a car, Uncle Kenny's restaurant and the conversation there, and the apartment
+  and its tour, with the mission's objectives and radar blips. Not yet: the plane, clouds and contrails in the
+  prologue, the bodyguards and ambushers at the port, the credits drive, the sinking car and its minigame,
+  swimming to the jetty, the police on the shore, hotwiring and the GPS route.
 - **The city:** streets and buildings with their textures, water, animated signs, weather, day and night,
   street furniture, street lights, steam vents and fountains.
 - **On foot:** the player character with movement, sprinting and collision. The follow camera counts consecutive
@@ -168,7 +176,7 @@ compatibility with the original.
 
 ## Not there yet
 
-- Missions, save games, full combat, the rest of the police response (road blocks, helicopters, SWAT and the
+- Missions after the first, save games, full combat, the rest of the police response (road blocks, helicopters, SWAT and the
   higher levels' units, route-finding pursuit) and the rest of the original gameplay HUD.
 - Radar GPS routes, mission/location blips, a control for the rotating-map setting (the rotation itself is ported), HUD fades,
   the stats screen and the full pause/PDA layout. The radar work is a subset of the HUD, not complete UI parity.
