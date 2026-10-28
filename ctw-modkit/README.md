@@ -265,7 +265,8 @@ The `Multiplayer` example is a complete mod built on the v13 functions. It puts 
 game's own pause screen (Esc; or press **F9**), which opens a window with four tabs:
 
 - **Online**: the public games on CTW Online, and joining a private one by its six-letter code. Nothing to set up
-  on the router: everything goes through the CTW Online relay ([online/](../online/README.md)).
+  on the router: everything goes through the CTW Online relay. The mod uses the project's service; a group can run
+  its own on a free Cloudflare account and set `online=` in `multiplayer.ini` (see [online/](../online/README.md)).
 - **Nearby**: games hosted on the same network, found by themselves.
 - **Address**: a host's address and UDP port, for virtual networks (Tailscale, ZeroTier, Radmin VPN) or a
   forwarded port.

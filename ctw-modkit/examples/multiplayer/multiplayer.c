@@ -26,7 +26,7 @@
 
 enum { SC_T = 23, SC_RETURN = 40, SC_ESCAPE = 41, SC_F1 = 58, SC_F9 = 66, SC_F12 = 69, SC_KP_ENTER = 88 };
 /* CTW Online, the public list and relay (online/ in the repository); multiplayer.ini's online= overrides it */
-#define ONLINE_DEFAULT_URL ""
+#define ONLINE_DEFAULT_URL "https://ctw-online.kryotooooo.workers.dev"
 #define LAN_PORT 7778
 #define ONLINE_VERSION "mp1"
 enum { TICKS = 30, CHAT_LINES = 8 };
@@ -160,7 +160,7 @@ static void save_settings(void) {
     fprintf(f, "name=%s\naddress=%s\nport=%s\ngame=%s\npublic=%d\n", name_from_env ? saved_name : my_name, address,
             port_text, game_name, list_public);
     const char* url = url_from_env ? saved_url : online_url;
-    if (url[0] && strcmp(url, ONLINE_DEFAULT_URL) != 0) fprintf(f, "online=%s\n", url);
+    if (strcmp(url, ONLINE_DEFAULT_URL) != 0) fprintf(f, "online=%s\n", url);   /* (empty: turned off) */
     fclose(f);
 }
 

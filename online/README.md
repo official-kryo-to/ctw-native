@@ -7,7 +7,13 @@ every player's messages go through the relay to the host and back.
 It is one Cloudflare Worker with two Durable Objects (`Lobby` for the list, one `Room` per game for the relay),
 so there is no server to run or update. Cloudflare's free plan is enough to start with; see the limits below.
 
-## Deploy
+The mod uses the project's own service, `https://ctw-online.kryotooooo.workers.dev`, unless told otherwise. Anyone
+can run their own (a private list for a group, or more room than the free plan gives): deploy it as below and point
+the players' mods at it. Games on different services do not see each other.
+
+## Deploy your own
+
+You need a free Cloudflare account and Node.js 18 or newer.
 
 ```text
 cd online
@@ -16,9 +22,16 @@ npx wrangler login          # once, in a browser
 npx wrangler deploy
 ```
 
-Wrangler prints the address, for example `https://ctw-online.<your-account>.workers.dev`. Put it in the mod:
-either as `ONLINE_DEFAULT_URL` in `ctw-modkit/examples/multiplayer/multiplayer.c` (for everyone who installs the
-mod), or as `online=` in a player's `mods/Multiplayer/multiplayer.ini`.
+Wrangler prints the address, for example `https://ctw-online.<your-account>.workers.dev`. Every player then adds
+a line to their `mods/Multiplayer/multiplayer.ini` (the file appears after the game has run once with the mod):
+
+```text
+online=https://ctw-online.<your-account>.workers.dev
+```
+
+or starts the game with the environment variable `CTW_ONLINE_URL` set to it. A build of the mod for everyone can
+change `ONLINE_DEFAULT_URL` in `ctw-modkit/examples/multiplayer/multiplayer.c` instead. `online=` with nothing after
+it turns CTW Online off (Nearby and Address still work).
 
 ## Try it locally
 
