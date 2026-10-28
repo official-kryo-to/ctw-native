@@ -3,6 +3,20 @@
 What changed in each release of CTW-Native. A release is the Porter exe with the game inside, so every entry
 covers both. The newest is on top; the release workflow publishes the entry of the version it builds.
 
+## 0.4.0
+
+- Play together: the new Multiplayer mod puts up to eight players in one city (F9 to host or join, T to chat).
+  Players see each other walk, drive, ride and shoot, with names and health over them; hits are taken by the
+  victim's own game, and joiners share the host's time and weather. Mod API version 13 adds the puppets it uses.
+- Money: the HUD's cash counter, the hospital's $200 and the police's $100 when you are reborn.
+- Pickups: the map's health, armour and weapon pickups with their five-minute respawns, and dead pedestrians drop
+  their money or their gun.
+- Police: cop cars chase and the cops get out to beat, shoot or arrest you, ending in the Busted screen.
+- Start-up as on Android: the legal screen, the loading ring and the intro movie (hold any key for a second to skip).
+- The radar flashes blue and red while you are wanted; bikes are mounted from the nearer side; Enhancements can make
+  hit street furniture come loose and tumble.
+- Fix the Linux checks, which failed on every run since the mouse-look tests were added.
+
 ## 0.3.0
 
 - Add wanted levels, crime reporting, police pedestrians and vehicles, and HUD stars.
