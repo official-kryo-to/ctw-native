@@ -111,10 +111,61 @@ void PauseScreen::sprite(int index, float x, float y, float k) const {
     glDisable(GL_TEXTURE_2D);
 }
 
+bool PauseScreen::buttonRect(int index, int count, int width, int height, float& x, float& y, float& w, float& h) {
+    if (index < 0 || index >= count || height <= 0) return false;
+    const float k = height / 768.f;
+    w = 380.f * k; h = 70.f * k;
+    const float gap = 18.f * k, total = count * h + (count - 1) * gap;
+    x = (width - w) * .5f;
+    y = (height - total) * .5f + index * (h + gap);
+    return true;
+}
+
+namespace {
+std::vector<int> visibleButtons() {
+    std::vector<int> v;
+    const auto& b = Plugins_PauseButtons();
+    for (int i = 0; i < (int)b.size(); ++i) if (b[(size_t)i].visible) v.push_back(i);
+    return v;
+}
+}
+
+void PauseScreen::select(int step) {
+    const int n = (int)visibleButtons().size();
+    if (!n) { selected_ = -1; return; }
+    selected_ = selected_ < 0 ? (step > 0 ? 0 : n - 1) : (selected_ + step + n) % n;
+    TheSound().playHud(326, 60);
+}
+
+void PauseScreen::press(Game& game, int index) {
+    const auto shown = visibleButtons();
+    if (index < 0 || index >= (int)shown.size()) return;
+    const PauseButton b = Plugins_PauseButtons()[(size_t)shown[(size_t)index]];
+    TheSound().playHud(326, 127);
+    selected_ = -1;
+    game.setPause(false);
+    b.fn(b.user);
+}
+
+bool PauseScreen::pressSelected(Game& game) {
+    if (selected_ < 0 || selected_ >= (int)visibleButtons().size()) return false;
+    press(game, selected_);
+    return true;
+}
+
 void PauseScreen::render(Game& game, int width, int height) {
     if (!game.pauseOpen || width <= 0 || height <= 0) return;
     int mx, my;
     Host_GetMouse(&mx, &my);
+    const auto shown = visibleButtons();
+    if (selected_ >= (int)shown.size()) selected_ = -1;
+    for (int i = 0; i < (int)shown.size(); ++i) {   // hovering picks a button
+        float bx, by, bw, bh;
+        if (buttonRect(i, (int)shown.size(), width, height, bx, by, bw, bh) && mx >= bx && mx < bx + bw && my >= by && my < by + bh) {
+            selected_ = i;
+            if (OS_TimeAccurate() >= touchReady_ && Plugins_HostApi().mouse_clicked(0)) { press(game, i); return; }
+        }
+    }
     if (OS_TimeAccurate() >= touchReady_ && Plugins_HostApi().mouse_clicked(0)) {
         if (resumeHit(width, height, (float)mx, (float)my)) {
             TheSound().playHud(326, 127);
@@ -138,4 +189,15 @@ void PauseScreen::render(Game& game, int width, int height) {
     // Native text-sprite creation adds a one-unit shadow for font zero (0x6c0558).
     Hud_Text(x + 46.f * k, y + k, 1.5f * k, 0x000000FFu, quitLabel_);
     Hud_Text(x + 45.f * k, y, 1.5f * k, 0xFFFFFFFFu, quitLabel_);
+    for (int i = 0; i < (int)shown.size(); ++i) {   // PC: the mods' buttons
+        float bx, by, bw, bh;
+        if (!buttonRect(i, (int)shown.size(), width, height, bx, by, bw, bh)) continue;
+        const bool hot = i == selected_;
+        Hud_Rect(bx, by, bw, bh, hot ? 0x3A3320F0u : 0x1A1A1AE0u);
+        Hud_Rect(bx, by + bh - 4.f * k, bw, 4.f * k, hot ? 0xF2C230FFu : 0x606060FFu);
+        const std::string& label = Plugins_PauseButtons()[(size_t)shown[(size_t)i]].label;
+        const float scale = 1.6f * k, tw = Hud_TextWidth(label, scale), th = Hud_LineHeight(scale);
+        Hud_Text(bx + (bw - tw) * .5f + k, by + (bh - th) * .5f + k, scale, 0x000000FFu, label);
+        Hud_Text(bx + (bw - tw) * .5f, by + (bh - th) * .5f, scale, hot ? 0xF2C230FFu : 0xFFFFFFFFu, label);
+    }
 }

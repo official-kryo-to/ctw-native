@@ -5,6 +5,7 @@
 // them the CtwHostApi (ctw_plugin.h). The game ships without any plugin; nothing here is needed to play.
 #pragma once
 #include <string>
+#include <vector>
 #include "ctw_plugin.h"
 
 void Plugins_Init(const std::string& modsDir);
@@ -20,3 +21,5 @@ void Plugins_Log(const std::string& line);
 const CtwHostApi& Plugins_HostApi();     // same public table used when loading DLLs
 void Plugins_EmitEvent(uint32_t type, CtwVehicle vehicle, int modelId, int value = 0);
 bool Plugins_RenderCharacter(const CtwCharacterPose& pose);
+struct PauseButton { std::string label; CtwCallback fn; void* user; bool visible; };
+const std::vector<PauseButton>& Plugins_PauseButtons();   // the plugins' pause-screen buttons (add_pause_button)

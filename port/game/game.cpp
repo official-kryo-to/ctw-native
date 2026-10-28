@@ -1669,6 +1669,11 @@ void Game::setPause(bool open) {
 
 bool Game::pauseKey(int k) {
     // PC bindings for the original pause/resume action; other input stays out of gameplay.
+    if (k == SDL_SCANCODE_UP || k == SDL_SCANCODE_DOWN) {   // PC: the mods' pause buttons
+        pauseScreen.select(k == SDL_SCANCODE_DOWN ? 1 : -1);
+        return true;
+    }
+    if (k == SDL_SCANCODE_RETURN && pauseScreen.pressSelected(*this)) return true;
     if (k == SDL_SCANCODE_ESCAPE || k == SDL_SCANCODE_BACKSPACE || k == SDL_SCANCODE_RETURN) {
         TheSound().playHud(326, 127);
         setPause(false);

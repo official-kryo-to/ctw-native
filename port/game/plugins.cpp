@@ -244,6 +244,8 @@ void h_on_key(CtwKeyCallback fn, void* u) { if (fn) g_keys.push_back({fn, u}); }
 void h_on_event(CtwGameEventCallback fn, void* u) { if (fn) g_events.push_back({fn, u}); }
 void h_game_input(int on) { g_gameInput = on != 0; Plugins_RefreshMouseCapture(); }
 
+std::vector<PauseButton> g_pauseButtons;
+
 CtwHostApi g_host = {
     CTW_PLUGIN_API_VERSION, sizeof(CtwHostApi),
     h_mods_dir, h_log, h_frame,
@@ -262,10 +264,20 @@ CtwHostApi g_host = {
 };
 }  // namespace
 
+const std::vector<PauseButton>& Plugins_PauseButtons() { return g_pauseButtons; }
+
 const CtwHostApi& Plugins_HostApi() {
     static const bool filled = [] {
         GameplayApi_Fill(g_host); g_host.on_game_event = h_on_event;
         g_host.consume_mouse_wheel = [] { g_wheelConsumed = true; };
+        g_host.add_pause_button = [](const char* label, CtwCallback fn, void* user) -> int {
+            if (!label || !*label || !fn || g_pauseButtons.size() >= 8) return 0;
+            g_pauseButtons.push_back({std::string(label).substr(0, 40), fn, user, true});
+            return (int)g_pauseButtons.size();
+        };
+        g_host.set_pause_button_visible = [](int id, int visible) {
+            if (id >= 1 && id <= (int)g_pauseButtons.size()) g_pauseButtons[(size_t)id - 1].visible = visible != 0;
+        };
         g_host.on_frame_begin = [](CtwCallback fn, void* u) { if (fn) g_frame.push_back({fn, u}); };
         g_host.load_character_model = [](const char* dff, const char* ifp, const char* textures) -> CtwCharacterModel {
             if (!dff || !ifp || !textures || g_characterModels.size() >= 128 || !g_nextCharacter) return 0;
@@ -384,6 +396,7 @@ void Plugins_Shutdown() {
     for(auto& item:g_characterModels)item.second->release();
     g_characterModels.clear();
     g_events.clear(); g_pendingEvents.clear();
+    g_pauseButtons.clear();
     g_gameInput = true; g_captureRequested = false; Host_SetRelativeMouse(false);
     Game& g = TheGame();   // nothing a plugin changed about the camera outlives it
     g.freeCam.on = false; g.controlYaw.on = false; g.fovOverride = 0.f; g.renderStyle = {};

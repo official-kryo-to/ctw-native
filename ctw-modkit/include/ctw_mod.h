@@ -251,6 +251,9 @@ typedef struct CtwApi {
     /* position, rotation (quaternion x, y, z, w) and velocity; set: not the player's own vehicle */
     int (*get_vehicle_pose)(CtwVehicle vehicle, float xyz[3], float quat[4], float velocity[3]);
     int (*set_vehicle_pose)(CtwVehicle vehicle, const float xyz[3], const float quat[4], const float velocity[3]);
+    /* A button on the game's own pause screen (Esc), shown while your mod is on: pressing it resumes the game and
+       calls fn. Use it for things that belong to the game rather than to cheats, such as a multiplayer menu. */
+    void (*add_pause_button)(CtwMod* mod, const char* label, CtwCallback fn, void* user);
 } CtwApi;
 
 /*

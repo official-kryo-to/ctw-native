@@ -18,7 +18,13 @@ public:
     bool resumeHit(int width, int height, float x, float y) const;
     static void quitCentre(int width, int height, float& x, float& y);
     bool quitHit(int width, int height, float x, float y) const;
+    // PC: the mods' buttons (add_pause_button) in a column in the middle; Up/Down pick one and Enter presses it
+    void select(int step);
+    bool pressSelected(Game& game);   // false: none is picked (Enter resumes as before)
 private:
+    int selected_ = -1;
+    static bool buttonRect(int index, int count, int width, int height, float& x, float& y, float& w, float& h);
+    void press(Game& game, int index);
     SpriteSet sprites_;
     unsigned texture_ = 0;
     int textureWidth_ = 0, textureHeight_ = 0;

@@ -191,6 +191,20 @@ void api_set_setting(CtwMod* m, const char* key, float value) {
 }
 
 void api_on_tick(CtwMod* m, CtwCallback fn, void* user) { if (fn) g_tickHooks.push_back({m, fn, user}); }
+// a mod's pause-screen buttons: the game's, shown while the mod runs
+struct PauseButtonHook { CtwMod* mod; CtwCallback fn; void* user; int id; std::string label; };
+std::vector<std::unique_ptr<PauseButtonHook>> g_pauseButtons;
+void api_add_pause_button(CtwMod* m, const char* label, CtwCallback fn, void* user) {
+    if (!m || !fn || !label) return;
+    for (auto& h : g_pauseButtons)   // a mod switched off and on again adds its button again: keep the one
+        if (h->mod == m && h->label == label) { h->fn = fn; h->user = user; return; }
+    auto hook = std::make_unique<PauseButtonHook>(PauseButtonHook{m, fn, user, 0, label});
+    hook->id = H->add_pause_button(label, [](void* u) {
+        auto* h = static_cast<PauseButtonHook*>(u);
+        h->fn(h->user);
+    }, hook.get());
+    if (hook->id) g_pauseButtons.push_back(std::move(hook));
+}
 void api_on_hud(CtwMod* m, CtwCallback fn, void* user) { if (fn) g_hudHooks.push_back({m, fn, user}); }
 void api_on_frame(CtwMod* m, CtwCallback fn, void* user) { if (m && fn) g_frameHooks.push_back({m, fn, user}); }
 void api_on_character(CtwMod* m,CtwCharacterCallback fn,void* user) {if(m && fn)g_characterHooks.push_back({m,fn,user});}
@@ -648,6 +662,7 @@ void drawMenu() {
 
 void onHud(void*) {
     if (!g_textureJobs.empty()) applyTextureJobs(3.0);   // about 3 ms of texture work per frame
+    for (const auto& b : g_pauseButtons) H->set_pause_button_visible(b->id, running(*b->mod));
     const auto hooks = g_hudHooks;
     for (const auto& h : hooks)
         if (running(*h.mod)) h.fn(h.user);
@@ -720,6 +735,7 @@ extern "C" CTW_PLUGIN_EXPORT int ctw_plugin_init(const CtwHostApi* host) {
     g_api.damage_player = gameplay && CTW_HOST_HAS(H,damage_player) ? H->damage_player : nullptr;
     g_api.get_vehicle_pose = gameplay && CTW_HOST_HAS(H,get_vehicle_pose) ? H->get_vehicle_pose : nullptr;
     g_api.set_vehicle_pose = gameplay && CTW_HOST_HAS(H,set_vehicle_pose) ? H->set_vehicle_pose : nullptr;
+    g_api.add_pause_button = CTW_HOST_HAS(H,add_pause_button) && CTW_HOST_HAS(H,set_pause_button_visible) ? api_add_pause_button : nullptr;
 #undef FORWARD_V4
 #undef FORWARD_V5
     g_api.on_game_event = gameplay && H->on_game_event ? api_on_event : nullptr;

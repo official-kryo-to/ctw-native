@@ -222,6 +222,10 @@ typedef struct CtwHostApi {
        under physics with that motion (for vehicles a remote player drives); not the player's own vehicle. */
     int (*get_vehicle_pose)(CtwVehicle vehicle, float xyz[3], float quat[4], float velocity[3]);
     int (*set_vehicle_pose)(CtwVehicle vehicle, const float xyz[3], const float quat[4], const float velocity[3]);
+    /* A button on the game's pause screen (Esc), such as Multiplayer: pressing it resumes the game and calls fn.
+       Returns its id (0: none); set_pause_button_visible shows or hides it. */
+    int (*add_pause_button)(const char* label, CtwCallback fn, void* user);
+    void (*set_pause_button_visible)(int id, int visible);
 } CtwHostApi;
 
 /* Exported by a plugin DLL. Return 0 from ctw_plugin_init to stay loaded. */
