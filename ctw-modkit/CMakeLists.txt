@@ -52,7 +52,7 @@ ctw_mod(enhancements Enhancements)
 ctw_mod(trumpify Trumpify)
 ctw_mod(multiplayer Multiplayer)
 if(WIN32)
-    target_link_libraries(multiplayer PRIVATE ws2_32)
+    target_link_libraries(multiplayer PRIVATE ws2_32 winhttp)
 endif()
 
 # Optional donor assets belong to the local Enhancements build, never the engine

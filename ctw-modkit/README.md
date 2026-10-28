@@ -261,17 +261,29 @@ animation/appearance limitations.
 
 ### Playing together
 
-The `Multiplayer` example is a complete mod built on the v13 functions. One player opens it with **F9**, types a
-name and presses **Host**; the others enter the host's address and press **Join**. Everyone sees the others walk,
-drive and ride with their names over them, shooting or hitting another player hurts that player in their own game
-(with "was killed by" in the chat), **T** opens the chat and joiners take the host's time of day and weather.
-Traffic, pedestrians, the police and pickups stay each player's own.
+The `Multiplayer` example is a complete mod built on the v13 functions. It puts a **MULTIPLAYER** button on the
+game's own pause screen (Esc; or press **F9**), which opens a window with four tabs:
 
-The host must be reachable on UDP port 7777 (changeable in the window). On one network that just works. Over the
-internet forward the port on the host's router, or put everyone on a virtual network such as Tailscale, ZeroTier
-or Radmin VPN and use the host's address there. A shortcut can start straight into a game: set `CTW_MULTIPLAYER` to
-`host` or `join <address>` (and optionally `CTW_MULTIPLAYER_NAME`) before starting the game. Messages are described
-in `examples/multiplayer/protocol.h`.
+- **Online**: the public games on CTW Online, and joining a private one by its six-letter code. Nothing to set up
+  on the router: everything goes through the CTW Online relay ([online/](../online/README.md)).
+- **Nearby**: games hosted on the same network, found by themselves.
+- **Address**: a host's address and UDP port, for virtual networks (Tailscale, ZeroTier, Radmin VPN) or a
+  forwarded port.
+- **Host**: name the game and host it; it is on the network at once and, with CTW Online, online too (listed
+  publicly, or private and joined by its code).
+
+Everyone sees the others walk, drive, ride and shoot with their names and health over them; hits on another player
+are taken by that player's own game (with "was killed by" in the chat), **T** opens the chat and joiners take the
+host's time of day and weather. Traffic, pedestrians, the police and pickups stay each player's own.
+
+The DS and PSP versions had two-player games over local wireless with six modes (two races, Stash Dash, Defend
+the Base, Liberty City Survivor and Gang Bang); the mobile version this port comes from has none of them (only an
+unused PDA button), so this mod is free roam together.
+
+A shortcut can start straight into a game: set `CTW_MULTIPLAYER` to `host`, `join <address>` or `online <code>`
+(and optionally `CTW_MULTIPLAYER_NAME`, or `CTW_ONLINE_URL` for another CTW Online) before starting the game.
+Messages are described in `examples/multiplayer/protocol.h`. A mod can add its own pause-screen buttons with
+`add_pause_button` (v13).
 
 ## 6. Windows and menus with ctw_ui.h
 

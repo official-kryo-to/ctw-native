@@ -23,4 +23,11 @@ int net_receive(NetAddr* from, void* data, size_t size);         /* bytes, 0 whe
 int net_same(const NetAddr* a, const NetAddr* b);
 void net_format(const NetAddr* a, char* out, size_t size);        /* "1.2.3.4:7777" */
 
+/* LAN discovery: a second socket on a fixed port that hosts broadcast a beacon to and browsers listen on. Several
+   games on one computer can listen at once (address reuse). */
+int net_beacon_open(uint16_t port);
+void net_beacon_close(void);
+int net_beacon_send(uint16_t port, const void* data, size_t size);   /* to everyone on the local network */
+int net_beacon_receive(NetAddr* from, void* data, size_t size);
+
 #endif

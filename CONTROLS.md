@@ -73,5 +73,6 @@ The intro movie stops when any key, mouse button or controller button is held fo
 
 | Multiplayer mod | |
 | --- | --- |
-| F9 | Host or join a game (name, address and port; Enter or Esc leaves a field) |
+| Esc, then MULTIPLAYER (or F9) | Find a game (Online, Nearby, Address) or host one |
+| Up / Down, Enter (pause screen) | Pick and press a pause-screen button |
 | T | Chat (Enter sends, Esc closes) |

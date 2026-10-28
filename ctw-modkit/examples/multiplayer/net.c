@@ -40,6 +40,7 @@ int net_start(void) {
 
 void net_stop(void) {
     net_close();
+    net_beacon_close();
 #ifdef _WIN32
     if (started) WSACleanup();
 #endif
@@ -118,6 +119,63 @@ int net_receive(NetAddr* from, void* data, size_t size) {
 }
 
 int net_same(const NetAddr* a, const NetAddr* b) { return a->ip == b->ip && a->port == b->port; }
+
+static Socket beacon = BAD_SOCKET;
+
+int net_beacon_open(uint16_t port) {
+    if (beacon != BAD_SOCKET) return 1;
+    beacon = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (beacon == BAD_SOCKET) return 0;
+    int on = 1;
+    setsockopt(beacon, SOL_SOCKET, SO_REUSEADDR, (const char*)&on, sizeof on);
+    setsockopt(beacon, SOL_SOCKET, SO_BROADCAST, (const char*)&on, sizeof on);
+#ifdef _WIN32
+    u_long nonblocking = 1;
+    ioctlsocket(beacon, FIONBIO, &nonblocking);
+#else
+    fcntl(beacon, F_SETFL, fcntl(beacon, F_GETFL, 0) | O_NONBLOCK);
+#endif
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_ANY);
+    a.sin_port = htons(port);
+    if (bind(beacon, (struct sockaddr*)&a, sizeof a) != 0) { net_beacon_close(); return 0; }
+    return 1;
+}
+
+void net_beacon_close(void) {
+    if (beacon != BAD_SOCKET) close_socket(beacon);
+    beacon = BAD_SOCKET;
+}
+
+int net_beacon_send(uint16_t port, const void* data, size_t size) {
+    Socket s = beacon != BAD_SOCKET ? beacon : sock;
+    if (s == BAD_SOCKET) return 0;
+    int on = 1;
+    setsockopt(s, SOL_SOCKET, SO_BROADCAST, (const char*)&on, sizeof on);
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof a);
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+    a.sin_port = htons(port);
+    return sendto(s, (const char*)data, (int)size, 0, (struct sockaddr*)&a, sizeof a) == (int)size;
+}
+
+int net_beacon_receive(NetAddr* from, void* data, size_t size) {
+    if (beacon == BAD_SOCKET) return 0;
+    struct sockaddr_in a;
+#ifdef _WIN32
+    int len = sizeof a;
+#else
+    socklen_t len = sizeof a;
+#endif
+    const int n = (int)recvfrom(beacon, (char*)data, (int)size, 0, (struct sockaddr*)&a, &len);
+    if (n <= 0) return 0;
+    from->ip = ntohl(a.sin_addr.s_addr);
+    from->port = ntohs(a.sin_port);
+    return n;
+}
 
 void net_format(const NetAddr* a, char* out, size_t size) {
     snprintf(out, size, "%u.%u.%u.%u:%u", (unsigned)(a->ip >> 24), (unsigned)(a->ip >> 16 & 255),
