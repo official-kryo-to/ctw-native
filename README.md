@@ -41,9 +41,11 @@ See [CONTROLS.md](CONTROLS.md) for the keys.
 Press **F4** in the game for the mod menu. A mod can contain texture changes, a C or C++ DLL, or both in one folder.
 The bundled **Enhancements** mod adds a third-person camera (**V**, then the mouse) and PSP-style lighting. See the [modding guide](ctw-modkit/README.md).
 
-**Play together:** the bundled **Multiplayer** mod puts up to eight players in one city. Press **Esc** and
+**Play together:** the bundled **Multiplayer** mod supports configurable rooms of 2–32 players (16 by default),
+with shared cars, NPCs and explosions, passenger seats and lettered minimap markers. Press **Esc** and
 **MULTIPLAYER**: host a game, or join one from the online list, your network or an address. Online games go through
 CTW Online, so nobody has to open ports. **T** chats. See [playing together](ctw-modkit/README.md#playing-together).
+You can also run your own list and relay on a free Cloudflare account in a few minutes: see [online/](online/README.md).
 
 ## Build from source
 

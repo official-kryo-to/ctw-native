@@ -221,6 +221,7 @@ uint8_t Pedestrians::moneyTier(int affluence, uint8_t current) {   // cPed::Asso
 }
 
 void Pedestrians::dropGoodies(Game& g, Ped& p) {   // cPed::DropGoodiesWhenDead
+    if (g.multiplayerWorld.client()) { p.dropPending = false; return; }
     // (+0x338 bit 9, set by cPed::Reset, lets it happen in the air too) not before the body has slowed to a unit a
     // second; nothing while the player's cPlayer +0x118A is set (never, here)
     const int64_t speed2 = (int64_t)p.body.vel[0] * p.body.vel[0] + (int64_t)p.body.vel[1] * p.body.vel[1] +
@@ -415,7 +416,7 @@ void Pedestrians::collect(Game& g) {
 void Pedestrians::spawn(Game& g, int type, const Traffic::ZoneInfo& z) {
     int32_t pos[3];
     NodeRef from, to;
-    if (!g.localArea.createPosition(g, g.player.pos, kSpawnRadius, pos, from, to)) return;
+    if (!g.localArea.createPosition(g, g.populationPosition(), kSpawnRadius, pos, from, to)) return;
     Ped p;
     if (!appearance(g,p,type,z)) return;
     std::copy(pos, pos + 3, p.body.pos);
@@ -481,6 +482,12 @@ bool Pedestrians::exitOccupant(Game& g, Vehicle& car, int seat, bool forgetTraff
     if(car.seatUser[seat]==-1) return true;
     if(car.seatUser[seat]<0) return false;
     for(Ped& p:peds) if(p.uid==(uint32_t)car.seatUser[seat] && p.vehicle==car.uid) {
+        if (p.puppet.world) { // a host NPC replica may be jacked; the host validates the driver's claim
+            int32_t door[3]; car.doorSpawnPoint(seat, door); car.localToWorld(door, p.body.pos);
+            p.vehicle = p.puppet.vehicle = 0; p.seat = -1;
+            p.body.hidden = p.body.attached = false; car.seatUser[seat] = -1;
+            return true;
+        }
         if(p.exiting || p.puppet.on) return false;   // (another player cannot be pulled out of his vehicle)
         p.exiting=true; p.body.hidden=false;
         car.seatOffset(seat,p.seatPosition); p.seatPosition[2]-=0x2800;
@@ -742,6 +749,8 @@ void Pedestrians::meleeHit(Game& g, Ped& p, int damage, int type, const int32_t 
     if (p.vehicle || p.deadFrames >= 0 || p.body.dead) return;   // CanBeHit: alive, not in a closed vehicle
     if (p.puppet.on) {   // another player: their own game takes the damage the player does
         if (fromPlayer) { p.puppet.damage += damage; g.addBlood(p.body.pos, 1); }
+        else if (!p.puppet.world && g.multiplayerWorld.role() == CTW_MULTIPLAYER_HOST && damage > 0)
+            p.puppet.worldDamage += std::min(damage, 65535 - p.puppet.worldDamage);
         return;
     }
     const int d = damage && 100 * damage < 100 ? 1 : 100 * damage / 100;   // FixDamageForArmour (cPed::Reset: 100)
@@ -774,6 +783,8 @@ void Pedestrians::bulletHit(Game& g, Ped& p, int damage, const int32_t dir[3], i
     if (p.vehicle || p.deadFrames >= 0 || p.body.dead) return;   // CanBeHit: alive, not in a closed vehicle
     if (p.puppet.on) {   // another player: their own game takes the damage the player does
         if (fromPlayer) { g.stats.incBulletsThatHit(); p.puppet.damage += damage; g.addBlood(p.body.pos, 5); }
+        else if (!p.puppet.world && g.multiplayerWorld.role() == CTW_MULTIPLAYER_HOST && damage > 0)
+            p.puppet.worldDamage += std::min(damage, 65535 - p.puppet.worldDamage);
         return;
     }
     if (fromPlayer) g.stats.incBulletsThatHit();   // the player's bullets (types 1 and 2)
@@ -1035,6 +1046,13 @@ void Pedestrians::wander(Game& g, Ped& p) {   // Native wander processing (0x721
 }
 
 void Pedestrians::update(Game& g) {
+    if (g.multiplayerWorld.client()) {
+        for (Ped& p : peds) if (p.puppet.on) {
+            puppetStep(g, p);
+            if (!p.vehicle && !p.body.dead) p.body.advance(&g.collision, false);
+        }
+        return;
+    }
     // still, upright vehicles are boxes for walking peds (as for the player in Game::tick)
     std::vector<Collision::Box> still;
     for (const Vehicle& c : g.cars) {
@@ -1083,7 +1101,9 @@ void Pedestrians::update(Game& g) {
     int32_t f[3];
     g.focus(f);
     peds.erase(std::remove_if(peds.begin(), peds.end(), [&](const Ped& p) {
-        return !p.vehicle && !p.puppet.on && dist2(p.body.pos, f) >= kRemoveDist2 && !g.view.canSee(p.body.pos, 0x2000);
+        return !p.vehicle && !p.puppet.on && dist2(p.body.pos, f) >= kRemoveDist2 &&
+               !(g.multiplayerWorld.role() == CTW_MULTIPLAYER_HOST && g.multiplayerWorld.nearPlayer(g, p.body.pos, 100 * 4096)) &&
+               !g.view.canSee(p.body.pos, 0x2000) && !g.multiplayerWorld.seenByOthers(g, p.body.pos, 0x2000);
     }), peds.end());
 }
 
@@ -1178,19 +1198,31 @@ bool Pedestrians::removePuppet(Game& g, uint32_t uid) {
 
 void Pedestrians::puppetStep(Game& g, Ped& p) {
     Ped::Puppet& t = p.puppet;
-    // into, out of or between vehicles: it takes the driver's seat (a puppet's own vehicle, made by the mod)
-    if (p.vehicle != t.vehicle) {
+    // A shared vehicle has one identity and independent occupants in its actual seats.
+    if (p.vehicle != t.vehicle || p.seat != t.seat) {
         for (Vehicle& car : g.cars)
-            if (car.uid == p.vehicle && car.seatUser[0] == (int)p.uid) car.seatUser[0] = -1;
+            if (car.uid == p.vehicle && p.seat >= 0 && p.seat < 4 && car.seatUser[p.seat] == (int)p.uid)
+                car.seatUser[p.seat] = -1;
         p.vehicle = 0; p.seat = -1;
         p.body.hidden = p.body.attached = false;
         for (Vehicle& car : g.cars) {
-            if (car.uid != t.vehicle || car.dead() || (car.seatUser[0] != -1 && car.seatUser[0] != (int)p.uid)) continue;
-            car.seatUser[0] = (int)p.uid;
-            p.vehicle = car.uid; p.seat = 0;
-            car.seatOffset(0, p.seatPosition);
+            if (car.uid != t.vehicle || car.dead() || t.seat < 0 || t.seat >= car.numSeats() || t.seat >= 4) continue;
+            if (car.seatUser[t.seat] >= 0 && car.seatUser[t.seat] != (int)p.uid && !t.world) {
+                Ped* npc = find((uint32_t)car.seatUser[t.seat]);
+                if (npc && (!npc->puppet.on || npc->puppet.world)) {
+                    int32_t door[3]; car.doorSpawnPoint(t.seat, door); car.localToWorld(door, npc->body.pos);
+                    npc->vehicle = npc->puppet.vehicle = 0; npc->seat = -1;
+                    npc->body.hidden = npc->body.attached = false; npc->exiting = false;
+                    car.seatUser[t.seat] = -1;
+                    g.traffic.forget(car.uid);
+                }
+            }
+            if (car.seatUser[t.seat] != -1 && car.seatUser[t.seat] != (int)p.uid) continue;
+            car.seatUser[t.seat] = (int)p.uid;
+            p.vehicle = car.uid; p.seat = t.seat;
+            car.seatOffset(t.seat, p.seatPosition);
             p.body.hidden = p.body.attached = true;   // a rider is drawn on his bike by the game (Game::render)
-            car.engineOn = true;
+            if (g.multiplayerWorld.role() == CTW_MULTIPLAYER_OFF) car.engineOn = true;
         }
         if (!p.vehicle) std::copy(t.target, t.target + 3, p.body.pos);   // out: where its game says
     }

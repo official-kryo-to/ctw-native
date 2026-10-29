@@ -45,7 +45,7 @@ int g_clicks = 0;
 float g_wheel = 0, g_dx = 0, g_dy = 0;
 std::string g_text;
 bool g_captureRequested = false;
-// Plugins_ClaimMouseRect: the UI rectangles of the rendered frame being drawn, and whether each button's current press
+// claim_mouse_rect: the UI rectangles of the rendered frame being drawn, and whether each button's current press
 // began on one (then the game does not see that button until it is released)
 struct ClaimRect { float x, y, w, h; };
 std::vector<ClaimRect> g_claims;
@@ -275,6 +275,9 @@ const CtwHostApi& Plugins_HostApi() {
     static const bool filled = [] {
         GameplayApi_Fill(g_host); g_host.on_game_event = h_on_event;
         g_host.consume_mouse_wheel = [] { g_wheelConsumed = true; };
+        g_host.claim_mouse_rect = Plugins_ClaimMouseRect;
+        g_host.draw_ui_text = Hud_UiText;
+        g_host.ui_text_width = Hud_UiTextWidth;
         g_host.add_pause_button = [](const char* label, CtwCallback fn, void* user) -> int {
             if (!label || !*label || !fn || g_pauseButtons.size() >= 8) return 0;
             g_pauseButtons.push_back({std::string(label).substr(0, 40), fn, user, true});
@@ -284,13 +287,35 @@ const CtwHostApi& Plugins_HostApi() {
             if (id >= 1 && id <= (int)g_pauseButtons.size()) g_pauseButtons[(size_t)id - 1].visible = visible != 0;
         };
         g_host.set_radar_blip = [](int id, const float* xyz, uint32_t rgba) -> int {
-            if (id < 1 || id > 0xFFFF || !xyz || !std::isfinite(xyz[0]) || !std::isfinite(xyz[1]) || !std::isfinite(xyz[2]))
-                return 0;
+            if (id < 1 || id > 0xFFFF || !xyz) return 0;
+            for (int k = 0; k < 3; ++k) if (!std::isfinite(xyz[k]) || std::abs(xyz[k]) > 32768.f) return 0;
             const int32_t at[3] = {(int32_t)(xyz[0] * 4096.f), (int32_t)(xyz[1] * 4096.f), (int32_t)(xyz[2] * 4096.f)};
+            for (auto& blip : TheGame().blips) if (blip.id == Game::kPluginBlips + id) {
+                std::copy(at, at + 3, blip.pos);
+                blip.colour = rgba;
+                return 1;
+            }
             TheGame().addBlip(at, rgba, Game::kPluginBlips + id);
             return 1;
         };
         g_host.remove_radar_blip = [](int id) { if (id >= 1 && id <= 0xFFFF) TheGame().removeBlip(Game::kPluginBlips + id); };
+        g_host.set_radar_blip_label = [](int id, const char* label) -> int {
+            if (id < 1 || id > 0xFFFF) return 0;
+            char shortLabel[3]{};
+            if (label) for (int k = 0; k < 3; ++k) {
+                char c = label[k];
+                if (!c) break;
+                if (k == 2) return 0;
+                if (c >= 'a' && c <= 'z') c -= 'a' - 'A';
+                if (!(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9')) return 0;
+                shortLabel[k] = c;
+            }
+            for (auto& blip : TheGame().blips) if (blip.id == Game::kPluginBlips + id) {
+                std::copy(shortLabel, shortLabel + 3, blip.label);
+                return 1;
+            }
+            return 0;
+        };
         g_host.on_frame_begin = [](CtwCallback fn, void* u) { if (fn) g_frame.push_back({fn, u}); };
         g_host.load_character_model = [](const char* dff, const char* ifp, const char* textures) -> CtwCharacterModel {
             if (!dff || !ifp || !textures || g_characterModels.size() >= 128 || !g_nextCharacter) return 0;

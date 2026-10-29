@@ -25,6 +25,7 @@ struct CollisionTestAccess {
     }
 };
 struct GameTestAccess { static void arrested(Game& game, bool on) { game.arrested_ = on; } };
+struct PedsTestAccess { static bool police(Game& game) { return game.peds.policeStep(game, game.peds.peds[0]); } };
 struct SoundTestAccess {
     static void prepare() {
         Sound& sound = TheSound(); sound.res_.data.resize(1);
@@ -93,6 +94,31 @@ int main() {
     std::filesystem::create_directories(dir); tables(dir);
     check(Weapons_Init(dir.string()), "synthetic weapon tables load");
     Game game; check(game.wanted.init(dir.string()), "synthetic wanted table makes accidental player crimes observable");
+    scene(game); game.multiplayerWorld.setRole(game, CTW_MULTIPLAYER_HOST);
+    game.wanted.setLevel(2, false, true);
+    check(PedsTestAccess::police(game), "wanted police execute their weapon task");
+    CtwWorldPed police{}; police.size = sizeof police;
+    check(game.multiplayerWorld.getPed(game, 0, &police) && police.weapon == 5 &&
+          (police.flags & CTW_PUPPET_FIRING), "police task publishes its active pistol and firing state");
+    game.wanted.setLevel(0, false, true); PedsTestAccess::police(game);
+    police.size = sizeof police;
+    check(game.multiplayerWorld.getPed(game, 0, &police) && !(police.flags & CTW_PUPPET_FIRING),
+          "police stop publishing firing when pursuit ends");
+    scene(game); game.player.pos[1] = 100 * 4096;
+    const int32_t target[3] = {0, 10 * 4096, 0};
+    auto remote = game.peds.spawnPuppet(game, target, 0, 1, 0, 0);
+    Weapon hostGun = pistol();
+    Weapons_NpcFrame(game, game.peds.peds[0].body, hostGun, true, 41);
+    check(game.peds.find(remote)->puppet.worldDamage == 20 && !game.peds.find(remote)->puppet.damage,
+          "host NPC bullet queues damage for the remote player without entering the PvP queue");
+    scene(game); game.player.pos[1] = 100 * 4096;
+    const int32_t nearTarget[3] = {0, 2 * 4096, 0};
+    remote = game.peds.spawnPuppet(game, nearTarget, 0, 1, 0, 0);
+    Weapon fists(0); fists.ammo = -1; fists.reload();
+    Weapons_NpcFrame(game, game.peds.peds[0].body, fists, true, 41);
+    check(game.peds.find(remote)->puppet.worldDamage == 10 && !game.peds.find(remote)->puppet.damage,
+          "host NPC melee queues damage for the remote player without entering the PvP queue");
+    game.multiplayerWorld.setRole(game, CTW_MULTIPLAYER_OFF);
     Player& cop = scene(game);
     game.playerWeapons.give(5, 17, true);
     Weapon& playerWeapon = *game.playerWeapons.current();

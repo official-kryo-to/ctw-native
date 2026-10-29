@@ -19,7 +19,7 @@
 #include <stddef.h>
 #include "ctw_types.h"
 
-#define CTW_PLUGIN_API_VERSION 13
+#define CTW_PLUGIN_API_VERSION 16
 #define CTW_HOST_HAS(api, member) ((api) && (api)->size >= offsetof(CtwHostApi, member) + sizeof((api)->member) && (api)->member)
 
 #ifdef _WIN32
@@ -230,6 +230,52 @@ typedef struct CtwHostApi {
        an id again moves it; remove_radar_blip takes it off. Ids are the plugin's own (1..65535). */
     int (*set_radar_blip)(int id, const float xyz[3], uint32_t rgba);
     void (*remove_radar_blip)(int id);
+    /* Version 14: host-owned city entities and shared vehicle seats. Index getters return 0 at end.
+       Client mode removes local ambient entities and disables their independent simulation/generation.
+       OFF releases replicas. Apply/remove functions must only receive authenticated host state. */
+    int (*set_multiplayer_world)(int role);
+    int (*get_world_vehicle)(int index, CtwWorldVehicle* out);
+    int (*set_world_vehicle)(const CtwWorldVehicle* state);
+    CtwVehicle (*world_vehicle_handle)(uint32_t id);
+    uint32_t (*world_vehicle_id)(CtwVehicle vehicle);
+    int (*remove_world_vehicle)(uint32_t id);
+    int (*get_world_ped)(int index, CtwWorldPed* out); /* excludes player puppets */
+    int (*set_world_ped)(const CtwWorldPed* state);
+    int (*remove_world_ped)(uint32_t id);
+    int (*take_world_explosion)(CtwWorldExplosion* out); /* drains locally generated effects */
+    int (*add_world_explosion)(const CtwWorldExplosion* state); /* replay, without recapture */
+    int (*get_player_seat)(void); /* -1 on foot; 0 driver; 1..3 passenger */
+    int (*set_player_seat)(CtwVehicle vehicle, int seat); /* authenticated seat assignment; vehicle 0 exits */
+    int (*set_puppet_seat)(CtwPuppet puppet, int seat);
+    int (*set_radar_blip_label)(int id, const char* label); /* 0..2 ASCII letters/digits; NULL/empty clears */
+    int (*take_world_ped_damage)(uint32_t id); /* drains damage dealt locally to an NPC replica */
+    int (*damage_world_ped)(uint32_t id, int amount); /* host only; validated transport damage 1..255 */
+    int (*vehicle_seat_count)(CtwVehicle vehicle); /* 0 invalid; available seats including the driver */
+    int (*adopt_world_vehicle)(CtwVehicle local, uint32_t host_id); /* client: map an existing car to its accepted host ID */
+    int (*get_vehicle_visual)(CtwVehicle vehicle, CtwVehicleVisual* out);
+    int (*set_vehicle_visual)(CtwVehicle vehicle, const CtwVehicleVisual* state);
+    int (*get_puppet_position)(CtwPuppet puppet, float xyz[3]); /* rendered position inside HUD callbacks */
+    CtwVehicle (*get_player_vehicle_task)(int* seat); /* enter/exit target, 0 when no task */
+    /* This rendered frame, (x, y, w, h) in screen pixels is your UI: a mouse button pressed there is yours, the game
+     * does not fire or throw with it until it is released. Call it each frame from on_hud. */
+    void (*claim_mouse_rect)(float x, float y, float w, float h);
+    int (*take_world_skid)(CtwSkidPoint* out);
+    int (*add_world_skid)(const CtwSkidPoint* point);
+    int (*get_world_pickup)(int index, CtwWorldPickup* out);
+    int (*set_world_pickup)(const CtwWorldPickup* state);
+    int (*remove_world_pickup)(uint32_t id);
+    uint32_t (*take_world_pickup_claim)(void);
+    int (*claim_world_pickup)(uint32_t id, const int32_t position[3], int in_vehicle, CtwWorldPickup* out);
+    int (*grant_world_pickup)(const CtwWorldPickup* state);
+    int (*take_puppet_world_damage)(CtwPuppet puppet);
+    /* The view this game's on-screen tests use. A host also tests another player's view (set on their puppet;
+     * NULL forgets it): cars and people one of them can see behave as seen, and nothing appears in their sight. */
+    int (*get_view)(CtwView* out);
+    int (*set_puppet_view)(CtwPuppet puppet, const CtwView* view);
+    /* The interface typeface (Kryoto's, as the Porter is set): px is the font size in pixels, tracking the letter
+     * spacing in em, style CTW_TEXT_BOLD | CTW_TEXT_UPPER. y is the top of a line box 1.5 px high. */
+    void (*draw_ui_text)(float x, float y, float px, float tracking_em, int style, uint32_t rgba, const char* utf8);
+    float (*ui_text_width)(float px, float tracking_em, int style, const char* utf8);
 } CtwHostApi;
 
 /* Exported by a plugin DLL. Return 0 from ctw_plugin_init to stay loaded. */

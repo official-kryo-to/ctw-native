@@ -171,7 +171,7 @@ int main(int argc, char** argv) {
     check(events() == 1 && ticks() == 1, "disabled mod receives no gameplay events or ticks");
     CtwCharacterPose pose{}; pose.size=sizeof pose; pose.id=42;
     check(characterHook && !characterHook(&pose, characterUser), "disabled mod falls back to original character sprites");
-    check(clickText("Disabled"), "the switch now reads Disabled");
+    check(clickText("Enabled"), "the Enabled check is still there, unticked");
     check(toggles() == 2 && enabled() == 1, "reenabling notifies the same loaded mod");
     check(textureLoads == 2, "reenabling the same mixed mod reapplies its textures");
     eventHook(&e,eventUser); check(events() == 2, "reenabling resumes event delivery");

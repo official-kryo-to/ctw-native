@@ -40,6 +40,16 @@ void burnoutFlame(Game& g, const Vehicle& car, const int32_t at[3]) {   // cFire
 }   // namespace
 
 void Vehicles_AddSkidmarks(Game& g, const Vehicle& car) {
+    int index = -1;
+    for (int i = 0; i < (int)g.cars.size(); ++i) if (g.cars[i].uid == car.uid) { index = i; break; }
+    const bool shared = g.multiplayerWorld.role() != CTW_MULTIPLAYER_OFF;
+    const bool local = !shared || g.multiplayerWorld.simulatesVehicle(g, index);
+    auto mark = [&](uint32_t id, const int32_t* pos, const int32_t* dir, int hold) {
+        if (!local) return;
+        uint32_t strip = 0, sequence = 0;
+        if (TheSkidmarks().addPoint(id, pos, dir, hold, &strip, &sequence) && shared)
+            g.multiplayerWorld.captureSkid(g, car.uid, id - car.uid * 4, strip, sequence, pos, dir, hold);
+    };
     const Vehicle::Tyre& front = car.tyre_[0];
     const Vehicle::Tyre& rear = car.tyre_[1];
     const uint32_t rearId = car.uid * 4, frontId = car.uid * 4 + 2;
@@ -51,7 +61,7 @@ void Vehicles_AddSkidmarks(Game& g, const Vehicle& car) {
         if (rear.spinning || rear.rimSparks || car.burnout_ == 3) {
             const int32_t a = rear.axleY << 4;
             for (int k = 0; k < 3; ++k) at[k] = car.pos[k] + ((a * car.fwd[k]) >> 16);
-            TheSkidmarks().addPoint(rearId, at, right, car.burnout_ == 1 ? 4 : 1);
+            mark(rearId, at, right, car.burnout_ == 1 ? 4 : 1);
             if (car.burnout_ == 3) {
                 const int32_t flame[3] = {at[0], at[1], at[2] + 0x400};
                 burnoutFlame(g, car, flame);
@@ -72,7 +82,7 @@ void Vehicles_AddSkidmarks(Game& g, const Vehicle& car) {
         if (front.spinning || front.rimSparks) {
             const int32_t a = front.axleY << 4;
             for (int k = 0; k < 3; ++k) at[k] = car.pos[k] + ((a * car.fwd[k]) >> 16);
-            TheSkidmarks().addPoint(frontId, at, right, 1);
+            mark(frontId, at, right, 1);
             if (front.spinning && Rand32Critical(3) == 1) g.addSkidSmoke(at, upFront, false);
             if (front.rimSparks) rimSpark(g, at);
         }
@@ -95,8 +105,8 @@ void Vehicles_AddSkidmarks(Game& g, const Vehicle& car) {
         if (rear.onGround) {
             int32_t d[3] = {r[0] - l[0], r[1] - l[1], r[2] - l[2]};
             Normalise3(d);
-            TheSkidmarks().addPoint(rearId, r, d, hold);
-            TheSkidmarks().addPoint(rearId + 1, l, d, hold);
+            mark(rearId, r, d, hold);
+            mark(rearId + 1, l, d, hold);
         }
         if (car.burnout_ == 3 || (car.b64_ & 0x100)) {
             burnoutFlame(g, car, l);
@@ -122,8 +132,8 @@ void Vehicles_AddSkidmarks(Game& g, const Vehicle& car) {
     if (front.spinning || front.rimSparks) {
         if (!computed) computeLateral();
         axlePoints(car, front.axleY, lateral, r, l);
-        TheSkidmarks().addPoint(frontId, r, right, 1);
-        TheSkidmarks().addPoint(frontId + 1, l, right, 1);
+        mark(frontId, r, right, 1);
+        mark(frontId + 1, l, right, 1);
         if (front.spinning) {
             if (Rand32Critical(3) == 1) g.addSkidSmoke(r, upFront, false);
             if (Rand32Critical(3) == 1) g.addSkidSmoke(l, upFront, false);

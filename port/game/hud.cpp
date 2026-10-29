@@ -3,14 +3,19 @@
 // See LICENSE in the repository root.
 #include "hud.h"
 #include "gfx/font.h"
+#include "gfx/uifont.h"
 #include "os/gamefs.h"
 #include <glad/gl.h>
 #include <vector>
 
 static BitmapFont g_font;
 static bool g_fontOk = false;
+extern const uint8_t kUiFont_regular[], kUiFont_bold[];   // generated/uifonts.cpp
+extern const size_t kUiFont_regular_size, kUiFont_bold_size;
 
 bool Hud_Init(const std::string& dataDir) {
+    if (kUiFont_regular_size) UiFont::load(0, kUiFont_regular, kUiFont_regular_size);
+    if (kUiFont_bold_size) UiFont::load(1, kUiFont_bold, kUiFont_bold_size);
     GameFs fs;
     std::vector<uint8_t> bin;
     if (fs.open(dataDir) && fs.read("IPhone_Hel_16x16.bin", bin)) g_fontOk = g_font.load(bin, dataDir + "/iphone_hel_16x16.png");
@@ -72,6 +77,26 @@ void Hud_Text16(float x, float y, float scale, uint32_t rgba, const std::u16stri
 
 float Hud_TextWidth(const std::string& utf8, float scale) {
     return g_fontOk ? g_font.textWidth(Hud_Utf8To16(utf8)) * scale : 0.f;
+}
+
+static std::string upperAscii(const char* s) {
+    std::string out(s);
+    for (char& c : out) if (c >= 'a' && c <= 'z') c = (char)(c - 32);
+    return out;
+}
+
+void Hud_UiText(float x, float y, float px, float trackingEm, int style, uint32_t rgba, const char* utf8) {
+    if (!utf8) return;
+    if (UiFont::ok()) { UiFont::draw(x, y, px, trackingEm, style, rgba, utf8); return; }
+    const float scale = px / 12.f;   // the game font's 16-pixel cell, about a 12-pixel face
+    Hud_Text(x, y + (UiFont::lineHeight(px) - Hud_LineHeight(scale)) * 0.5f, scale, rgba,
+             style & UiFont::Upper ? upperAscii(utf8) : std::string(utf8));
+}
+
+float Hud_UiTextWidth(float px, float trackingEm, int style, const char* utf8) {
+    if (!utf8) return 0.f;
+    if (UiFont::ok()) return UiFont::width(px, trackingEm, style, utf8);
+    return Hud_TextWidth(style & UiFont::Upper ? upperAscii(utf8) : std::string(utf8), px / 12.f);
 }
 
 float Hud_LineHeight(float scale) { return (g_fontOk ? g_font.lineHeight() : 16) * scale; }

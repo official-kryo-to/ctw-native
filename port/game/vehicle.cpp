@@ -378,6 +378,8 @@ int32_t Vehicle::impactTerm(const int32_t n[3], const int32_t r[3]) const {   //
 
 // ============================================================================================== driving
 void Vehicle::act(const Controls& yIn, bool playerDriving, Collision* col) {
+    visualFrameOffset_ = 0;
+    visualSource_ = 0;
     playerDriving_ = playerDriving;
     Controls y = dead_ ? Controls{} : yIn;   // a wreck does not drive
     // Engine-off mods retain steering and braking, but cannot apply propulsion in either gear direction.
@@ -1347,12 +1349,14 @@ void Vehicle::openDoor(int seat) {   // cVehicle::OpenDoor
     if (seat < 0 || seat > 3 || doorNode_[seat] <= 0) return;
     TheSound().doorEvent(*this, true);
     doors_[seat].mode = 2;
+    localDoors_ |= 1u << seat;
     doorOpenBits_ |= 1 << seat;
 }
 
 void Vehicle::closeDoor(int seat) {   // cVehicle::CloseDoor
     if (seat < 0 || seat > 3 || doorNode_[seat] <= 0) return;
     doors_[seat].mode = 1;
+    localDoors_ |= 1u << seat;
 }
 
 void Vehicle::setDoorClosed(int seat) {   // cVehicle::SetDoorClosed
@@ -1360,11 +1364,13 @@ void Vehicle::setDoorClosed(int seat) {   // cVehicle::SetDoorClosed
     doors_[seat].angle = 0;
     doors_[seat].speed = 0;
     doorOpenBits_ &= ~(1 << seat);
+    localDoors_ &= ~(1u << seat);
 }
 
-void Vehicle::updateDoors() {   // cVehicle::UpdateDoorMatrices -> cVehicleDoor::Update (max angles DAT_0058718e)
+void Vehicle::updateDoors(uint32_t mask) {   // cVehicle::UpdateDoorMatrices -> cVehicleDoor::Update (max angles DAT_0058718e)
     flapDoors();
     for (int i = 0; i < 5; ++i) {
+        if (!(mask & (1u << i))) continue;
         if(debris_[i].detached) continue;
         Door& d = doors_[i];
         uint16_t max = TheGameplayTables().doorMax[i];
@@ -1409,7 +1415,7 @@ void Vehicle::localToWorld(const int32_t l[3], int32_t o[3]) const {
 }
 
 // ============================================================================================== body sway
-void Vehicle::processAlways() { updateSuspension(); updateDoors(); }   // (Vehicles_AddSkidmarks follows)
+void Vehicle::processAlways(bool remote) { updateSuspension(); updateDoors(remote ? localDoors_ : 31); }   // (Vehicles_AddSkidmarks follows)
 
 void Vehicle::updateSuspension() {   // cWheeledVehicle::UpdateSuspension (every frame)
     int32_t inRoll = swayRollV_, inPitch = swayPitchV_;
@@ -1550,6 +1556,18 @@ void Vehicle::setHealthBelowSmoke(unsigned health) {
     if (health_ >= 0x1F) burnTimer_ = 0x1E0;
 }
 
+void Vehicle::setReplicatedHealth(int health, bool dead) {
+    const bool wasDead = dead_;
+    health_ = (uint8_t)std::clamp(health, 0, 255);
+    const bool destroyed = dead || !health_;
+    if (destroyed && !wasDead) setDead(); // initialize the same wreck effects as the authority
+    else if (!destroyed && wasDead) releaseEffects();
+    dead_ = destroyed;
+    justDied = false; // the host's explosion event supplies the one shared blast
+    if (dead_) engineOn = false;
+    if (health_ >= 0x1F) burnTimer_ = 0x1E0;
+}
+
 bool Vehicle::repair() {
     if (dead_) return false;
     health_ = 0xFF;
@@ -1608,7 +1626,7 @@ void Vehicle::checkForDriverFallingOut() {   // cVehicle::CheckForDriverFallingO
     knockOff.dir[0] = -fwd[0]; knockOff.dir[1] = -fwd[1]; knockOff.dir[2] = 0;
 }
 
-void Vehicle::processDamage(uint32_t frame) {   // the damage part of cVehicle::Process (+ cSmoke::Process)
+void Vehicle::processDamage(uint32_t frame, bool authoritative) {   // the damage part of cVehicle::Process (+ cSmoke::Process)
     if (!dead_) {
         if (health_ < 0xBE) {   // smoke from the engine: 3/4 of the way to the front, 1 unit up
             if (!smoke_) {
@@ -1629,11 +1647,11 @@ void Vehicle::processDamage(uint32_t frame) {   // the damage part of cVehicle::
                 }
             }
         } else if (smoke_) { TheParticles().remove(smoke_); smoke_ = nullptr; }
-        if (health_ < 0x1F) {   // burning: blows up when the timer runs out (8 seconds)
+        if (authoritative && health_ < 0x1F) {   // only the authority advances burning/death
             if (burnTimer_ != 0) burnTimer_ = (int16_t)(burnTimer_ - 2);
             else { health_ = 0; setDead(); }
         }
-    } else if (burnTimer_ > 0) burnTimer_ = (int16_t)(burnTimer_ - 2);
+    } else if (authoritative && burnTimer_ > 0) burnTimer_ = (int16_t)(burnTimer_ - 2);
     if (health_ < 0x1F && burnTimer_ > 0) {
         int32_t offset[3] = {0, dead_ ? 0 : (hy * 3) / 4, dead_ ? 0x400 : 0x1000}, p[3];
         localToWorld(offset, p);
@@ -1655,6 +1673,7 @@ void Vehicle::processDamage(uint32_t frame) {   // the damage part of cVehicle::
 
 // ============================================================================================== lights
 void Vehicle::renderLights(const WorldCamera& cam, uint32_t frame, bool night, Collision* col) const {
+    frame = visualFrame(frame);
     if (dead_) return;
     bool driver = engineOn;
     auto world = [&](int32_t x, int32_t y, int32_t z, float out[3]) {
@@ -1682,7 +1701,7 @@ void Vehicle::renderLights(const WorldCamera& cam, uint32_t frame, bool night, C
     }
     if (siren) renderRoofLights(cam, frame);
     if ((driver && indicators) || (!driver && indicators == 3)) {   // blinking, 8 frames on / 8 off
-        if (8 < ((frame + uid) & 0xF)) {
+        if (8 < ((frame + visualSource()) & 0xF)) {
             float p[3];
             if (indicators & 1) {
                 world(-0x199 - rx, ry - 0x333, rz + 0x333, p);
@@ -1830,7 +1849,7 @@ void Vehicle::render(const Model* m) const {
 // the headlamps with blue and red bursts; the fire truck (6) red and white, 8 red and grey, 13 a steady amber, 34
 // blue and red, and the rest magenta and green.
 void Vehicle::renderRoofLights(const WorldCamera& cam, uint32_t frame) const {
-    const uint32_t t = frame + uid * 7;   // (the original offsets the clock by the vehicle's pool slot)
+    const uint32_t t = frame + visualSource() * 7;   // shared source slot preserves the siren pattern
     int32_t x = roof_[0], y = roof_[1], z = roof_[2];
     int colour = 0x7FFF, size = 0x1000, side = 1;   // side: -1 left, 1 right, 0 middle
     switch (infoId) {

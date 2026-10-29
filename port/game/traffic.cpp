@@ -122,6 +122,7 @@ bool Traffic::createPos(Game& g, int network, int& a, int& b, int32_t pos[3], in
     const int64_t playerSpeed2 = (int64_t)g.player.vel[0]*g.player.vel[0] +
         (int64_t)g.player.vel[1]*g.player.vel[1] + (int64_t)g.player.vel[2]*g.player.vel[2];
     const bool slowPlayer = playerSpeed2 < (int64_t)(20*4096)*(20*4096);
+    const int32_t* population = g.populationPosition();
     int32_t centre[3]; g.focus(centre);
     struct Candidate { int a = -1, b = -1; int32_t pos[3]{}; } best;
     int64_t bestDistance = 0xF4240000000LL;
@@ -153,8 +154,8 @@ bool Traffic::createPos(Game& g, int network, int& a, int& b, int32_t pos[3], in
                         int64_t along=0, lowForward=0, highForward=0;
                         for (int k=0;k<3;++k) {
                             along += (int64_t)g.player.fwd[k]*direction[k];
-                            lowForward += (int64_t)g.player.fwd[k]*(low[k]-g.player.pos[k]);
-                            highForward += (int64_t)g.player.fwd[k]*(high[k]-g.player.pos[k]);
+                            lowForward += (int64_t)g.player.fwd[k]*(low[k]-population[k]);
+                            highForward += (int64_t)g.player.fwd[k]*(high[k]-population[k]);
                         }
                         if (lowForward > 0) useLo = useLo && (along < 0 ? slowPlayer : !slowPlayer);
                         if (highForward > 0 && (along < 0 ? !slowPlayer : slowPlayer)) useHi = false;
@@ -162,7 +163,7 @@ bool Traffic::createPos(Game& g, int network, int& a, int& b, int32_t pos[3], in
                     if (useLo || useHi) {
                         const int t = useLo ? (useHi && Rand16Critical(2) ? hi : lo) : hi;
                         int32_t point[3];position(t,point);
-                        bool clear = !g.view.canSee(point,0x5000);
+                        bool clear = !g.view.canSee(point,0x5000) && !g.multiplayerWorld.seenByOthers(g,point,0x5000);
                         for (const auto& car : g.cars) {
                             const int64_t dx=(int64_t)car.pos[0]-point[0],dy=(int64_t)car.pos[1]-point[1];
                             if (dx*dx+dy*dy < (int64_t)0x5000*0x5000) { clear=false;break; }
@@ -170,7 +171,7 @@ bool Traffic::createPos(Game& g, int network, int& a, int& b, int32_t pos[3], in
                         if (clear) {
                             int64_t metric=0, projection=0;
                             for (int k=0;k<3;++k) {
-                                const int64_t d=(int64_t)g.player.pos[k]-A[k];
+                                const int64_t d=(int64_t)population[k]-A[k];
                                 metric += d*d; projection += direction[k]*d;
                             }
                             projection >>= 12;

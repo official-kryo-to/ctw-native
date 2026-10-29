@@ -206,6 +206,86 @@ bool Pickups::collect(Game& g, Pickup& p) {
     return false;   // (the phone's swap box)
 }
 
+bool Pickups::eligible(const Game& g, const Pickup& p) const {
+    if (p.type == Money) return p.amount > 0;
+    if (p.type == Health) return g.player.health <= 126;
+    if (p.type == Armour) return g.player.armour <= 126;
+    if (p.type == Bribe) return g.wanted.level() != 0;
+    const int weapon = weaponFromType(p.type);
+    if (!weapon || !Weapons_Ok()) return false;
+    const WeaponManager& w = g.playerWeapons;
+    const int slot = Weapons_Info(weapon).slot;
+    const Weapon* carried = w.inSlot(slot);
+    if (!carried || !carried->ammoCount()) return true;
+    if (carried->type == weapon) return carried->ammoCount() != Weapons_Info(weapon).maxAmmo;
+    return (unsigned)(slot - 2) <= 3;
+}
+
+int Pickups::getWorld(int index, CtwWorldPickup* out) const {
+    if (!out || out->size < sizeof(*out) || index < 0) return 0;
+    for (const Pickup& p : pickups_) {
+        if (p.state != 0) continue;
+        if (index-- != 0) continue;
+        *out = {}; out->size = sizeof(*out); out->id = p.uid; out->type = p.type;
+        out->amount = p.amount; std::copy(p.pos, p.pos + 3, out->position); out->in_vehicle = p.inVehicle;
+        return 1;
+    }
+    return 0;
+}
+
+int Pickups::setWorld(Game& g, const CtwWorldPickup* s) {
+    if (!g.multiplayerWorld.client() || !s || s->size < sizeof(*s) || !s->id || s->amount < 0 ||
+        s->in_vehicle > 1 || (s->type != Money && typeInfo(s->type).texture < 0)) return 0;
+    for (Pickup& p : pickups_) if (p.uid == s->id) return 1;
+    if (freeSlots() <= 0) return 0;
+    Pickup item;
+    item.uid = s->id; item.type = s->type; item.amount = s->amount;
+    std::copy(s->position, s->position + 3, item.pos); item.inVehicle = s->in_vehicle != 0;
+    item.cell = cellKey(item.pos);
+    if (item.type == Money) { item.texture = item.amount > 99 ? 0x22 : 0; item.colour = 0x3E0; }
+    else { const TypeInfo info = typeInfo(item.type); item.texture = info.texture; item.colour = info.colour; }
+    pickups_.push_back(item);
+    return 1;
+}
+
+int Pickups::removeWorld(uint32_t id) {
+    auto it = std::find_if(pickups_.begin(), pickups_.end(), [id](const Pickup& p) { return p.uid == id; });
+    if (it == pickups_.end()) return 0;
+    pickups_.erase(it); return 1;
+}
+
+uint32_t Pickups::takeWorldClaim(const Game& g) const {
+    if (!g.multiplayerWorld.client()) return 0;
+    for (const Pickup& p : pickups_)
+        if (p.state == 0 && touching(g, p) == 0 && eligible(g, p)) return p.uid;
+    return 0;
+}
+
+int Pickups::claimWorld(Game& g, uint32_t id, const int32_t pos[3], int inVehicle, CtwWorldPickup* out) {
+    if (g.multiplayerWorld.role() != CTW_MULTIPLAYER_HOST || !pos || !out || out->size < sizeof(*out)) return 0;
+    for (Pickup& p : pickups_) {
+        if (p.uid != id || p.state != 0 || (inVehicle && !p.inVehicle)) continue;
+        const int64_t reach = inVehicle ? 0x4000 : 0x2000, height = inVehicle ? 0x8000 : 0x4000;
+        if (std::abs((int64_t)pos[0] - p.pos[0]) > reach || std::abs((int64_t)pos[1] - p.pos[1]) > reach ||
+            std::abs((int64_t)pos[2] - p.pos[2]) > height) return 0;
+        *out = {}; out->size = sizeof(*out); out->id = p.uid; out->type = p.type; out->amount = p.amount;
+        std::copy(p.pos, p.pos + 3, out->position); out->in_vehicle = p.inVehicle;
+        if (p.type != Money && (p.ambient || p.type == Health || p.type == Armour || p.type == Bribe)) {
+            p.timer = 0x4650; setState(p, 1); ++p.hidden;
+        } else setState(p, 4);
+        return 1;
+    }
+    return 0;
+}
+
+int Pickups::grantWorld(Game& g, const CtwWorldPickup* s) {
+    if (!g.multiplayerWorld.client() || !s || s->size < sizeof(*s) || !s->id || s->amount < 0 ||
+        (s->type != Money && typeInfo(s->type).texture < 0)) return 0;
+    Pickup p; p.uid = s->id; p.type = s->type; p.amount = s->amount;
+    // The host has already accepted the claim. The grant changes only the recipient's inventory.
+    collect(g, p); return 1;
+}
+
 void Pickups::process(Game& g, Pickup& p) {   // cBasePickup::Process
     switch (p.state) {
     case 0: {
@@ -235,6 +315,7 @@ void Pickups::process(Game& g, Pickup& p) {   // cBasePickup::Process
 }
 
 void Pickups::update(Game& g) {
+    if (g.multiplayerWorld.client()) return; // clients render only host-created replicas
     // cWorld streaming: the sectors around the player; a sector coming in loads its pickups, one going away takes
     // its pickups with it (the entities of a sector are deleted with it)
     int32_t at[3];
@@ -242,8 +323,11 @@ void Pickups::update(Game& g) {
     int cx, cy;
     Collision::cellOfPos(at[0], at[1], cx, cy);
     std::set<int> now;
-    for (int dx = -1; dx <= 1; ++dx)
-        for (int dy = -1; dy <= 1; ++dy) now.insert((cx + dx) * 100 + (cy + dy));
+    for (const auto& center : g.multiplayerWorld.interestCenters(g)) {
+        Collision::cellOfPos(center[0], center[1], cx, cy);
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dy = -1; dy <= 1; ++dy) now.insert((cx + dx) * 100 + (cy + dy));
+    }
     pickups_.erase(std::remove_if(pickups_.begin(), pickups_.end(),
                                   [&](const Pickup& p) { return !now.count(p.cell); }), pickups_.end());
     for (int k : now)

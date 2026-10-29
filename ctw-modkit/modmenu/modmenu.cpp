@@ -228,6 +228,13 @@ void api_remove_radar_blip(CtwMod* m, int id) {
             return;
         }
 }
+void api_set_radar_blip_label(CtwMod* m, int id, const char* label) {
+    if (!m || !running(*m)) return;
+    for (const auto& b : g_radarBlips) if (b.mod == m && b.id == id) {
+        H->set_radar_blip_label(b.hostId, label);
+        return;
+    }
+}
 void api_on_hud(CtwMod* m, CtwCallback fn, void* user) { if (fn) g_hudHooks.push_back({m, fn, user}); }
 void api_on_frame(CtwMod* m, CtwCallback fn, void* user) { if (m && fn) g_frameHooks.push_back({m, fn, user}); }
 void api_on_character(CtwMod* m,CtwCharacterCallback fn,void* user) {if(m && fn)g_characterHooks.push_back({m,fn,user});}
@@ -484,9 +491,10 @@ bool matchesSearch(const CtwMod& m) {
     return has(m.name) || has(m.author) || has(m.folder) || has(m.description);
 }
 
-// Every size follows the game font (ctw_ui.h), so rows never run into each other at any font size.
-float listRowHeight(const CtwUi& ui) { return 12.f + ctw_ui_lh(&ui, 1.f) + 4.f + ctw_ui_lh(&ui, 0.8f) + 12.f; }
-float labelHeight(const CtwUi& ui) { return ctw_ui_lh(&ui, 0.8f) + 18.f; }
+// The Porter's mod picker (porter/src/App.tsx, ModPicker): a card per mod, kryo-radius border p-3, its name in
+// text-sm and its byline in text-xs (gap-1). Section labels are its <Label>, mb-3 under a pt-5 gap.
+float listRowHeight(const CtwUi&) { return 12.f + 20.f + 4.f + 16.f + 12.f; }
+float labelHeight(const CtwUi&) { return 20.f + 16.f + 12.f; }
 
 std::string byline(const CtwMod& m) {
     std::string s;
@@ -500,8 +508,6 @@ std::string note(const CtwMod& m) {
     if (!m.enabled && m.codeLoaded) return "Switched off. It stops completely after a restart.";
     return "";
 }
-
-uint32_t statusColour(const CtwMod& m) { return !m.error.empty() ? CTW_UI_ERROR : m.enabled ? CTW_UI_OK : 0x5A5D68FFu; }
 
 CtwMod* selectedMod() {
     if (g_selected >= (int)g_mods.size()) g_selected = (int)g_mods.size() - 1;
@@ -527,85 +533,86 @@ void chooseNext(int step) {
     if (g_listH > 0.f && top + rh > g_listScroll.target + g_listH) g_listScroll.target = top + rh - g_listH;
 }
 
-const char* statusText(const CtwMod& m) { return !m.error.empty() ? "ERROR" : m.enabled ? "ON" : "OFF"; }
-
-// The left column: one row per mod (status dot, name, version and author, an on / off pill). Clicking selects it.
+// The left column: the Porter's mod cards. The selected one is the card the Porter draws chosen (border-primary
+// bg-primary/10); the others border-border, border-foreground/40 under the pointer. The box is the mod's switch.
 void drawList(CtwUi& ui, float x, float y, float w, float h) {
     const std::vector<int> shown = shownMods();
-    const float rh = listRowHeight(ui), gap = 6.f;
+    const float rh = listRowHeight(ui), gap = 8.f, cw = w - 14.f;
     g_listH = h;
     ctw_ui_scroll_begin(&ui, 1, &g_listScroll, x, y, w, h, shown.size() * (rh + gap));
     if (g_mods.empty())
-        ctw_ui_text_wrap(&ui, x + 8.f, y + 8.f, 0.9f, CTW_UI_DIM,
+        ctw_ui_type_wrap(&ui, x, y, CTW_UI_TEXT_XS, 1.625f, CTW_UI_MUTED_FG,
                          "No mods installed.\n\nPut each mod in its own folder inside the game's mods folder, then start "
-                         "the game again.", w - 24.f, 1);
+                         "the game again.", cw, 1);
     else if (shown.empty())
-        ctw_ui_text_wrap(&ui, x + 8.f, y + 8.f, 0.9f, CTW_UI_DIM, "No mod matches the search.", w - 24.f, 1);
-    const bool inList = ctw_ui_in(&ui, x, y, w - 14.f, h);
+        ctw_ui_type_wrap(&ui, x, y, CTW_UI_TEXT_XS, 1.625f, CTW_UI_MUTED_FG, "No mod matches the search.", cw, 1);
+    const bool inList = ctw_ui_in(&ui, x, y, cw, h);
     float ry = y - g_listScroll.pos;
     for (int i : shown) {
         CtwMod& m = *g_mods[i];
         if (ry + rh >= y && ry <= y + h) {
-            const bool selected = i == g_selected, hot = inList && ctw_ui_in(&ui, x, ry, w - 14.f, rh);
-            if (selected || hot) ctw_ui_round_rect(&g_api, x, ry, w - 14.f, rh, 10.f, selected ? 0xF2C2301Cu : CTW_UI_HOVER);
-            if (selected) ctw_ui_round_rect(&g_api, x, ry + 10.f, 3.f, rh - 20.f, 1.5f, CTW_UI_ACCENT);
-            if (hot && ui.clicked) { g_selected = i; g_detailScroll.pos = g_detailScroll.target = 0.f; }
-            const char* pill = statusText(m);
-            const float pw = g_api.text_width(0.75f, pill) + 12.f;
-            ctw_ui_badge(&ui, x + w - 14.f - pw - 10.f, ry + 12.f + (ctw_ui_lh(&ui, 1.f) - ctw_ui_lh(&ui, 0.75f) - 4.f) * 0.5f,
-                         statusColour(m), pill);
-            const float dot = 8.f, tx = x + 16.f + dot + 10.f, tw = w - 14.f - (tx - x) - 12.f - pw - 8.f;
-            ctw_ui_round_rect(&g_api, x + 16.f, ry + 12.f + (ctw_ui_lh(&ui, 1.f) - dot) * 0.5f, dot, dot, dot * 0.5f,
-                              statusColour(m));
-            ctw_ui_text_fit(&ui, tx, ry + 12.f, 1.f, m.enabled ? CTW_UI_TEXT : CTW_UI_DIM, m.name.c_str(), tw);
-            const std::string by = byline(m);
-            ctw_ui_text_fit(&ui, tx, ry + 12.f + ctw_ui_lh(&ui, 1.f) + 4.f, 0.8f, CTW_UI_DIM, by.c_str(), tw);
+            const bool selected = i == g_selected, hot = inList && ctw_ui_in(&ui, x, ry, cw, rh);
+            if (selected) ctw_ui_round_rect(&g_api, x, ry, cw, rh, CTW_UI_RADIUS, ctw_ui_alpha(CTW_UI_PRIMARY, 0.1f));
+            ctw_ui_round_frame(&g_api, x, ry, cw, rh, CTW_UI_RADIUS, 1.f,
+                               selected ? CTW_UI_PRIMARY : hot ? ctw_ui_alpha(CTW_UI_FOREGROUND, 0.4f) : CTW_UI_BORDER);
+            const float bx = x + 12.f, by = ry + 12.f, tx = bx + 16.f + 8.f;
+            CtwUi box = ui;   // the box switches the mod; the rest of the card selects it
+            box.clicked = inList && ui.clicked;
+            int on = m.enabled ? 1 : 0;
+            if (ctw_ui_check(&box, bx, by, 16.f, 20.f, nullptr, &on, 0)) setEnabled(m, on != 0);
+            else if (hot && ui.clicked) { g_selected = i; g_detailScroll.pos = g_detailScroll.target = 0.f; }
+            float tagW = 0.f;
+            if (!m.error.empty()) tagW = ctw_ui_type_w(&ui, 10.f, 0.025f, CTW_UI_UPPER, "error") + 14.f;
+            const float nameW = x + cw - 12.f - tx - (tagW > 0.f ? tagW + 8.f : 0.f);
+            ctw_ui_type_fit(&ui, tx, by + (20.f - 21.f) * 0.5f, CTW_UI_TEXT_SM, 0.f, 0,
+                            m.enabled ? CTW_UI_FOREGROUND : CTW_UI_MUTED_FG, m.name.c_str(), nameW);
+            if (tagW > 0.f) ctw_ui_badge(&ui, x + cw - 12.f - tagW, by + (20.f - 21.f) * 0.5f, CTW_UI_DESTRUCTIVE, "error");
+            const std::string by2 = byline(m);
+            ctw_ui_type_fit(&ui, tx, by + 20.f + 4.f + (16.f - 18.f) * 0.5f, CTW_UI_TEXT_XS, 0.f, 0, CTW_UI_MUTED_FG,
+                            by2.c_str(), x + cw - 12.f - tx);
         }
         ry += rh + gap;
     }
     ctw_ui_scroll_end(&ui);
 }
 
-// The right column: the selected mod's name, its switch, description, any note, then its options. Returns the height of
-// the contents; draws them when draw is set, so measuring and drawing can never disagree.
+// The right column, as the Porter's ready screen sets out a choice: the name (text-sm bold) and a caption, the tags,
+// the mod's switch (a Check), its description (text-sm leading-relaxed), any notice, then its options. Returns the
+// height of the contents; draws them when draw is set, so measuring and drawing can never disagree.
 float detail(CtwUi& u, CtwUi& inert, CtwMod& m, float x, float y, float w, bool draw) {
     float ry = y;
-    if (draw) ctw_ui_text_fit(&u, x, ry, 1.5f, CTW_UI_TEXT, m.name.c_str(), w);
-    ry += ctw_ui_lh(&u, 1.5f) + 4.f;
-    const std::string by = byline(m);
-    if (!by.empty()) {
-        if (draw) ctw_ui_text_fit(&u, x, ry, 0.9f, CTW_UI_DIM, by.c_str(), w);
-        ry += ctw_ui_lh(&u, 0.9f);
-    }
-    {   // what the mod contains: code, textures, an error
+    if (draw) ctw_ui_type_fit(&u, x, ry + (20.f - 21.f) * 0.5f, CTW_UI_TEXT_SM, 0.f, CTW_UI_BOLD, CTW_UI_FOREGROUND,
+                              m.name.c_str(), w);
+    ry += 20.f + 2.f;
+    std::string caption = byline(m);
+    caption += (caption.empty() ? "" : "  \xC2\xB7  ") + std::string("mods/") + m.folder;
+    if (draw) ctw_ui_type_fit(&u, x, ry, 10.f, 0.05f, CTW_UI_UPPER, CTW_UI_MUTED_FG, caption.c_str(), w);
+    ry += 15.f;
+    if (!m.dllName.empty() || m.textureFiles > 0 || !m.error.empty()) {   // what the mod contains (its Tags)
         ry += 8.f;
         float bx = x;
         char tex[32];
-        snprintf(tex, sizeof tex, "%d TEXTURE%s", m.textureFiles, m.textureFiles == 1 ? "" : "S");
+        snprintf(tex, sizeof tex, "%d texture%s", m.textureFiles, m.textureFiles == 1 ? "" : "s");
         if (draw) {
-            if (!m.dllName.empty()) bx += ctw_ui_badge(&u, bx, ry, 0x7FB2FFFFu, "CODE") + 6.f;
-            if (m.textureFiles > 0) bx += ctw_ui_badge(&u, bx, ry, 0xC79BFFFFu, tex) + 6.f;
-            if (!m.error.empty()) bx += ctw_ui_badge(&u, bx, ry, CTW_UI_ERROR, "ERROR") + 6.f;
-            ctw_ui_text_fit(&u, bx + 4.f, ry + 2.f, 0.75f, CTW_UI_DIM, ("mods/" + m.folder).c_str(), x + w - bx - 4.f);
+            if (!m.dllName.empty()) bx += ctw_ui_tag(&u, bx, ry, "code") + 4.f;
+            if (m.textureFiles > 0) bx += ctw_ui_tag(&u, bx, ry, tex) + 4.f;
+            if (!m.error.empty()) ctw_ui_badge(&u, bx, ry, CTW_UI_DESTRUCTIVE, "error");
         }
-        ry += ctw_ui_lh(&u, 0.75f) + 4.f;
+        ry += 21.f;
     }
-    ry += 14.f;
-    const float row = ctw_ui_row_h(&u);
-    if (draw) {   // the on/off switch as a card
-        ctw_ui_round_rect(&g_api, x, ry, w, row + 8.f, 10.f, CTW_UI_SURFACE);
+    ry += 20.f;
+    if (draw) {
         int on = m.enabled ? 1 : 0;
-        if (ctw_ui_switch(&u, x, ry + 4.f, w, row, m.enabled ? "Enabled" : "Disabled", &on)) setEnabled(m, on != 0);
+        if (ctw_ui_check(&u, x, ry, w, 20.f, "Enabled", &on, 0)) setEnabled(m, on != 0);
     }
-    ry += row + 8.f + 14.f;
+    ry += 20.f + 20.f;
     if (!m.description.empty())
-        ry += ctw_ui_text_wrap(&u, x, ry, 0.95f, 0xC8CAD2FFu, m.description.c_str(), w, draw) + 12.f;
+        ry += ctw_ui_type_wrap(&u, x, ry, CTW_UI_TEXT_SM, 1.625f, CTW_UI_FOREGROUND, m.description.c_str(), w, draw) + 20.f;
     const std::string n = note(m);
-    if (!n.empty())
-        ry += ctw_ui_text_wrap(&u, x, ry, 0.9f, m.error.empty() ? CTW_UI_ACCENT : CTW_UI_ERROR, n.c_str(), w, draw) + 12.f;
+    if (!n.empty()) ry += ctw_ui_notice(&u, x, ry, w, m.error.empty() ? CTW_UI_WARNING : CTW_UI_DESTRUCTIVE, n.c_str(), draw) + 20.f;
     if (m.items.empty()) {
-        if (draw && m.codeLoaded) ctw_ui_text(&u, x, ry, 0.9f, CTW_UI_DIM, "This mod has no options.");
-        return ry + ctw_ui_lh(&u, 0.9f) - y;
+        if (draw && m.codeLoaded) ctw_ui_caption(&u, x, ry, "This mod has no options.");
+        return ry + 15.f - y;
     }
     CtwUi& iu = running(m) ? u : inert;   // a stopped mod's options do not react
     const float top = ry;
@@ -615,26 +622,24 @@ float detail(CtwUi& u, CtwUi& inert, CtwMod& m, float x, float y, float w, bool 
         const float h = it.kind == CtwMod::Item::Slider ? ctw_ui_slider_h(&iu)
                       : it.kind == CtwMod::Item::Label ? labelHeight(iu) : ctw_ui_row_h(&iu);
         if (draw) switch (it.kind) {
-        case CtwMod::Item::Toggle: ctw_ui_switch(&iu, x, ry, w, h, it.label.c_str(), it.ival); break;
+        case CtwMod::Item::Toggle: ctw_ui_check(&iu, x, ry, w, h, it.label.c_str(), it.ival, 0); break;
         case CtwMod::Item::Slider:
-            ctw_ui_slider(&iu, sliderId++, x, ry, w, h, it.label.c_str(), it.fval, it.mn, it.mx, it.step);
+            ctw_ui_slider(&iu, sliderId++, x - 8.f, ry, w + 16.f, h, it.label.c_str(), it.fval, it.mn, it.mx, it.step);
             break;
         case CtwMod::Item::Button:
-            if (ctw_ui_button(&iu, x + 4.f, ry + 3.f, w - 8.f, h - 6.f, it.label.c_str())) it.fn(it.user);
+            if (ctw_ui_button(&iu, x, ry + 2.f, ctw_ui_button_w(&iu, CTW_UI_MD, it.label.c_str()), h - 4.f, it.label.c_str()))
+                it.fn(it.user);
             break;
         case CtwMod::Item::Choice:
             names.clear();
             for (auto& o : it.options) names.push_back(o.c_str());
             ctw_ui_choice(&iu, x, ry, w, h, it.label.c_str(), it.ival, names.data(), (int)names.size());
             break;
-        case CtwMod::Item::Label:
-            ctw_ui_text_fit(&iu, x + 12.f, ry + h - ctw_ui_lh(&iu, 0.8f) - 6.f, 0.8f, CTW_UI_ACCENT, it.label.c_str(), w - 24.f);
-            g_api.draw_rect(x + 12.f, ry + h - 2.f, w - 24.f, 1.f, CTW_UI_LINE);
-            break;
+        case CtwMod::Item::Label: ctw_ui_label(&iu, x, ry + 20.f + (16.f - 18.f) * 0.5f, it.label.c_str()); break;
         }
         ry += h;
     }
-    if (draw && !running(m) && ry > top) g_api.draw_rect(x, top, w, ry - top, 0x14151B90u);   // dimmed while off
+    if (draw && !running(m) && ry > top) g_api.draw_rect(x - 8.f, top, w + 16.f, ry - top, ctw_ui_alpha(CTW_UI_CARD, 0.6f));   // dimmed while off
     return ry - y + 8.f;
 }
 
@@ -651,21 +656,22 @@ void drawMenu() {
     g_api.draw_rect(0.f, 0.f, (float)g_api.screen_width(), (float)g_api.screen_height(), 0x0000003Cu);
     if (ctw_ui_panel(&ui, px, py, pw, ph, "Mods", g_mods.empty() ? nullptr : count)) { setOpen(false); return; }
 
-    const float top = py + ctw_ui_title_h(&ui) + 14.f, bottom = py + ph - ctw_ui_footer_h(&ui) - 12.f;
-    const float listW = std::max(200.f, std::min(300.f, pw * 0.38f)), lx = px + 14.f;
+    // the card's p-6
+    const float top = py + ctw_ui_title_h(&ui) + 24.f, bottom = py + ph - ctw_ui_footer_h(&ui) - 24.f;
+    const float listW = std::max(200.f, std::min(300.f, pw * 0.38f)), lx = px + 24.f;
     // left: search, then the list
     float ly = top;
     if (!g_mods.empty()) {
         int focused = g_searchFocused ? 1 : 0;
-        if (ctw_ui_textbox(&ui, lx, ly, listW, row, g_search, sizeof g_search, &focused, "Search mods..."))
+        if (ctw_ui_textbox(&ui, lx, ly, listW, row, g_search, sizeof g_search, &focused, "Search mods\xE2\x80\xA6"))
             g_listScroll.target = 0.f;
         setSearchFocus(focused != 0);
-        ly += row + 10.f;
+        ly += row + 16.f;
     }
     drawList(ui, lx, ly, listW, bottom - ly);
     // right: the selected mod
-    const float dx = lx + listW + 16.f, dw = px + pw - 16.f - dx;
-    g_api.draw_rect(dx - 9.f, top, 1.f, bottom - top, CTW_UI_LINE);
+    const float dx = lx + listW + 24.f, dw = px + pw - 24.f - dx;
+    g_api.draw_rect(dx - 13.f, top, 1.f, bottom - top, CTW_UI_BORDER);
     if (CtwMod* m = selectedMod()) {
         CtwUi inert = ui;   // rows scrolled out of view, and options of stopped mods, must not react
         inert.clicked = 0;
@@ -766,6 +772,43 @@ extern "C" CTW_PLUGIN_EXPORT int ctw_plugin_init(const CtwHostApi* host) {
     g_api.add_pause_button = CTW_HOST_HAS(H,add_pause_button) && CTW_HOST_HAS(H,set_pause_button_visible) ? api_add_pause_button : nullptr;
     g_api.set_radar_blip = CTW_HOST_HAS(H,set_radar_blip) && CTW_HOST_HAS(H,remove_radar_blip) ? api_set_radar_blip : nullptr;
     g_api.remove_radar_blip = CTW_HOST_HAS(H,set_radar_blip) && CTW_HOST_HAS(H,remove_radar_blip) ? api_remove_radar_blip : nullptr;
+    g_api.set_radar_blip_label = CTW_HOST_HAS(H,set_radar_blip_label) && g_api.set_radar_blip ? api_set_radar_blip_label : nullptr;
+    g_api.set_multiplayer_world = gameplay && CTW_HOST_HAS(H,set_multiplayer_world) ? H->set_multiplayer_world : nullptr;
+    g_api.get_world_vehicle = gameplay && CTW_HOST_HAS(H,get_world_vehicle) ? H->get_world_vehicle : nullptr;
+    g_api.set_world_vehicle = gameplay && CTW_HOST_HAS(H,set_world_vehicle) ? H->set_world_vehicle : nullptr;
+    g_api.world_vehicle_handle = gameplay && CTW_HOST_HAS(H,world_vehicle_handle) ? H->world_vehicle_handle : nullptr;
+    g_api.world_vehicle_id = gameplay && CTW_HOST_HAS(H,world_vehicle_id) ? H->world_vehicle_id : nullptr;
+    g_api.remove_world_vehicle = gameplay && CTW_HOST_HAS(H,remove_world_vehicle) ? H->remove_world_vehicle : nullptr;
+    g_api.get_world_ped = gameplay && CTW_HOST_HAS(H,get_world_ped) ? H->get_world_ped : nullptr;
+    g_api.set_world_ped = gameplay && CTW_HOST_HAS(H,set_world_ped) ? H->set_world_ped : nullptr;
+    g_api.remove_world_ped = gameplay && CTW_HOST_HAS(H,remove_world_ped) ? H->remove_world_ped : nullptr;
+    g_api.take_world_explosion = gameplay && CTW_HOST_HAS(H,take_world_explosion) ? H->take_world_explosion : nullptr;
+    g_api.add_world_explosion = gameplay && CTW_HOST_HAS(H,add_world_explosion) ? H->add_world_explosion : nullptr;
+    g_api.get_player_seat = gameplay && CTW_HOST_HAS(H,get_player_seat) ? H->get_player_seat : nullptr;
+    g_api.set_player_seat = gameplay && CTW_HOST_HAS(H,set_player_seat) ? H->set_player_seat : nullptr;
+    g_api.set_puppet_seat = gameplay && CTW_HOST_HAS(H,set_puppet_seat) ? H->set_puppet_seat : nullptr;
+    g_api.take_world_ped_damage = gameplay && CTW_HOST_HAS(H,take_world_ped_damage) ? H->take_world_ped_damage : nullptr;
+    g_api.damage_world_ped = gameplay && CTW_HOST_HAS(H,damage_world_ped) ? H->damage_world_ped : nullptr;
+    g_api.vehicle_seat_count = gameplay && CTW_HOST_HAS(H,vehicle_seat_count) ? H->vehicle_seat_count : nullptr;
+    g_api.adopt_world_vehicle = gameplay && CTW_HOST_HAS(H,adopt_world_vehicle) ? H->adopt_world_vehicle : nullptr;
+    g_api.get_vehicle_visual = gameplay && CTW_HOST_HAS(H,get_vehicle_visual) ? H->get_vehicle_visual : nullptr;
+    g_api.set_vehicle_visual = gameplay && CTW_HOST_HAS(H,set_vehicle_visual) ? H->set_vehicle_visual : nullptr;
+    g_api.get_puppet_position = gameplay && CTW_HOST_HAS(H,get_puppet_position) ? H->get_puppet_position : nullptr;
+    g_api.get_player_vehicle_task = gameplay && CTW_HOST_HAS(H,get_player_vehicle_task) ? H->get_player_vehicle_task : nullptr;
+    g_api.claim_mouse_rect = CTW_HOST_HAS(H,claim_mouse_rect) ? H->claim_mouse_rect : nullptr;
+    g_api.take_world_skid = gameplay && CTW_HOST_HAS(H,take_world_skid) ? H->take_world_skid : nullptr;
+    g_api.add_world_skid = gameplay && CTW_HOST_HAS(H,add_world_skid) ? H->add_world_skid : nullptr;
+    g_api.get_world_pickup = gameplay && CTW_HOST_HAS(H,get_world_pickup) ? H->get_world_pickup : nullptr;
+    g_api.set_world_pickup = gameplay && CTW_HOST_HAS(H,set_world_pickup) ? H->set_world_pickup : nullptr;
+    g_api.remove_world_pickup = gameplay && CTW_HOST_HAS(H,remove_world_pickup) ? H->remove_world_pickup : nullptr;
+    g_api.take_world_pickup_claim = gameplay && CTW_HOST_HAS(H,take_world_pickup_claim) ? H->take_world_pickup_claim : nullptr;
+    g_api.claim_world_pickup = gameplay && CTW_HOST_HAS(H,claim_world_pickup) ? H->claim_world_pickup : nullptr;
+    g_api.grant_world_pickup = gameplay && CTW_HOST_HAS(H,grant_world_pickup) ? H->grant_world_pickup : nullptr;
+    g_api.take_puppet_world_damage = gameplay && CTW_HOST_HAS(H,take_puppet_world_damage) ? H->take_puppet_world_damage : nullptr;
+    g_api.get_view = gameplay && CTW_HOST_HAS(H,get_view) ? H->get_view : nullptr;
+    g_api.set_puppet_view = gameplay && CTW_HOST_HAS(H,set_puppet_view) ? H->set_puppet_view : nullptr;
+    g_api.draw_ui_text = CTW_HOST_HAS(H,draw_ui_text) ? H->draw_ui_text : nullptr;
+    g_api.ui_text_width = CTW_HOST_HAS(H,ui_text_width) ? H->ui_text_width : nullptr;
 #undef FORWARD_V4
 #undef FORWARD_V5
     g_api.on_game_event = gameplay && H->on_game_event ? api_on_event : nullptr;

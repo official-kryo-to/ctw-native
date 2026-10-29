@@ -21,7 +21,8 @@ void Game::updateWanted() {
     focus(at);
     for (Vehicle& car : cars) {
         const bool onScreen = view.canSee(car.pos, car.boundRadius());
-        car.screenTimer = onScreen ? 0xFF : car.screenTimer ? (uint8_t)(car.screenTimer - 1) : 0;   // +0x99C
+        const bool seen = onScreen || multiplayerWorld.seenByOthers(*this, car.pos, car.boundRadius());
+        car.screenTimer = seen ? 0xFF : car.screenTimer ? (uint8_t)(car.screenTimer - 1) : 0;   // +0x99C
         if (!car.dead() && onScreen && isCopCar(*this, car)) wanted.setCopInView(frame, at, car.pursuing);
     }
     wanted.process(frame, at, playerCar >= 0);   // cPlayer::Process -> cWantedManager::Process

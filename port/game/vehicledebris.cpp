@@ -119,6 +119,65 @@ void Vehicle::explosionDebris(const Model* model) {
     for(int slot=0;slot<5;++slot) if(Rand16Critical(255)>=65) createDebris(slot,0xA000,*model);
 }
 
+uint32_t Vehicle::destructionState() const {
+    uint32_t state = (uint32_t)(flapBits_ & 31) << 9;
+    for (int i = 0; i < 5; ++i) if (debris_[i].detached) state |= 1u << (14 + i);
+    for (int i = 0; i < 2; ++i) if (tyre_[i].burst) state |= 1u << (19 + i);
+    return state | ((uint32_t)std::clamp((int)burnTimer_, 0, 1023) << 21);
+}
+
+void Vehicle::getVisual(CtwVehicleVisual& s, uint32_t frame) const {
+    s = {}; s.size = sizeof s;
+    s.flags = (engineOn ? 1u : 0u) | (siren ? 2u : 0u) | ((uint32_t)indicators << 2) |
+              (hazards ? 16u : 0u) | (railBraking ? 32u : 0u);
+    s.controls = b64_ & 0x106; s.burnout = burnout_;
+    for (int i = 0; i < 2; ++i) {
+        const auto& t = tyre_[i];
+        s.tyres |= ((t.spinning ? 1u : 0u) | (t.rimSparks ? 2u : 0u) | (t.onGround ? 4u : 0u)) << (i * 3);
+    }
+    s.steer = steerAngle_; s.bike_lean = bikeLean_; s.bike_pitch = bikePitch_; s.bike_kick = bikeKick_;
+    s.doors_open = doorOpenBits_;
+    for (int i = 0; i < 5; ++i) s.door_angles[i] = doors_[i].angle;
+    s.frame = visualFrame(frame);
+    s.source = visualSource();
+}
+
+void Vehicle::setVisual(const CtwVehicleVisual& s, uint32_t frame, int preserveDoor) {
+    engineOn = (s.flags & 1) && !dead_; siren = (s.flags & 2) != 0;
+    indicators = (uint8_t)((s.flags >> 2) & 3); hazards = (s.flags & 16) != 0; railBraking = (s.flags & 32) != 0;
+    b64_ = (uint16_t)((b64_ & ~0x106u) | (s.controls & 0x106)); burnout_ = (uint8_t)s.burnout;
+    for (int i = 0; i < 2; ++i) {
+        auto& t = tyre_[i]; t.spinning = (s.tyres & (1u << (i*3))) != 0;
+        t.rimSparks = (s.tyres & (2u << (i*3))) != 0; t.onGround = (s.tyres & (4u << (i*3))) != 0;
+    }
+    steerAngle_ = s.steer; bikeLean_ = s.bike_lean; bikePitch_ = s.bike_pitch; bikeKick_ = s.bike_kick;
+    for (int i = 0; i < 5; ++i) if (i != preserveDoor && !(localDoors_ & (1u << i))) {
+        doors_[i].angle = (uint16_t)s.door_angles[i]; doors_[i].speed = 0;
+        if (s.doors_open & (1u << i)) { doorOpenBits_ |= 1u << i; doors_[i].mode = 0; }
+        else { doorOpenBits_ &= (uint8_t)~(1u << i); doors_[i].mode = 0; }
+    }
+    visualFrameOffset_ = s.frame - frame;
+    visualSource_ = s.source;
+}
+
+void Vehicle::setReplicatedDestruction(uint32_t state, const Model* model) {
+    for (int i = 0; i < 5; ++i) {
+        if ((flapBits_ & (1u << i)) && !(state & (1u << (9 + i)))) {
+            doors_[i] = Door{}; doorOpenBits_ &= (uint8_t)~(1u << i);
+        }
+        if (state & (1u << (14 + i))) {
+            if (!debris_[i].detached && model) createDebris(i, dead_ ? 0xA000 : 0x4000, *model);
+            // Missing model data must not lose the persistent detached state.
+            if (!debris_[i].detached) { debris_[i].detached = true; debris_[i].pos[2] = -0x14000; }
+        } else if (debris_[i].detached) debris_[i] = Debris{};
+        pendingDebris_[i] = 0;
+    }
+    flapBits_ = (uint8_t)((state >> 9) & 31);
+    for (int i = 0; i < 2; ++i) tyre_[i].burst = (state & (1u << (19 + i))) != 0;
+    burnTimer_ = (int16_t)((state >> 21) & 1023);
+    if (dead_) smokeLife_ = burnTimer_;
+}
+
 void Vehicle::processDebris(const Model* model) {
     // cWheeledVehicle determines the hatch hinge direction from its initial Y translation.
     if(model && doorNode_[4]>0 && doorNode_[4]<(int)model->nodes.size())

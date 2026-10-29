@@ -307,7 +307,7 @@ void Game::addSteamCloud(const int32_t pos[3], uint16_t colour, int16_t scale) {
 }
 
 void Game::focus(int32_t o[3]) const {
-    const int32_t* p = playerCar >= 0 ? cars[playerCar].pos : player.pos;
+    const int32_t* p = populationOverride_ ? populationCentre_ : playerCar >= 0 ? cars[playerCar].pos : player.pos;
     o[0] = p[0]; o[1] = p[1]; o[2] = p[2];
 }
 
@@ -400,20 +400,24 @@ void Game::updateSectors() {
     focus(f);
     sectors.hold(f[0], f[1]);                     // the player (and the car he drives) hold their sector
     sectors.updateCriticalArea(player.pos, view);  // cPlayer::UpdateCriticalArea (after cCamera::Update)
+    auto centers = multiplayerWorld.interestCenters(*this);
+    if (!centers.empty()) centers.erase(centers.begin());
+    sectors.setAdditionalAreas(centers);
 }
 
 int Game::pedPopulation() const {   // cWorldSector::GetPopulation(1): every ped in the sectors, the player included
-    int n = WorldSectors::inBox(player.pos, 327680, player.pos[0], player.pos[1]) ? 1 : 0;
+    const auto* centre = populationPosition();
+    int n = WorldSectors::inBox(centre, 327680, player.pos[0], player.pos[1]) ? 1 : 0;
     for (const Pedestrians::Ped& p : peds.peds)
         n += sectors.loadedAt(p.body.pos[0], p.body.pos[1]) &&
-             WorldSectors::inBox(player.pos, 327680, p.body.pos[0], p.body.pos[1]);
+             WorldSectors::inBox(centre, 327680, p.body.pos[0], p.body.pos[1]);
     return n;
 }
 
 int Game::carPopulation() const {   // cWorldSector::GetPopulation(0): every vehicle in the sectors
     int n = 0;
     for (const Vehicle& c : cars)
-        n += sectors.loadedAt(c.pos[0], c.pos[1]) && WorldSectors::inBox(player.pos, 327680, c.pos[0], c.pos[1]);
+        n += sectors.loadedAt(c.pos[0], c.pos[1]) && WorldSectors::inBox(populationPosition(), 327680, c.pos[0], c.pos[1]);
     return n;
 }
 
@@ -426,9 +430,27 @@ int Game::carPopulation() const {   // cWorldSector::GetPopulation(0): every veh
 // the wanted level (WantedModifier; when full, a cop roll frees a vehicle: cGlobalPopulationManager::ForceFreeVehicle)
 // and the minimal-AI caps (4 and 4).
 void Game::updatePopulation() {
+    if (multiplayerWorld.client()) return;
     updateWanted();
+    const auto centers = multiplayerWorld.interestCenters(*this);
+    const size_t selected = centers.empty() ? 0 : populationCursor_++ % centers.size();
+    populationFrame_ = centers.size() > 1 ? populationCursor_ / (uint32_t)centers.size() : frame;
+    if (!selected) { updatePopulationAtFocus(); return; }
+    // One population pass per tick keeps work bounded as players spread across the city. The local player and
+    // camera never move: only the generation queries and their temporary path cache use this interest centre.
+    const LocalArea saved = localArea;
+    std::copy(centers[selected].begin(), centers[selected].end(), populationCentre_);
+    populationOverride_ = true;
+    localArea.rebuildForFocus(*this, populationCentre_);
+    updatePopulationAtFocus();
+    populationOverride_ = false;
+    localArea = saved;
+}
+
+void Game::updatePopulationAtFocus() {
     const uint32_t t = world.timeCycle().time();
-    const Traffic::ZoneInfo& z = traffic.zoneOrDefault(player.pos[0], player.pos[1], t - 0x14000u < 0xFFFF3000u);
+    const auto* centre = populationPosition();
+    const Traffic::ZoneInfo& z = traffic.zoneOrDefault(centre[0], centre[1], t - 0x14000u < 0xFFFF3000u);
     const int pedCount = pedPopulation();
     int pedCap = std::min(16, (int)(20u * (uint32_t)z.pedDensity * 100u / 7500u));
     pedCap = std::min(64, (int)(pedCap * peds.densityScale));   // PC mod API (1 = the original)
@@ -437,6 +459,13 @@ void Game::updatePopulation() {
     peds.maxPeds = pedCap;
     traffic.maxCars = carCap;
     const int carCount = carPopulation();
+    if (multiplayerWorld.role() == CTW_MULTIPLAYER_HOST && multiplayerWorld.interestCenters(*this).size() > 1) {
+        // At most one entity per selected-player pass. Reusing a native 64-frame schedule for every remote
+        // centre would multiply its delay by the player count and leave distant players waiting for a city.
+        if ((populationFrame_ & 1u) && carCount < carCap && cars.size() < 1024) traffic.generateRandom(*this, z, true);
+        else if (pedCount < pedCap && peds.peds.size() < 1024) peds.generate(*this, z);
+        return;
+    }
     // the player ped's speed (driving: his car's)
     const int32_t* vel = playerCar >= 0 ? cars[playerCar].vel : player.vel;
     const uint32_t speed = (uint32_t)std::sqrt((double)(uint64_t)((int64_t)vel[0] * vel[0] + (int64_t)vel[1] * vel[1] +
@@ -454,18 +483,18 @@ void Game::updatePopulation() {
         const int period = periodFor(k);
         if (period != carSchedule.period) scheduler.setTiming(carSchedule, period);
     }
-    if (!FrameScheduler::fired(carSchedule, frame)) {
-        if (FrameScheduler::fired(pedSchedule, frame) && pedCount < pedCap) peds.generate(*this, z);
+    if (!FrameScheduler::fired(carSchedule, populationFrame_)) {
+        if (FrameScheduler::fired(pedSchedule, populationFrame_) && pedCount < pedCap && peds.peds.size() < 1024) peds.generate(*this, z);
         return;
     }
-    traffic.generateRandom(*this, z, carCount < carCap);
+    if (cars.size() < 1024) traffic.generateRandom(*this, z, carCount < carCap);
 }
 
 int Game::carPopulationByType(int out[20]) const {
     std::fill(out, out + 20, 0);
     int total = 0;
     for (const Vehicle& c : cars) {
-        if (!sectors.loadedAt(c.pos[0], c.pos[1]) || !WorldSectors::inBox(player.pos, 327680, c.pos[0], c.pos[1])) continue;
+        if (!sectors.loadedAt(c.pos[0], c.pos[1]) || !WorldSectors::inBox(populationPosition(), 327680, c.pos[0], c.pos[1])) continue;
         int type = 1;   // the cVehicle constructor's +0x964
         for (const Pedestrians::Ped& p : peds.peds)
             if (p.vehicle == c.uid && p.seat == 0) { type = p.type; break; }
@@ -501,6 +530,7 @@ bool Game::forceFreeVehicle() {   // cGlobalPopulationManager::ForceFreeVehicle(
 
 void Game::collectSectors() {   // cWorld::GarbageCollection (cGame::Render): cWorldSector::Reset deletes the entities
     sectors.collect();
+    if (multiplayerWorld.client()) return;
     peds.collect(*this);
     for (int i = (int)cars.size() - 1; i >= 0; --i) {
         // entities that hold their sector (cEntity +0x38): the player's car, one being entered, mods' and missions'
@@ -513,14 +543,16 @@ void Game::collectSectors() {   // cWorld::GarbageCollection (cGame::Render): cW
 }
 
 void Game::removeFarCars() {   // cVehicle::ShouldBeDestroyed: more than ~74 units from the player (and off screen)
+    if (multiplayerWorld.client()) return;
     int32_t f[3];
     focus(f);
     for (int i = (int)cars.size() - 1; i >= 0; --i) {
         const Vehicle& c = cars[i];
         if (i == playerCar || i == task.car || c.keep) continue;
+        if (multiplayerWorld.role() == CTW_MULTIPLAYER_HOST && multiplayerWorld.nearPlayer(*this, c.pos, 90 * 4096)) continue;
         int64_t dx = f[0] - c.pos[0], dy = f[1] - c.pos[1];
         if (dx * dx + dy * dy <= 0x1563FFFFFFLL) continue;
-        if (view.canSee(c.pos, 0x5000)) continue;   // (only when off screen)
+        if (view.canSee(c.pos, 0x5000) || multiplayerWorld.seenByOthers(*this, c.pos, 0x5000)) continue;   // (only when off screen)
         peds.discardOccupants(cars[i]);
         removeCar(i);
     }
@@ -549,6 +581,31 @@ static void constantVelocity(const PedSprites& ps, int anim, const int32_t delta
     for (int i = 0; i < 3; ++i) out[i] = (int16_t)(((uint32_t)(k * (int16_t)delta[i])) >> 12);
 }
 
+// Shared cars do not shuffle a passenger through the occupied driver's seat. When the free door is across the
+// vehicle, approach around a bumper instead of walking straight through its collision box.
+static int passengerApproach(const Vehicle& car, const int32_t player[3], int seat, int32_t route[3][3]) {
+    int32_t door[3]; car.doorSpawnPoint(seat, door);
+    int32_t local[2]{};
+    for (int k = 0; k < 3; ++k) {
+        local[0] += (int32_t)(((int64_t)(player[k] - car.pos[k]) * car.right[k]) >> 12);
+        local[1] += (int32_t)(((int64_t)(player[k] - car.pos[k]) * car.fwd[k]) >> 12);
+    }
+    const int sourceSide = local[0] < 0 ? -1 : 1, targetSide = seat & 1 ? 1 : -1;
+    if (car.isBike() || sourceSide == targetSide) return 0;
+    const int32_t x = car.hx + 0x1800, y = car.hy + 0x1800;
+    const int around = std::abs(local[1] - y) + std::abs(door[1] - y) <=
+                       std::abs(local[1] + y) + std::abs(door[1] + y) ? 1 : -1;
+    int count = 0;
+    if (std::abs(local[1]) < y) {
+        route[count][0] = sourceSide * x; route[count][1] = around * y; route[count++][2] = 0;
+        route[count][0] = targetSide * x; route[count][1] = around * y; route[count++][2] = 0;
+    } else {
+        route[count][0] = targetSide * x; route[count][1] = local[1]; route[count++][2] = 0;
+    }
+    route[count][0] = targetSide * x; route[count][1] = door[1]; route[count++][2] = 0;
+    return count;
+}
+
 void Game::startEnter(int target) {   // FindSuitableVehicles (within 10 units) -> the driver's seat
     if (player.dead || arrested_ || arrestGrabbed) return;
     int best = -1;
@@ -558,7 +615,11 @@ void Game::startEnter(int target) {   // FindSuitableVehicles (within 10 units) 
         if (cars[i].dead()) continue;
         if (cars[i].seatUser[0] >= 0) {   // (another player's vehicle in a multiplayer game cannot be taken)
             const Pedestrians::Ped* driver = peds.find((uint32_t)cars[i].seatUser[0]);
-            if (driver && driver->puppet.on) continue;
+            if (driver && driver->puppet.on && !driver->puppet.world) {
+                bool freeSeat = false;
+                for (int s = 1; s < cars[i].numSeats() && s < 4; ++s) freeSeat |= cars[i].seatUser[s] == -1;
+                if (!freeSeat) continue;
+            }
         }
         int64_t dx = cars[i].pos[0] - player.pos[0], dy = cars[i].pos[1] - player.pos[1];
         int64_t d2 = dx * dx + dy * dy;
@@ -575,6 +636,33 @@ void Game::startEnter(int target) {   // FindSuitableVehicles (within 10 units) 
     // across, {100} warp in. Passenger's side: {6, 1}, then {1}, then {100}. ({2, 1} validates as {6, 1} does for the
     // player and is left out.) Bikes and single seaters use the bike plans (ops 9 and 10): straight on.
     Vehicle& c = cars[best];
+    if (c.seatUser[0] >= 0) {
+        const auto* driver = peds.find((uint32_t)c.seatUser[0]);
+        if (driver && driver->puppet.on && !driver->puppet.world) {
+            double nearest = 0.;
+            int selected = -1;
+            for (int s = 1; s < c.numSeats() && s < 4; ++s) {
+                if (c.seatUser[s] != -1 || !doorClear(c, s)) continue;
+                int32_t route[3][3]{}, previous[3] = {player.pos[0], player.pos[1], player.pos[2]}, at[3], door[3];
+                const int count = passengerApproach(c, player.pos, s, route);
+                double length = 0.;
+                for (int i = 0; i < count; ++i) {
+                    c.localToWorld(route[i], at);
+                    length += std::hypot((double)at[0] - previous[0], (double)at[1] - previous[1]);
+                    std::copy(at, at + 3, previous);
+                }
+                c.doorSpawnPoint(s, door); c.localToWorld(door, at);
+                length += std::hypot((double)at[0] - previous[0], (double)at[1] - previous[1]);
+                if (selected < 0 || length < nearest) {
+                    selected = s; nearest = length; task.waypointCount = count;
+                    for (int i = 0; i < 3; ++i) std::copy(route[i], route[i] + 3, task.waypoints[i]);
+                }
+            }
+            if (selected >= 0) task.seat = task.door = selected;
+            else task = CarTask{};
+            return;
+        }
+    }
     int32_t local[3], d0[3], d1[3];
     c.doorSpawnPoint(0, local); c.localToWorld(local, d0);
     c.doorSpawnPoint(1, local); c.localToWorld(local, d1);
@@ -598,6 +686,17 @@ void Game::startEnter(int target) {   // FindSuitableVehicles (within 10 units) 
     if (!peds.exitOccupant(*this, c, 0)) { task = CarTask{}; return; }
     finishEnter(c);
     task = CarTask{};
+}
+
+void Game::carDoorTarget(int32_t out[3]) {
+    if (task.car < 0 || task.car >= (int)cars.size()) { std::copy(player.pos, player.pos + 3, out); return; }
+    const auto& car = cars[task.car];
+    while (task.waypointIndex < task.waypointCount) {
+        car.localToWorld(task.waypoints[task.waypointIndex], out);
+        if (dist2d(player.pos, out) > 0xC00) return;
+        ++task.waypointIndex;
+    }
+    int32_t door[3]; car.doorSpawnPoint(task.door, door); car.localToWorld(door, out);
 }
 
 bool Game::doorClear(const Vehicle& c, int seat) {
@@ -635,7 +734,8 @@ void Game::finishEnter(Vehicle& c) {   // RunPostEnterSeat: in the seat; the doo
     if (!emergency) c.siren = false;
     if (!c.isBike()) c.closeDoor(task.seat);
     else c.bikeMounted = 1;
-    c.seatUser[0] = -2;
+    c.seatUser[task.seat] = -2;
+    playerSeat = task.seat;
     c.engineOn = !c.needsHotwiring();   // (a car to hotwire starts when it is hotwired)
     c.keep = true;   // a car the player used is not cleaned up (cVehicle +0x945 bit 3)
     player.hidden = true;
@@ -652,7 +752,7 @@ void Game::startExit() {   // cExitCar: which way out depends on the speed (mIns
     if (sp >= 164637) return;   // too fast to get out
     task = CarTask{};
     task.car = playerCar;
-    task.seat = 0;
+    task.seat = playerSeat;
     task.op = sp < 14634 ? CarTask::ClimbOut : CarTask::Braking;   // (54879..164637 would roll out: not ported, brakes)
     if (task.op == CarTask::ClimbOut) task.heading = -1;           // OP_OPENDOOR this frame, the animation next frame
 }
@@ -679,6 +779,8 @@ bool Game::tickTask(bool stickHeld, int16_t stickHeading) {
             if ((int64_t)player.fwd[0] * s + (int64_t)player.fwd[1] * co < 0) { task.op = CarTask::None; return false; }
         }
         int32_t sp[3], w[3];
+        carDoorTarget(w);
+        if (task.waypointIndex < task.waypointCount) return false;
         c.doorSpawnPoint(task.door, sp);
         c.localToWorld(sp, w);
         if (dist2d(player.pos, w) > 0x2000) return false;   // the normal on-foot update walks there (see tick)
@@ -784,7 +886,7 @@ bool Game::tickTask(bool stickHeld, int16_t stickHeading) {
         place();
         if (!done) return true;
         if (!c.isBike()) c.closeDoor(task.seat);   // "ExitCar closeDoor"
-        c.engineOn = false;
+        if (playerSeat == 0) c.engineOn = false;
         c.localToWorld(task.end, player.pos);
         player.attached = false;
         player.placeOnGround(&collision);
@@ -865,6 +967,7 @@ void Game::processVehicleDeaths() {
     for (Vehicle& car : cars) {
         if (!car.justDied) continue;
         car.justDied = false;
+        if (multiplayerWorld.client()) continue; // host health/destruction and explosion event own the outcome
         car.explosionDebris(carModel(car.infoId));
         peds.releaseOccupants(*this,car,true);
         Plugins_EmitEvent(CTW_EVENT_VEHICLE_DESTROYED, car.uid, car.infoId);
@@ -935,7 +1038,10 @@ bool Game::addBigExplosion(const int32_t at[3], int type, int16_t scale, const i
     e.moving = (int64_t)velocity[0] * velocity[0] + (int64_t)velocity[1] * velocity[1] +
                (int64_t)velocity[2] * velocity[2] > 0x28000;
     // AddExplosion's duplicate check only applies to stationary explosions
-    if (e.moving) { explosions_.push_back(e); stats.incExplosions(); return true; }
+    if (e.moving) {
+        multiplayerWorld.captureExplosion(type, at, scale / 4096.f, velocity);
+        explosions_.push_back(e); stats.incExplosions(); return true;
+    }
     return queueExplosion(e);
 }
 
@@ -1223,6 +1329,7 @@ void Game::updateDeath() {
 
 void Game::tick() {
     snapshotPoses();
+    multiplayerWorld.advanceVehicles(*this, OS_TimeAccurate());
     updateSequence();
     screenFade.tick();
     if (objective.frames > 0) --objective.frames;
@@ -1335,13 +1442,21 @@ void Game::tick() {
             finishShortFrame();
             return;
         }
-        traffic.update(*this);
-        for (int i = 0; i < (int)cars.size(); ++i) cars[i].act(i == playerCar ? dc : carControls(cars[i]), i == playerCar, &collision);
+        if (!multiplayerWorld.client()) traffic.update(*this);
+        for (int i = 0; i < (int)cars.size(); ++i) if (multiplayerWorld.simulatesVehicle(*this, i))
+            cars[i].act(i == playerCar ? dc : carControls(cars[i]), i == playerCar && playerSeat == 0, &collision);
         peds.update(*this);
         Vehicle::collideCars(cars, playerCar, frame);
+        multiplayerWorld.advanceVehicles(*this, OS_TimeAccurate());
         propDynamics.checkImpacts(*this);
-        for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); Vehicles_AddSkidmarks(*this, c); c.processDebris(carModel(c.infoId)); c.processDamage(frame); c.checkForDriverFallingOut(); }
-        traffic.afterPhysics(*this);
+        for (int i = 0; i < (int)cars.size(); ++i) {
+            Vehicle& c = cars[i];
+            if (multiplayerWorld.simulatesVehicle(*this, i)) c.integrate(&collision);
+            c.processAlways(!multiplayerWorld.simulatesVehicle(*this,i) && task.car != i); Vehicles_AddSkidmarks(*this, c); c.processDebris(carModel(c.infoId));
+            c.processDamage(frame, !multiplayerWorld.client());
+            if (!multiplayerWorld.client()) c.checkForDriverFallingOut();
+        }
+        if (!multiplayerWorld.client()) traffic.afterPhysics(*this);
         projectiles.process(*this);
         processKnockOffs();
         processVehicleReactions();
@@ -1350,7 +1465,7 @@ void Game::tick() {
             finishShortFrame();
             return;
         }
-        if (speedScale != 1.f && dc.throttle > 0) {   // mods: the speed changer nudges the driven vehicle's speed
+        if (playerSeat == 0 && speedScale != 1.f && dc.throttle > 0) {   // mods: the speed changer nudges the driven vehicle's speed
             Vehicle& me = cars[playerCar];
             if (speedScale < 1.f || me.speed() < (int32_t)(30.f * 4096.f * speedScale)) {
                 float k = 1.f + (speedScale - 1.f) * 0.04f;
@@ -1379,7 +1494,7 @@ void Game::tick() {
         processTimeCycle();
         if (seqCamera.active) world.stream(seqCamera.eye[0] / 4096.f, seqCamera.eye[1] / 4096.f, 2);   // a cutscene
         else if (!freeCam.on) world.stream(me.pos[0] / 4096.f, me.pos[1] / 4096.f, 2);
-        carGens.update(*this);
+        if (!multiplayerWorld.client()) carGens.update(*this);
         removeFarCars();
         collectSectors();
         TheSound().update(*this);
@@ -1401,10 +1516,8 @@ void Game::tick() {
     in.moving = stickHeld;
     in.heading = stickHeading;
     if (task.op == CarTask::GotoDoor) {   // cGotoTargetOnFootStraightLine: head for the door (running at most)
-        const Vehicle& c = cars[task.car];
-        int32_t sp[3], w[3];
-        c.doorSpawnPoint(task.door, sp);
-        c.localToWorld(sp, w);
+        int32_t w[3];
+        carDoorTarget(w);
         in.moving = true;
         in.heading = padAngle((float)(w[0] - player.pos[0]), (float)(w[1] - player.pos[1]));
         walk = false;
@@ -1453,8 +1566,9 @@ void Game::tick() {
     else if (player.dead || arrested_ || scriptAnim) player.stepOneShot(&pedSprites);
     else if (player.reacting() && player.actReaction(&pedSprites,Pedestrians::vehicleAbove(*this,player)))
         TheSound().pedThrownBack(player.pos);   // cAnimation::HandleFrameResets
-    traffic.update(*this);
-    for (Vehicle& c : cars) c.act(carControls(c), false, &collision);
+    if (!multiplayerWorld.client()) traffic.update(*this);
+    for (int i = 0; i < (int)cars.size(); ++i) if (multiplayerWorld.simulatesVehicle(*this, i))
+        cars[i].act(carControls(cars[i]), false, &collision);
     const bool wasDead = player.dead;
     peds.update(*this);
     if (!wasDead && player.dead) {
@@ -1467,9 +1581,16 @@ void Game::tick() {
         if (player.splashed) addWaterSplash(player.pos, 9, player.vel, -1);   // cPed::Integrate: fell in
     }
     Vehicle::collideCars(cars, -1, frame);
+    multiplayerWorld.advanceVehicles(*this, OS_TimeAccurate());
     propDynamics.checkImpacts(*this);
-    for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); Vehicles_AddSkidmarks(*this, c); c.processDebris(carModel(c.infoId)); c.processDamage(frame); c.checkForDriverFallingOut(); }
-    traffic.afterPhysics(*this);
+    for (int i = 0; i < (int)cars.size(); ++i) {
+        Vehicle& c = cars[i];
+        if (multiplayerWorld.simulatesVehicle(*this, i)) c.integrate(&collision);
+        c.processAlways(!multiplayerWorld.simulatesVehicle(*this,i) && task.car != i); Vehicles_AddSkidmarks(*this, c); c.processDebris(carModel(c.infoId));
+        c.processDamage(frame, !multiplayerWorld.client());
+        if (!multiplayerWorld.client()) c.checkForDriverFallingOut();
+    }
+    if (!multiplayerWorld.client()) traffic.afterPhysics(*this);
     projectiles.process(*this);
     processKnockOffs();
     processVehicleReactions();
@@ -1493,7 +1614,7 @@ void Game::tick() {
     player.posf(p);
     if (seqCamera.active) world.stream(seqCamera.eye[0] / 4096.f, seqCamera.eye[1] / 4096.f, 2);   // a cutscene
     else if (!freeCam.on) world.stream(p[0], p[1], 2);   // (the free camera streams around itself in render)
-    carGens.update(*this);
+    if (!multiplayerWorld.client()) carGens.update(*this);
     removeFarCars();
     collectSectors();
     TheSound().horn = false;
@@ -1721,7 +1842,7 @@ bool Game::key(int k) {
 // (The task's further conditions, vehicle +0x948 bit 5 and player +0x1184 bit 7, and the alarm, are not ported; nor
 // are medium and hard hotwiring: those cars start as before.)
 void Game::updateHotwire() {
-    if (hotwiring.active() || playerCar < 0 || task.op != CarTask::None || player.dead) return;
+    if (hotwiring.active() || playerCar < 0 || playerSeat != 0 || task.op != CarTask::None || player.dead) return;
     Vehicle& c = cars[playerCar];
     if (!c.needsHotwiring()) return;
     const int cls = c.hotwireClass;

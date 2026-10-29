@@ -5,6 +5,7 @@
 #include "game.h"
 #include "hud.h"
 #include "plugins.h"
+#include "porterui.h"
 #include "sound.h"
 #include "os/os.h"
 #include <SDL.h>
@@ -13,9 +14,6 @@
 #include <cstdio>
 
 namespace {
-constexpr uint32_t kPanel = 0x0B0D12E6u, kLine = 0xFFFFFF1Au, kText = 0xE6E8EEFFu, kDim = 0x9AA0ABFFu,
-                   kAccent = 0xF2C230FFu, kHot = 0xF2C23038u, kField = 0xFFFFFF14u;
-
 std::string onOff(bool v) { return v ? "on" : "off"; }
 
 // the first mission's places, for jumping about while testing it
@@ -232,20 +230,25 @@ bool DevMenu::key(Game& g, int k) {
     return true;   // nothing reaches the game while the menu is open
 }
 
+// Drawn as the Porter draws its interface (porterui.h): a card with its title bar, the pages as small buttons (the
+// chosen one the white pill), the rows as the Porter's chosen-card outline, values between chevrons, the cutscene
+// name in its field, and the last result over the keys at the bottom.
 void DevMenu::render(Game& g, int W, int H) {
+    using namespace PorterUi;
     if (!open_ || W <= 0 || H <= 0) return;
     build(g);
-    const float s = std::clamp(H / 900.f, 0.8f, 1.4f), lh = Hud_LineHeight(s), rowH = lh + 10.f * s;
-    const float w = std::min(W - 32.f, 620.f * s), x = W - w - 16.f, y = 16.f;
-    const float tabsH = lh + 14.f * s, titleH = lh + 16.f * s;
-    const int visible = std::max(3, (int)((H - 2 * y - titleH - tabsH - 2 * lh - 30.f * s) / rowH));
-    const float h = titleH + tabsH + std::min<int>(visible, (int)rows_.size()) * rowH + 2 * lh + 30.f * s;
+    const float rowH = 36.f, pad = 24.f, titleH = 40.f, tabsH = 28.f, footH = 15.f + 4.f + 15.f + 2.f * 16.f;
+    const float w = std::min(W - 24.f, 620.f), x = W - w - 12.f, y = 12.f;
+    const float chrome = titleH + pad + tabsH + 16.f + 16.f + footH;
+    const int visible = std::max(3, (int)((H - 2 * y - chrome) / rowH));
+    const float h = chrome + std::min<int>(visible, (int)rows_.size()) * rowH;
     Plugins_ClaimMouseRect(x, y, w, h);
     int mx = 0, my = 0;
     Host_GetMouse(&mx, &my);
     const CtwHostApi& api = Plugins_HostApi();
-    const bool clicked = api.mouse_clicked(0) != 0;
+    const bool clicked = api.mouse_clicked(0) != 0, pressed = api.mouse_down(0) != 0;
     const bool inside = mx >= x && my >= y && mx < x + w && my < y + h;
+    auto in = [&](float rx, float ry, float rw, float rh) { return mx >= rx && my >= ry && mx < rx + rw && my < ry + rh; };
     // the field takes what is typed while it is the selected row ('\b' is a backspace)
     if (!rows_.empty() && rows_[selected_].field) {
         for (const char* t = api.text_input(); t && *t; ++t) {
@@ -262,44 +265,58 @@ void DevMenu::render(Game& g, int W, int H) {
     if (selected_ >= scroll_ + visible) scroll_ = selected_ - visible + 1;
 
     Hud_Begin(W, H);
-    Hud_Rect(x, y, w, h, kPanel);
-    Hud_Rect(x, y, w, 2.f, kAccent);
-    Hud_Text(x + 14.f * s, y + 8.f * s, s * 1.1f, kText, "Developer menu");
-    const std::string hint = "F3 closes";
-    Hud_Text(x + w - Hud_TextWidth(hint, s * 0.85f) - 14.f * s, y + 10.f * s, s * 0.85f, kDim, hint);
-    // the tabs
-    float tx = x + 10.f * s;
-    const float ty = y + titleH;
-    for (int i = 0; i < (int)pages_.size(); ++i) {
-        const float tw = Hud_TextWidth(pages_[i], s * 0.9f) + 16.f * s;
-        const bool hot = mx >= tx && my >= ty && mx < tx + tw && my < ty + tabsH - 4.f;
-        if (i == page_) Hud_Rect(tx, ty, tw, tabsH - 4.f, kHot);
-        if (i == page_) Hud_Rect(tx, ty + tabsH - 6.f, tw, 2.f, kAccent);
-        Hud_Text(tx + 8.f * s, ty + 5.f * s, s * 0.9f, i == page_ || hot ? kText : kDim, pages_[i]);
-        if (hot && clicked && i != page_) { page_ = i; selected_ = scroll_ = 0; }
-        tx += tw + 4.f * s;
+    card(x, y, w, h);
+    float close[4];
+    titleBar(x, y, w, "Developer menu", "F3", false, close);
+    if (in(close[0], close[1], close[2], close[3])) {
+        titleBar(x, y, w, "Developer menu", "F3", true, close);
+        if (clicked) { open_ = false; Hud_End(); return; }
     }
-    Hud_Rect(x + 10.f * s, ty + tabsH - 3.f, w - 20.f * s, 1.f, kLine);
+    // the pages
+    float tx = x + pad;
+    const float ty = y + titleH + pad;
+    for (int i = 0; i < (int)pages_.size(); ++i) {
+        const float tw = buttonWidth(Sm, pages_[i].c_str());
+        const bool hot = in(tx, ty, tw, tabsH);
+        button(tx, ty, tw, tabsH, i == page_ ? PrimaryButton : Ghost, Sm, hot, pressed, false, pages_[i].c_str());
+        if (hot && clicked && i != page_) { page_ = i; selected_ = scroll_ = 0; }
+        tx += tw + 8.f;
+    }
     // the rows
-    float ry = ty + tabsH + 4.f * s;
+    const float rx = x + pad - 12.f, rw = w - 2.f * (pad - 12.f);
+    float ry = ty + tabsH + 16.f;
     for (int i = scroll_; i < (int)rows_.size() && i < scroll_ + visible; ++i, ry += rowH) {
         Row& r = rows_[i];
-        const bool hot = mx >= x && mx < x + w && my >= ry && my < ry + rowH;
+        const bool hot = in(rx, ry, rw, rowH);
         if (hot && (mx != lastMouse_[0] || my != lastMouse_[1])) selected_ = i;   // hovering (once it moves)
-        if (i == selected_) Hud_Rect(x + 6.f * s, ry, w - 12.f * s, rowH - 2.f, kHot);
+        if (i == selected_) {
+            roundRect(rx, ry + 2.f, rw, rowH - 4.f, Radius, alpha(Primary, 0.1f));
+            frame(rx, ry + 2.f, rw, rowH - 4.f, Radius, 1.f, Primary);
+        }
         const bool action = !r.value;
-        Hud_Text(x + 16.f * s, ry + 5.f * s, s, action ? kText : kDim, r.label);
-        if (r.value) {
-            std::string v = r.value();
-            if (r.field) {
-                const float fw = w * 0.55f;
-                Hud_Rect(x + w - fw - 14.f * s, ry + 2.f * s, fw, rowH - 6.f * s, kField);
-                if (i == selected_ && (g.frame / 15) % 2 == 0) v += "_";
-                Hud_Text(x + w - fw - 8.f * s, ry + 5.f * s, s * 0.9f, kText, v);
-            } else {
-                if (r.change) v = "< " + v + " >";
-                Hud_Text(x + w - Hud_TextWidth(v, s) - 16.f * s, ry + 5.f * s, s, kText, v);
+        const float ly = typeY(ry, rowH, TextXs), right = rx + rw - 12.f;
+        if (!r.value) {
+            textFit(rx + 12.f, ly, TextXs, 0.f, 0, Foreground, r.label.c_str(), rw - 24.f);
+        } else if (r.field) {
+            const float fw = rw * 0.55f, fx = right - fw, fh = 28.f, fy = ry + (rowH - fh) * 0.5f;
+            textFit(rx + 12.f, ly, TextXs, 0.f, 0, action ? Foreground : MutedFg, r.label.c_str(), fx - rx - 24.f);
+            field(fx, fy, fw, fh, hot, i == selected_);
+            const std::string v = r.value();
+            textFit(fx + 12.f, typeY(fy, fh, TextXs), TextXs, 0.f, 0, Foreground, v.c_str(), fw - 24.f);
+            if (i == selected_ && (g.frame / 15) % 2 == 0)
+                Hud_Rect(fx + 13.f + std::min(textWidth(TextXs, 0.f, 0, v.c_str()), fw - 24.f), fy + 7.f, 1.f, 14.f, Foreground);
+        } else {
+            const std::string v = r.value();
+            const float vw = textWidth(TextXs, 0.f, 0, v.c_str());
+            float vx = right - vw;
+            if (r.change) {   // < value >, the chevrons light under the pointer
+                const bool left = hot && mx < x + w * 0.5f;
+                iconChevron(right - 14.f, ry + (rowH - 14.f) * 0.5f, 14.f, true, hot && !left ? Foreground : MutedFg);
+                vx = right - 14.f - 6.f - vw;
+                iconChevron(vx - 6.f - 14.f, ry + (rowH - 14.f) * 0.5f, 14.f, false, left ? Foreground : MutedFg);
             }
+            textFit(rx + 12.f, ly, TextXs, 0.f, 0, Foreground, r.label.c_str(), vx - 32.f - rx - 12.f);
+            text(vx, ly, TextXs, 0.f, 0, Foreground, v.c_str());
         }
         if (hot && clicked) {
             selected_ = i;
@@ -310,10 +327,11 @@ void DevMenu::render(Game& g, int W, int H) {
     }
     lastMouse_[0] = mx;
     lastMouse_[1] = my;
-    // the footer: the last result and the keys
-    const float fy = y + h - 2 * lh - 14.f * s;
-    Hud_Rect(x + 10.f * s, fy - 4.f * s, w - 20.f * s, 1.f, kLine);
-    Hud_Text(x + 14.f * s, fy, s * 0.9f, kAccent, status_.empty() ? "Ready." : status_);
-    Hud_Text(x + 14.f * s, fy + lh, s * 0.8f, kDim, "Up/Down: row   Left/Right: value   Enter: do   Tab: page   Esc: close");
+    // the footer: the last result (text-[11px]) and the keys (a caption), over a hairline
+    const float fy = y + h - footH;
+    Hud_Rect(x + 1.f, fy, w - 2.f, 1.f, Border);
+    textFit(x + pad, fy + 16.f, 11.f, 0.f, 0, Foreground, status_.empty() ? "Ready." : status_.c_str(), w - 2.f * pad);
+    textFit(x + pad, fy + 16.f + 15.f + 4.f, 10.f, 0.05f, Upper, MutedFg,
+            "Up/Down: row  \xC2\xB7  Left/Right: value  \xC2\xB7  Enter: do  \xC2\xB7  Tab: page  \xC2\xB7  Esc: close", w - 2.f * pad);
     Hud_End();
 }

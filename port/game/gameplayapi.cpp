@@ -277,6 +277,26 @@ void GameplayApi_Fill(CtwHostApi& api) {
         p->puppet.damage = 0;
         return damage;
     };
+    api.take_puppet_world_damage = [](CtwPuppet handle) -> int {
+        auto& g = TheGame();
+        auto* p = g.peds.find(handle);
+        if (g.multiplayerWorld.role() != CTW_MULTIPLAYER_HOST || !p || !p->puppet.on || p->puppet.world) return 0;
+        const int damage = p->puppet.worldDamage;
+        p->puppet.worldDamage = 0;
+        return damage;
+    };
+    api.get_view = [](CtwView* out) -> int {
+        if (!out || out->size < sizeof *out) return 0;
+        const CameraView& v = TheGame().view;
+        CtwView s{}; s.size = sizeof s;
+        std::copy(v.pos, v.pos + 3, s.eye);
+        s.yaw = v.yaw; s.pitch = v.pitch; s.width = v.width; s.height = v.height;
+        *out = s;
+        return v.width > 0 && v.height > 0;
+    };
+    api.set_puppet_view = [](CtwPuppet handle, const CtwView* view) -> int {
+        return TheGame().multiplayerWorld.setPuppetView(TheGame(), handle, view);
+    };
     api.world_to_screen = [](const float* xyz, float* out) -> int {
         if (!vectorValid(xyz) || !out) return 0;
         return TheGame().worldToScreen(xyz, (int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight(), out) ? 1 : 0;
@@ -361,4 +381,56 @@ void GameplayApi_Fill(CtwHostApi& api) {
         TheGame().peds.densityScale = scale; return 1;
     };
     api.get_camera_shake = [](float out[3]) { TheGame().cameraShake(out); };
+    api.set_multiplayer_world = [](int role) { auto& g = TheGame(); return g.multiplayerWorld.setRole(g, role); };
+    api.get_world_vehicle = [](int i, CtwWorldVehicle* s) { auto& g = TheGame(); return g.multiplayerWorld.getVehicle(g, i, s); };
+    api.set_world_vehicle = [](const CtwWorldVehicle* s) { auto& g = TheGame(); return g.multiplayerWorld.setVehicle(g, s); };
+    api.world_vehicle_handle = [](uint32_t id) { auto& g = TheGame(); return g.multiplayerWorld.vehicleHandle(g, id); };
+    api.world_vehicle_id = [](CtwVehicle h) { auto& g = TheGame(); return g.multiplayerWorld.vehicleId(g, h); };
+    api.remove_world_vehicle = [](uint32_t id) { auto& g = TheGame(); return g.multiplayerWorld.removeVehicle(g, id); };
+    api.get_world_ped = [](int i, CtwWorldPed* s) { auto& g = TheGame(); return g.multiplayerWorld.getPed(g, i, s); };
+    api.set_world_ped = [](const CtwWorldPed* s) { auto& g = TheGame(); return g.multiplayerWorld.setPed(g, s); };
+    api.remove_world_ped = [](uint32_t id) { auto& g = TheGame(); return g.multiplayerWorld.removePed(g, id); };
+    api.get_world_pickup = [](int i, CtwWorldPickup* p) { return TheGame().pickups.getWorld(i, p); };
+    api.set_world_pickup = [](const CtwWorldPickup* p) { auto& g = TheGame(); return g.pickups.setWorld(g, p); };
+    api.remove_world_pickup = [](uint32_t id) { return TheGame().pickups.removeWorld(id); };
+    api.take_world_pickup_claim = [] { auto& g = TheGame(); return g.pickups.takeWorldClaim(g); };
+    api.claim_world_pickup = [](uint32_t id, const int32_t* pos, int vehicle, CtwWorldPickup* out) { auto& g = TheGame(); return g.pickups.claimWorld(g, id, pos, vehicle, out); };
+    api.grant_world_pickup = [](const CtwWorldPickup* p) { auto& g = TheGame(); return g.pickups.grantWorld(g, p); };
+    api.take_world_skid = [](CtwSkidPoint* p) { return TheGame().multiplayerWorld.takeSkid(p); };
+    api.add_world_skid = [](const CtwSkidPoint* p) { auto& g = TheGame(); return g.multiplayerWorld.addSkid(g, p); };
+    api.take_world_explosion = [](CtwWorldExplosion* s) { return TheGame().multiplayerWorld.takeExplosion(s); };
+    api.add_world_explosion = [](const CtwWorldExplosion* s) { auto& g = TheGame(); return g.multiplayerWorld.addExplosion(g, s); };
+    api.get_player_seat = [] { return TheGame().playerCar >= 0 ? TheGame().playerSeat : -1; };
+    api.set_player_seat = [](CtwVehicle h, int seat) { auto& g = TheGame(); return g.multiplayerWorld.setPlayerSeat(g, h, seat); };
+    api.set_puppet_seat = [](CtwPuppet h, int seat) -> int {
+        auto* p = TheGame().peds.find(h);
+        if (!p || !p->puppet.on || seat < -1 || seat > 3) return 0;
+        p->puppet.seat = seat; return 1;
+    };
+    api.take_world_ped_damage = [](uint32_t id) { auto& g = TheGame(); return g.multiplayerWorld.takePedDamage(g, id); };
+    api.damage_world_ped = [](uint32_t id, int amount) { auto& g = TheGame(); return g.multiplayerWorld.damagePed(g, id, amount); };
+    api.vehicle_seat_count = [](CtwVehicle h) -> int { const auto* v = vehicle(h); return v ? v->numSeats() : 0; };
+    api.adopt_world_vehicle = [](CtwVehicle h, uint32_t id) { auto& g = TheGame(); return g.multiplayerWorld.adoptVehicle(g, h, id); };
+    api.get_vehicle_visual = [](CtwVehicle h, CtwVehicleVisual* out) -> int {
+        const auto* v = vehicle(h); if (!v || !out || out->size < sizeof *out) return 0;
+        v->getVisual(*out, TheGame().frame); return 1;
+    };
+    api.set_vehicle_visual = [](CtwVehicle h, const CtwVehicleVisual* s) -> int {
+        auto* v = vehicle(h); auto& g = TheGame();
+        if (!v || !s || s->size < sizeof *s || s->burnout > 3 || s->doors_open > 31 || s->tyres > 63 ||
+            std::abs((int64_t)s->steer) > 65536 || std::abs((int64_t)s->bike_lean) > 65536 ||
+            std::abs((int64_t)s->bike_pitch) > 65536 || std::abs((int64_t)s->bike_kick) > 65536) return 0;
+        for (auto a : s->door_angles) if (a > 65535) return 0;
+        if (g.multiplayerWorld.client() && indexOf(h) == g.playerCar && g.playerSeat == 0) return 1;
+        const int door = g.task.op != Game::CarTask::None && g.task.car == indexOf(h) ? g.task.seat : -1;
+        v->setVisual(*s, g.frame, door); return 1;
+    };
+    api.get_puppet_position = [](CtwPuppet h, float* xyz) -> int {
+        const auto* p = TheGame().peds.find(h); if (!p || !xyz) return 0;
+        for (int k = 0; k < 3; ++k) xyz[k] = p->body.pos[k] / 4096.f; return 1;
+    };
+    api.get_player_vehicle_task = [](int* seat) -> CtwVehicle {
+        const auto& g = TheGame(); if (seat) *seat = g.task.seat;
+        return g.task.op != Game::CarTask::None && g.task.car >= 0 && g.task.car < (int)g.cars.size() ? g.cars[g.task.car].uid : 0;
+    };
 }

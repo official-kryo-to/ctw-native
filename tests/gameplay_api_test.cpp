@@ -39,10 +39,25 @@ int main() {
     SDL_Init(0);
     Game& g = TheGame();
     const auto& api = Plugins_HostApi();
-    check(api.version == 13 && CTW_HOST_HAS(&api, set_vehicle_pose) && CTW_HOST_HAS(&api, spawn_puppet) && CTW_HOST_HAS(&api, set_prop_physics) && CTW_HOST_HAS(&api, cycle_weapon) && CTW_HOST_HAS(&api, consume_mouse_wheel) && CTW_HOST_HAS(&api, world_line) &&
+    check(api.version == 16 && CTW_HOST_HAS(&api, set_vehicle_pose) && CTW_HOST_HAS(&api, spawn_puppet) && CTW_HOST_HAS(&api, set_prop_physics) && CTW_HOST_HAS(&api, cycle_weapon) && CTW_HOST_HAS(&api, consume_mouse_wheel) && CTW_HOST_HAS(&api, world_line) &&
           CTW_HOST_HAS(&api, get_camera_shake) && CTW_HOST_HAS(&api, get_character_bounds) &&
           CTW_HOST_HAS(&api, draw_character_model_at_time) && CTW_HOST_HAS(&api, draw_character_model_attached) &&
-          CTW_HOST_HAS(&api, give_weapon) && CTW_HOST_HAS(&api, get_player_weapon), "v13 append-only host is available");
+          CTW_HOST_HAS(&api, give_weapon) && CTW_HOST_HAS(&api, get_player_weapon), "v14 append-only host is available");
+    const float marker[3] = {10, 20, 30};
+    check(CTW_HOST_HAS(&api, set_radar_blip_label) && api.set_radar_blip(1, marker, 0x4FB3FFFFu) &&
+          api.set_radar_blip_label(1, "aa") && g.blips.size() == 1 && !std::strcmp(g.blips[0].label, "AA"),
+          "player radar markers accept readable two-letter identifiers");
+    const float movedMarker[3] = {11, 22, 33};
+    check(api.set_radar_blip(1, movedMarker, 0xFF5A5AFFu) && g.blips.size() == 1 &&
+          !std::strcmp(g.blips[0].label, "AA") && g.blips[0].pos[1] == 22 * 4096,
+          "moving a player marker preserves its identifier without making a second dot");
+    const float invalidMarker[3] = {1.e30f, 0, 0};
+    check(!api.set_radar_blip(2, invalidMarker, 0) && !api.set_radar_blip_label(2, "B") &&
+          !api.set_radar_blip_label(1, "AAA") && !api.set_radar_blip_label(1, "\n") &&
+          !std::strcmp(g.blips[0].label, "AA"), "invalid radar positions and labels leave existing markers intact");
+    check(api.set_radar_blip_label(1, nullptr) && !g.blips[0].label[0], "clearing a label restores an ordinary dot");
+    api.remove_radar_blip(1);
+    check(g.blips.empty() && !api.set_radar_blip_label(1, "A"), "removing a player clears its radar marker and identifier");
     check(!api.get_prop_physics(), "props keep the original physics by default");
     api.set_prop_physics(1);
     check(api.get_prop_physics() && g.propDynamics.fullPhysics(), "mods can switch on full prop physics");

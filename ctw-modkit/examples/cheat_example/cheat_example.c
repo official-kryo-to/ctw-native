@@ -316,22 +316,23 @@ static void draw_spawner(void) {
     const float px = r.x, py = r.y, pw = r.w, ph = r.h, row = ctw_ui_row_h(&ui);
     char line[64];
     snprintf(line, sizeof line, "%d", shown_count);
-    if (ctw_ui_panel(&ui, px, py, pw, ph, "SPAWN", line)) { set_spawner(0); return; }
+    if (ctw_ui_panel(&ui, px, py, pw, ph, "Spawn", line)) { set_spawner(0); return; }
 
-    const float top = py + ctw_ui_title_h(&ui) + 12.f;
+    const float top = py + ctw_ui_title_h(&ui) + 24.f;
     int was_focused = search_focused;
-    if (ctw_ui_textbox(&ui, px + 14.f, top, pw - 28.f, row, filter, sizeof filter, &search_focused,
-                       "Search vehicles and weapons...")) {
+    if (ctw_ui_textbox(&ui, px + 24.f, top, pw - 48.f, row, filter, sizeof filter, &search_focused,
+                       "Search vehicles and weapons\xE2\x80\xA6")) {
         refilter();
         scroll.target = 0.f;
     }
     if (was_focused != search_focused) update_game_input();
 
-    /* grid of cards: the picture, then the name and the ID under it */
-    const float gx = px + 14.f, gy = top + row + 12.f, gw = pw - 28.f, gh = py + ph - ctw_ui_footer_h(&ui) - 10.f - gy;
+    /* grid of cards (the Porter's: kryo-radius border, border-foreground/40 under the pointer): the picture, then the
+       name in text-sm and the ID as a caption */
+    const float gx = px + 24.f, gy = top + row + 16.f, gw = pw - 48.f, gh = py + ph - ctw_ui_footer_h(&ui) - 16.f - gy;
     const int cols = gw >= 520.f ? 3 : gw >= 300.f ? 2 : 1;
-    const float gap = 10.f, cw = (gw - 14.f - gap * (cols - 1)) / cols;
-    const float name_h = ctw_ui_lh(&ui, 1.05f), id_h = ctw_ui_lh(&ui, 0.85f), text_h = 8.f + name_h + 2.f + id_h + 8.f;
+    const float gap = 8.f, cw = (gw - 14.f - gap * (cols - 1)) / cols;
+    const float name_h = 21.f, id_h = 15.f, text_h = 4.f + name_h + 2.f + id_h + 12.f;
     const float pic_h = cw * 0.55f, ch = 4.f + pic_h + text_h;
     const int rows = (shown_count + cols - 1) / cols;
     ctw_ui_scroll_begin(&ui, 2, &scroll, gx, gy, gw, gh, rows * (ch + gap));
@@ -341,16 +342,14 @@ static void draw_spawner(void) {
         if (cy + ch < gy || cy > gy + gh) continue;       /* only what is on screen */
         const int id = shown[i];
         const int hot = in_grid && ctw_ui_in(&ui, cx, cy, cw, ch);
-        api->draw_rect(cx, cy, cw, ch, hot ? 0xE0B02040u : CTW_UI_ROW);
-        if (hot) api->draw_rect(cx, cy + ch - 3.f, cw, 3.f, CTW_UI_ACCENT);
+        ctw_ui_round_frame(api, cx, cy, cw, ch, CTW_UI_RADIUS, 1.f, hot ? ctw_ui_alpha(CTW_UI_FOREGROUND, 0.4f) : CTW_UI_BORDER);
         const char* name;
         if (id >= WEAPON_ENTRY) {   /* the game's own weapon picture, larger while hovered */
             name = api->weapon_name(id - WEAPON_ENTRY);
             const float grow = hot ? 1.f : 0.88f, iw = (cw - 8.f) * grow, ih = pic_h * grow;
             if (!CTW_MOD_HAS(api, draw_weapon_icon) ||
                 !api->draw_weapon_icon(id - WEAPON_ENTRY, cx + 4.f + (cw - 8.f - iw) * 0.5f, cy + 4.f + (pic_h - ih) * 0.5f, iw, ih)) {
-                const float big = ctw_ui_lh(&ui, 1.6f);
-                ctw_ui_text_fit(&ui, cx + 14.f, cy + 4.f + (pic_h - big) * 0.5f, 1.6f, CTW_UI_DIM, "WEAPON", cw - 28.f);
+                ctw_ui_label(&ui, cx + 12.f, cy + 4.f + (pic_h - 18.f) * 0.5f, "Weapon");
             }
             snprintf(line, sizeof line, "Weapon %d", id - WEAPON_ENTRY);
         } else {
@@ -359,16 +358,16 @@ static void draw_spawner(void) {
             snprintf(line, sizeof line, "Vehicle %d", id);
         }
         api->set_clip(gx, gy, gw, gh);                   /* the picture changes the drawing state */
-        const float ty = cy + 4.f + pic_h + 8.f;
-        ctw_ui_text_fit(&ui, cx + 10.f, ty, 1.05f, CTW_UI_TEXT, name ? name : "?", cw - 20.f);
-        api->draw_text(cx + 10.f, ty + name_h + 2.f, 0.85f, CTW_UI_DIM, line);
+        const float ty = cy + 4.f + pic_h + 4.f;
+        ctw_ui_type_fit(&ui, cx + 12.f, ty, CTW_UI_TEXT_SM, 0.f, 0, CTW_UI_FOREGROUND, name ? name : "?", cw - 24.f);
+        ctw_ui_type_fit(&ui, cx + 12.f, ty + name_h + 2.f, 10.f, 0.05f, CTW_UI_UPPER, CTW_UI_MUTED_FG, line, cw - 24.f);
         if (hot && ui.clicked) spawn(id);
     }
-    if (!shown_count) ctw_ui_text(&ui, gx + 6.f, gy + 10.f, 1.f, CTW_UI_DIM, "Nothing matches.");
+    if (!shown_count) ctw_ui_caption(&ui, gx, gy, "Nothing matches.");
     ctw_ui_scroll_end(&ui);
     /* what just happened, else how it works */
-    if (message[0] && api->frame_count() < message_until) ctw_ui_footer(&ui, px, py, pw, ph, CTW_UI_ACCENT, message);
-    else ctw_ui_footer(&ui, px, py, pw, ph, CTW_UI_DIM, "Click: spawn.   Enter: first match.   Q / E: switch weapon.   Esc: close");
+    if (message[0] && api->frame_count() < message_until) ctw_ui_footer(&ui, px, py, pw, ph, CTW_UI_FOREGROUND, message);
+    else ctw_ui_footer(&ui, px, py, pw, ph, CTW_UI_DIM, "Click: spawn  \xC2\xB7  Enter: first match  \xC2\xB7  Q / E: switch weapon  \xC2\xB7  Esc: close");
 }
 
 /* The free camera's keys, at the bottom above the game's help line. Only while nothing else is open: with a
@@ -379,14 +378,14 @@ static void draw_camera_help(void) {
     char speeds[128];
     snprintf(speeds, sizeof speeds, "Wheel: speed %.0f      Page Up / Page Down: render distance %.0f", cam_speed, render_distance);
     const char* keys = "Mouse: look      WASD: fly      Space / Ctrl: up and down      Shift: faster      F8: back";
-    const float h1 = ctw_ui_lh(&ui, 1.1f), h2 = ctw_ui_text_wrap(&ui, 0, 0, 0.9f, 0, keys, w, 0);
-    const float h3 = ctw_ui_text_wrap(&ui, 0, 0, 0.9f, 0, speeds, w, 0), h = 12.f + h1 + 6.f + h2 + h3 + 12.f;
+    /* a card with the Porter's <Label>, the keys in text-xs and the settings as a caption line */
+    const float h1 = 16.f, h2 = ctw_ui_type_wrap(&ui, 0, 0, CTW_UI_TEXT_XS, 1.625f, 0, keys, w, 0);
+    const float h3 = ctw_ui_type_wrap(&ui, 0, 0, CTW_UI_TEXT_XS, 1.625f, 0, speeds, w, 0), h = 16.f + h1 + 8.f + h2 + h3 + 16.f;
     const float y = bottom - h;
-    ctw_ui_round_rect(api, x, y, bw, h, 12.f, CTW_UI_PANEL);
-    api->draw_rect(x + 12.f, y, bw - 24.f, 2.f, CTW_UI_ACCENT);
-    api->draw_text(x + 20.f, y + 12.f, 1.1f, CTW_UI_TEXT, "FREE CAMERA");
-    ctw_ui_text_wrap(&ui, x + 20.f, y + 18.f + h1, 0.9f, CTW_UI_TEXT, keys, w, 1);
-    ctw_ui_text_wrap(&ui, x + 20.f, y + 18.f + h1 + h2, 0.9f, CTW_UI_DIM, speeds, w, 1);
+    ctw_ui_card(api, x, y, bw, h);
+    ctw_ui_label(&ui, x + 20.f, y + 16.f + (h1 - 18.f) * 0.5f, "Free camera");
+    ctw_ui_type_wrap(&ui, x + 20.f, y + 16.f + h1 + 8.f, CTW_UI_TEXT_XS, 1.625f, CTW_UI_FOREGROUND, keys, w, 1);
+    ctw_ui_type_wrap(&ui, x + 20.f, y + 16.f + h1 + 8.f + h2, CTW_UI_TEXT_XS, 1.625f, CTW_UI_MUTED_FG, speeds, w, 1);
 }
 
 static void hud(void* user) {

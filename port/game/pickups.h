@@ -21,6 +21,7 @@
 // phone's "touch to swap" box, which the port does not have, so it stays where it is.
 #pragma once
 #include <cstdint>
+#include "ctw_types.h"
 #include <set>
 #include <vector>
 
@@ -48,6 +49,7 @@ public:
         int cell = -1;                // the 50-unit sector it belongs to (x * 100 + y)
     };
 
+    void setShared(bool shared) { shared_ = shared; }
     void reset();                                   // cPickupManager::Reset
     void update(Game& g);                           // streaming, cPickupManager::Process and each pickup's Process
     void render(const Game& g, const WorldCamera& cam) const;   // cBasePickup::ManagedRender
@@ -59,11 +61,18 @@ public:
     static int weaponFromType(int type);
     static int typeFromWeapon(int weapon);           // AddDroppedWeapon's switch (-1: none)
     const std::vector<Pickup>& list() const { return pickups_; }
+    int getWorld(int index, CtwWorldPickup* out) const;
+    int setWorld(Game& g, const CtwWorldPickup* state);
+    int removeWorld(uint32_t id);
+    uint32_t takeWorldClaim(const Game& g) const;
+    int claimWorld(Game& g, uint32_t id, const int32_t position[3], int inVehicle, CtwWorldPickup* out);
+    int grantWorld(Game& g, const CtwWorldPickup* state);
     bool allowMelee = true;                          // AllowMeleePickups (+0x191)
     bool allowMoney = true;                          // cPlayer +0x3F9 (the script's AllowMoneyPickups): dead peds' money
     static constexpr int kPoolSize = 30;             // cGamePoolManager's "Pickup" pool
 
 private:
+    bool shared_ = false;
     std::vector<Pickup> pickups_;
     uint32_t nextUid_ = 1;
     struct Collected { int32_t x = 0, y = 0; uint8_t type = 0; bool active = false; int16_t timer = 0; };
@@ -73,8 +82,9 @@ private:
     bool addToCollected(const Pickup& p);            // AddToAmbientCollectedList
     bool forceFree();                                // ForceFreePickup
     int touching(const Game& g, const Pickup& p) const;   // IsTouchingPlayer: 0 the player, 2 nobody
+    bool eligible(const Game& g, const Pickup& p) const;
     bool collect(Game& g, Pickup& p);                // the pickup's Collect: true to keep counting it as taken
     void setState(Pickup& p, uint8_t state);         // cBasePickup::SetState
     void process(Game& g, Pickup& p);                // cBasePickup::Process
-    int freeSlots() const { return kPoolSize - (int)pickups_.size(); }
+    int freeSlots() const { return (shared_ ? 256 : kPoolSize) - (int)pickups_.size(); }
 };

@@ -43,7 +43,7 @@ switch, description and options on the right.
 | --- | --- |
 | `Enhancements` | PC extras, one feature per source file: a third-person camera (**V**), PSP-style lighting and optional imported LCS 3D people. Remembers its options. |
 | `CheatExample` | Cheats, a spawn menu for vehicles and weapons (F7) and a free camera (F8). |
-| `Multiplayer` | Play together: up to eight players in one city over UDP (**F9** to host or join, **T** to chat). See [Playing together](#playing-together). |
+| `Multiplayer` | Play together: configurable rooms for 2–32 players in one city over UDP (**F9** to host or join, **T** to chat). See [Playing together](#playing-together). |
 | `Trumpify` | Transparent texture layers over the city's adverts. |
 
 The Porter lets you choose the premade mods and installs `ModMenu.dll` when mods are enabled. They also come from building
@@ -184,7 +184,7 @@ colours `0xRRGGBBAA`, screen coordinates pixels from the top left.
 Keys are SDL scancodes (<https://wiki.libsdl.org/SDL2/SDL_Scancode>). Read the mouse and typed text inside
 `on_draw_hud`. `examples/cheat_example` uses most of this: study it next.
 
-**Versions.** `api->version` is 13 for this game. Functions are only ever added at the end of `CtwApi`, so a mod built
+**Versions.** `api->version` is 16 for this game. Functions are only ever added at the end of `CtwApi`, so a mod built
 for an older version keeps working; if your mod needs a newer function, check `api->version` or `api->size` in
 `ctw_mod_init` and return non-zero to refuse loading on an older game.
 
@@ -261,7 +261,7 @@ animation/appearance limitations.
 
 ### Playing together
 
-The `Multiplayer` example is a complete mod built on the v13 functions. It puts a **MULTIPLAYER** button on the
+The `Multiplayer` example uses the v15 shared-world and vehicle presentation functions. It puts a **MULTIPLAYER** button on the
 game's own pause screen (Esc; or press **F9**), which opens a window with four tabs:
 
 - **Online**: the public games on CTW Online, and joining a private one by its six-letter code. Nothing to set up
@@ -273,10 +273,27 @@ game's own pause screen (Esc; or press **F9**), which opens a window with four t
 - **Host**: name the game and host it; it is on the network at once and, with CTW Online, online too (listed
   publicly, or private and joined by its code).
 
+The **Maximum players** slider on Host chooses the room size, including the host: 16 by default, from 2 to a
+hard limit of 32. Changes take effect when hosting or restarting. The setting is saved as `max_players=16` in
+`mods/Multiplayer/multiplayer.ini`; `CTW_MULTIPLAYER_MAX_PLAYERS=32` overrides it for a shortcut. Larger rooms need
+more host upload bandwidth and processing time. The game and relay both enforce the room size.
+
 Everyone sees the others walk, drive, ride and shoot with their names and health over them, and each player as a
-dot of their own colour on the radar (the swatch on their name tag); hits on another player
+lettered dot of their own colour on the radar (A-Z, then AA-AF, matching the player list); hits on another player
 are taken by that player's own game (with "was killed by" in the chat), **T** opens the chat and joiners take the
-host's time of day and weather. Traffic, pedestrians, the police and pickups stay each player's own.
+host's time of day and weather. The host owns traffic, parked cars, pedestrians, police and explosions; joiners
+receive those same entities and send their damage and driving updates to the host. Occupants share one vehicle
+ID and distinct seats, with the driver controlling its motion. Snapshots stream in bounded batches and stale
+updates are rejected; explosion and damage retries apply once. Cars spawned by a joiner's mod are assigned a host
+ID and adopted without replacing the original car. Police visibility and NPC damage are shared; pursuit and arrest
+AI currently follows the host's player and wanted level. Mission progress remains local.
+Lights, brake/reverse lamps, indicators, door angles, wheel slip, bike lean and burnout effects follow the driver's
+state. Remote vehicles use a short interpolation buffer; passenger cameras and name tags follow the same rendered
+vehicle instead of jumping to packet positions. Individual smoke/spark particles are generated locally from the
+shared effect state. Tyre trails use accepted source geometry with ordered retries. NPC money/weapon drops and
+ambient pickups are shared; the first successful collector receives the reward once and the pickup disappears for
+everyone. All players need the updated game and mod: protocol v5 refuses older multiplayer versions.
+See the [synchronization coverage and remaining gaps](examples/multiplayer/SYNC.md).
 
 The DS and PSP versions had two-player games over local wireless with six modes (two races, Stash Dash, Defend
 the Base, Liberty City Survivor and Gang Bang); the mobile version this port comes from has none of them (only an
@@ -285,18 +302,28 @@ unused PDA button), so this mod is free roam together.
 A shortcut can start straight into a game: set `CTW_MULTIPLAYER` to `host`, `join <address>` or `online <code>`
 (and optionally `CTW_MULTIPLAYER_NAME`, or `CTW_ONLINE_URL` for another CTW Online) before starting the game.
 Messages are described in `examples/multiplayer/protocol.h`. A mod can add its own pause-screen buttons with
-`add_pause_button` and radar dots with `set_radar_blip` (v13).
+`add_pause_button` and radar dots with `set_radar_blip` (v13), with `set_radar_blip_label` (v14) for letters. Each
+player's state carries the view their game tests "on screen" with (`get_view`); the host sets it on their puppet
+(`set_puppet_view`, v16), so cars and people another player can see behave as seen, and nothing appears in front of
+them.
 
 ## 6. Windows and menus with ctw_ui.h
 
-`include/ctw_ui.h` is optional, plain C and header-only: windows, buttons, switches, sliders, option pickers,
-tags, scrolling lists, text fields and wrapped text, drawn with the mod API. The mod menu and the Cheat Example's spawn menu are built with
-it.
+`include/ctw_ui.h` is optional, plain C and header-only: windows, buttons, check boxes, sliders, option pickers,
+tags, notices, scrolling lists, text fields and wrapped text, drawn with the mod API. The mod menu, the Multiplayer
+window and the Cheat Example's spawn menu are built with it.
+
+It is the Porter's interface, copied: Kryoto's design tokens (`CTW_UI_BACKGROUND`, `CTW_UI_CARD`, `CTW_UI_PRIMARY`,
+`CTW_UI_BORDER`, `CTW_UI_MUTED_FG` and the status colours, from `porter/src/styles.css`) and its components
+(`ctw_ui_label`, `ctw_ui_caption`, `ctw_ui_button_ex` with the outline, primary, ghost and danger pills in three
+sizes, `ctw_ui_check`, `ctw_ui_tag`, `ctw_ui_notice`, `ctw_ui_card`), in the same CSS pixel sizes and set in the
+same typeface. `draw_ui_text` and `ui_text_width` (API v16) draw that typeface; on an older game the same layout
+uses the game's font. The earlier calls keep working (a switch is now a check box, and scale 1 text is `text-xs`).
 
 Two things keep windows tidy:
 
-- **Sizes follow the game font.** Use `ctw_ui_row_h`, `ctw_ui_slider_h`, `ctw_ui_title_h` and `ctw_ui_footer_h`
-  for heights and `ctw_ui_lh` for lines of text, not fixed pixel numbers.
+- **Use the sizes it gives.** `ctw_ui_row_h`, `ctw_ui_slider_h`, `ctw_ui_title_h` and `ctw_ui_footer_h` are the
+  Porter's heights; `ctw_ui_button_w` sizes a button to its label. Inside a window, keep the card's 24-pixel padding.
 - **Windows have a place.** `ctw_ui_side_area` gives a window a rectangle on the right that stays clear of the
   game's clock, its help line and the open mod menu.
 
@@ -310,11 +337,15 @@ static CtwUiScroll list;
 static void hud(void* user) {
     ctw_ui_begin(&ui, api);
     CtwUiRect r = ctw_ui_side_area(api, 420.f);                      /* at most 420 pixels wide */
-    if (ctw_ui_panel(&ui, r.x, r.y, r.w, r.h, "MY WINDOW", NULL)) { /* close clicked */ }
-    float y = r.y + ctw_ui_title_h(&ui) + 10.f;
-    if (ctw_ui_button(&ui, r.x + 14.f, y, 160.f, ctw_ui_row_h(&ui), "Click me")) api->log(self, "clicked");
-    y += ctw_ui_row_h(&ui) + 10.f;
-    ctw_ui_scroll_begin(&ui, 1, &list, r.x + 14.f, y, r.w - 28.f, r.y + r.h - ctw_ui_footer_h(&ui) - y, content_height);
+    if (ctw_ui_panel(&ui, r.x, r.y, r.w, r.h, "My window", NULL)) { /* close clicked */ }
+    float y = r.y + ctw_ui_title_h(&ui) + 24.f;
+    ctw_ui_label(&ui, r.x + 24.f, y, "Actions");
+    y += 16.f + 12.f;
+    const float bw = ctw_ui_button_w(&ui, CTW_UI_MD, "Click me");
+    if (ctw_ui_button_ex(&ui, r.x + 24.f, y, bw, ctw_ui_row_h(&ui), CTW_UI_PRIMARY_BUTTON, CTW_UI_MD, 0, "Click me"))
+        api->log(self, "clicked");
+    y += ctw_ui_row_h(&ui) + 16.f;
+    ctw_ui_scroll_begin(&ui, 1, &list, r.x + 24.f, y, r.w - 48.f, r.y + r.h - ctw_ui_footer_h(&ui) - y, content_height);
     /* draw rows at y - list.pos */
     ctw_ui_scroll_end(&ui);
     ctw_ui_footer(&ui, r.x, r.y, r.w, r.h, CTW_UI_DIM, "F9: close");

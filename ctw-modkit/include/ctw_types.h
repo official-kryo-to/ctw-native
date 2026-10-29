@@ -129,4 +129,58 @@ typedef struct CtwPuppetState {
     CtwVehicle vehicle;             /* the vehicle it drives, 0 on foot */
     int32_t weapon;                 /* the weapon it holds (eWeaponType, 0 fists); FIRING: its gun shoots (harmlessly) */
 } CtwPuppetState;
+
+/* Version 14: shared-world replication. IDs belong to the host and remain stable for the session.
+   Set size before every call. The transport must authenticate the authority before applying a state. */
+enum CtwMultiplayerRole { CTW_MULTIPLAYER_OFF = 0, CTW_MULTIPLAYER_HOST = 1, CTW_MULTIPLAYER_CLIENT = 2 };
+typedef struct CtwWorldVehicle {
+    uint32_t size, id;
+    int32_t model, palette, health;
+    uint32_t flags;                  /* CtwVehicleFlags; bit 8 siren, 9..13 damaged flaps, 14..18 detached
+                                       parts, 19..20 burst tyres, 21..30 remaining burn timer (game ticks). */
+    float position[3], quaternion[4], velocity[3];
+} CtwWorldVehicle;
+typedef struct CtwWorldPed {
+    uint32_t size, id;
+    int32_t type, subtype, body, upper, legs, move, health, weapon;
+    uint32_t flags;                  /* CtwPuppetFlags */
+    float position[3], heading, velocity[3];
+    uint32_t vehicle;                /* host vehicle ID, 0 on foot */
+    int32_t seat;
+} CtwWorldPed;
+typedef struct CtwWorldExplosion {
+    uint32_t size;
+    int32_t type;                    /* 0..11, as Explosion::AddExplosion */
+    float position[3], velocity[3], scale;
+} CtwWorldExplosion;
+/* Version 15: persistent vehicle presentation, independent of physics authority. */
+typedef struct CtwVehicleVisual {
+    /* flags: engine 1, siren 2, indicators 4/8, hazards 16, rail brake 32.
+       controls: brake 2, reverse 4, burnout flames 0x100.
+       tyres: front spin/rim-sparks/ground bits 0..2; rear bits 3..5. Angles use native fixed units.
+       frame/source retain the originating vehicle's light pattern across differing local handles. */
+    uint32_t size, flags, controls, tyres, burnout;
+    int32_t steer, bike_lean, bike_pitch, bike_kick;
+    uint32_t doors_open, door_angles[5], frame, source;
+} CtwVehicleVisual;
+/* Accepted tyre contact geometry, in native 1/4096 world units. Strip and sequence identify continuity. */
+typedef struct CtwSkidPoint {
+    uint32_t size, vehicle, wheel, strip, sequence, hold, owner;
+    int32_t position[3], direction[3];
+} CtwSkidPoint;
+/* Host-assigned pickup identity and native fixed-point world position. */
+typedef struct CtwWorldPickup {
+    uint32_t size, id;
+    int32_t type, amount, position[3];
+    uint32_t in_vehicle;
+} CtwWorldPickup;
+/* The view a game decides "on screen" with (cBaseCam::CanSee): the eye in 1/4096 world units, yaw and pitch in
+   1/65536 turns and the screen size its frustum was set up for. */
+enum { CTW_TEXT_BOLD = 1, CTW_TEXT_UPPER = 2 };   /* draw_ui_text styles */
+typedef struct CtwView {
+    uint32_t size;
+    int32_t eye[3];
+    uint32_t yaw, pitch;
+    int32_t width, height;
+} CtwView;
 #endif

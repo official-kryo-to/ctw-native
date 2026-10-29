@@ -14,17 +14,28 @@ endif()
 FetchContent_Declare(SDL2 GIT_REPOSITORY https://github.com/libsdl-org/SDL.git GIT_TAG release-2.30.9 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(SDL2)
 
+# brotli's decoder, for the interface font (WOFF2): only its C sources are built
+if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/../third_party/brotli/c/include" AND NOT FETCHCONTENT_SOURCE_DIR_BROTLI)
+    set(FETCHCONTENT_SOURCE_DIR_BROTLI "${CMAKE_CURRENT_LIST_DIR}/../third_party/brotli" CACHE PATH "Local brotli source")
+endif()
+FetchContent_Declare(brotli GIT_REPOSITORY https://github.com/google/brotli.git GIT_TAG v1.1.0 GIT_SHALLOW TRUE
+    SOURCE_SUBDIR no-cmake)
+FetchContent_MakeAvailable(brotli)
+file(GLOB CTW_BROTLI_SOURCES ${brotli_SOURCE_DIR}/c/common/*.c ${brotli_SOURCE_DIR}/c/dec/*.c)
+add_library(ctw_brotlidec STATIC ${CTW_BROTLI_SOURCES})
+target_include_directories(ctw_brotlidec PUBLIC ${brotli_SOURCE_DIR}/c/include)
+
 add_library(glad STATIC third_party/glad/src/gl.c)
 target_include_directories(glad PUBLIC third_party/glad/include)
 
 # ---- engine: everything shared by the showcase and the game (src/) ----------------------------------------
 add_library(ctw_engine STATIC
     src/os/os_sdl.cpp src/os/wad.cpp src/os/gamefs.cpp src/os/dxtbin.cpp src/os/pak.cpp src/os/datafile.cpp
-    src/gfx/spriteset.cpp src/gfx/font.cpp src/gfx/model.cpp src/gfx/character.cpp src/gfx/texload.cpp src/gfx/assets.cpp src/gfx/stb_impl.cpp src/gfx/pedsprites.cpp src/gfx/rendertables.cpp
+    src/gfx/spriteset.cpp src/gfx/font.cpp src/gfx/model.cpp src/gfx/character.cpp src/gfx/texload.cpp src/gfx/assets.cpp src/gfx/stb_impl.cpp src/gfx/uifont.cpp src/gfx/pedsprites.cpp src/gfx/rendertables.cpp
     src/text/gxt.cpp src/audio/audio.cpp src/video/movie.cpp
     src/world/worldmap.cpp src/world/timecycle.cpp src/world/worldrenderer.cpp src/world/collision.cpp src/world/collisionsweep.cpp src/world/props.cpp)
 target_include_directories(ctw_engine PUBLIC src third_party/stb third_party/minimp3)
-target_link_libraries(ctw_engine PUBLIC glad SDL2::SDL2-static)
+target_link_libraries(ctw_engine PUBLIC glad SDL2::SDL2-static ctw_brotlidec)
 if(WIN32)   # Media Foundation decodes the intro movie (part of Windows; no extra runtime)
     target_link_libraries(ctw_engine PUBLIC mfplat mfreadwrite mfuuid shlwapi ole32)
 endif()
@@ -60,12 +71,32 @@ target_sources(ctw_gameplay PRIVATE game/pedsocial.cpp)
 target_sources(ctw_gameplay PRIVATE game/zones.cpp)
 target_sources(ctw_gameplay PRIVATE game/intro.cpp)
 target_sources(ctw_gameplay PRIVATE game/pickups.cpp)
-target_sources(ctw_gameplay PRIVATE game/sequence.cpp game/comicscreen.cpp game/sinkingcar.cpp game/devmenu.cpp game/stroke.cpp game/hotwiring.cpp game/cutscene.cpp game/mission.cpp game/kena01.cpp)
+target_sources(ctw_gameplay PRIVATE game/sequence.cpp game/comicscreen.cpp game/sinkingcar.cpp game/devmenu.cpp game/porterui.cpp game/stroke.cpp game/hotwiring.cpp game/cutscene.cpp game/mission.cpp game/kena01.cpp)
 target_sources(ctw_gameplay PRIVATE game/pedcomments.cpp)
 target_sources(ctw_gameplay PRIVATE game/police.cpp game/policedriving.cpp)
 target_include_directories(ctw_gameplay PUBLIC game)
 target_sources(ctw_gameplay PRIVATE game/radar.cpp game/gamehud.cpp)
 target_sources(ctw_gameplay PRIVATE game/gameplayapi.cpp game/cameraobstruction.cpp)
+target_sources(ctw_gameplay PRIVATE game/multiplayerworld.cpp)
+# The interface typeface the Porter is set in (Kryoto's Teletext, porter/public/fonts: see its README), built into
+# the game as the Porter builds it into its own exe. Without the files the interface uses the game's font.
+set(CTW_UI_FONTS ${CMAKE_CURRENT_LIST_DIR}/../porter/public/fonts)
+set(CTW_UI_FONT_SOURCE "// Generated from porter/public/fonts by port/CMakeLists.txt.\n#include <cstddef>\n#include <cstdint>\n")
+foreach(CTW_FONT regular bold)
+    set(CTW_FONT_FILE ${CTW_UI_FONTS}/teletext-${CTW_FONT}.woff2)
+    set(CTW_FONT_BYTES "0")
+    set(CTW_FONT_SIZE "0")
+    if(EXISTS ${CTW_FONT_FILE})
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CTW_FONT_FILE})
+        file(READ ${CTW_FONT_FILE} CTW_FONT_HEX HEX)
+        string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," CTW_FONT_BYTES "${CTW_FONT_HEX}")
+        set(CTW_FONT_SIZE "sizeof kUiFont_${CTW_FONT}")
+    endif()
+    string(APPEND CTW_UI_FONT_SOURCE "extern const uint8_t kUiFont_${CTW_FONT}[] = {${CTW_FONT_BYTES}};\n"
+                                     "extern const size_t kUiFont_${CTW_FONT}_size = ${CTW_FONT_SIZE};\n")
+endforeach()
+file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/generated/uifonts.cpp CONTENT "${CTW_UI_FONT_SOURCE}" @ONLY)
+target_sources(ctw_gameplay PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated/uifonts.cpp)
 target_sources(ctw_gameplay PRIVATE game/vehicledebris.cpp game/vehicleskids.cpp game/trails.cpp game/vehiclereactions.cpp
     game/wanted.cpp game/crimes.cpp game/deathscreen.cpp)
 target_sources(ctw_gameplay PRIVATE game/explosions.cpp)
@@ -91,6 +122,9 @@ target_include_directories(audiotest PRIVATE third_party/minimp3)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(multiplayerworldtest ../tests/multiplayer_world_test.cpp)
+    target_link_libraries(multiplayerworldtest PRIVATE ctw_gameplay)
+    add_test(NAME multiplayer_world COMMAND multiplayerworldtest)
     add_executable(npcweaponstest ../tests/npc_weapons_test.cpp)
     target_link_libraries(npcweaponstest PRIVATE ctw_gameplay)
     add_test(NAME npc_weapons COMMAND npcweaponstest)

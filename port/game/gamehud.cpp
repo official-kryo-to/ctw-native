@@ -208,11 +208,21 @@ void GameplayHud::render(const Game& game, int width, int height) const {
     glDisable(GL_TEXTURE_2D);
     for (const RadarBlip& b : game.blips) {   // HUDImpl::AddBlip (a dot in the blip's colour; at the edge when far)
         float bx, by;
-        projection.worldOffset(b.pos, pos, bx, by, diameter * .45f);
+        const float markerRadius = b.label[0] ? (b.label[1] ? 11.f : 8.f) : 5.f;
+        projection.worldOffset(b.pos, pos, bx, by, diameter * .49f - markerRadius - 1.5f);
+        const float x = cx + bx * k, y = cy + by * k;
         glColor4f(0, 0, 0, .8f);
-        disc(cx + bx * k, cy + by * k, 6.5f * k);
+        disc(x, y, (markerRadius + 1.5f) * k);
         glColor4ub((GLubyte)(b.colour >> 24), (GLubyte)(b.colour >> 16), (GLubyte)(b.colour >> 8), 255);
-        disc(cx + bx * k, cy + by * k, 5.f * k);
+        disc(x, y, markerRadius * k);
+        if (b.label[0]) {
+            const float width = Hud_TextWidth(b.label, 1.f), height = Hud_LineHeight(1.f);
+            const float available = markerRadius * 1.65f * k;
+            const float scale = std::min(.75f * k, available / std::max({width, height, 1.f}));
+            Hud_Text(x - Hud_TextWidth(b.label, scale) * .5f, y - Hud_LineHeight(scale) * .5f,
+                     scale, 0x101010FFu, b.label);
+            glDisable(GL_TEXTURE_2D);
+        }
     }
     renderWantedStars(game, k, width, height);
     renderCash(game, k);

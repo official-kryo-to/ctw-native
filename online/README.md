@@ -13,7 +13,9 @@ the players' mods at it. Games on different services do not see each other.
 
 ## Deploy your own
 
-You need a free Cloudflare account and Node.js 18 or newer.
+You need a free Cloudflare account and Node.js 18 or newer. Nothing in the project is tied to the project's own
+account: there are no secrets, account IDs or routes to edit. The first deploy asks you to pick a `workers.dev`
+subdomain if your account has none.
 
 ```text
 cd online
@@ -58,6 +60,32 @@ A game uses a local service with `CTW_ONLINE_URL=http://127.0.0.1:8787` set befo
 Relay frames are binary and carry the game's own messages unchanged: a player's message reaches the host as
 `[u16 player][message]`; the host sends `[u16 player][message]` to one player or `[0xFFFF][message]` to all. An
 empty message from the relay tells the host a player has gone.
+
+Rooms default to 16 players and allow a host-selected limit from 2 to 32, including the host. The registration's
+`max` is the room's capacity for its lifetime; heartbeats preserve it. The relay refuses connections when that
+capacity is reached, and the mod also enforces it across direct, LAN and relay players together.
+
+## Abuse limits
+
+The service has no accounts, so it limits by the client's address (`CF-Connecting-IP`). The constants are at the
+top of `src/index.js`; raise them if many players share one address.
+
+| Limit | Value | When exceeded |
+| --- | --- | --- |
+| Games one address keeps listed | 5 | listing is refused with 429 |
+| New games one address lists | 20 a minute | 429 |
+| Lookups of unknown game codes | 30 a minute | 429, which stops code guessing |
+| Frames a relay player sends | 200 a second | the excess is dropped |
+| Frame size | 2048 bytes | dropped |
+| Room size | 2 to 32 including the host | refused |
+
+Counters are kept in memory and start again if Cloudflare restarts the list object, so they are a courtesy and not a
+guarantee. A host reports its own player count, so the list is not proof of who is playing. A private game is
+reachable by anyone who knows its six-letter code.
+
+Many games run at once: each one is its own relay room, and a service has one list. They all share the Cloudflare
+account's quota (below), so on the project's service one heavy user can use up what everyone else has. Run your
+own if that matters.
 
 ## Limits
 

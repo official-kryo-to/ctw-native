@@ -61,3 +61,70 @@ test('a public game is listed, relayed and removed', { skip: !base }, async () =
   list = await (await fetch(base + '/v1/servers')).json()
   assert.ok(!list.some((s) => s.id === created.id), 'a game that stopped is no longer listed')
 })
+
+test('the configured room limit includes its host and cannot be bypassed in the join URL', { skip: !base, timeout: 15_000 }, async () => {
+  const created = await (await fetch(base + '/v1/servers', {
+    method: 'POST', body: JSON.stringify({ name: 'Two-player room', players: 1, max: 2 }),
+  })).json()
+  let host, player
+  try {
+    host = await open(ws(`/v1/rooms/${created.id}?token=${created.token}`))
+    player = await open(ws(`/v1/rooms/${created.id}`))
+    await assert.rejects(open(ws(`/v1/rooms/${created.id}?role=host&max=32`)), 'two means host plus one player')
+    assert.equal((await fetch(base + `/v1/servers/${created.id}`, {
+      method: 'POST', body: JSON.stringify({ token: created.token, players: 32, name: 'Two-player room' }),
+    })).status, 200)
+    const list = await (await fetch(base + '/v1/servers')).json()
+    const room = list.find((s) => s.id === created.id)
+    assert.equal(room.max, 2, 'a heartbeat preserves the registered capacity')
+    assert.equal(room.players, 2, 'a heartbeat cannot advertise more players than the room holds')
+  } finally {
+    player?.close()
+    host?.close()
+    await fetch(base + `/v1/servers/${created.id}?token=${created.token}`, { method: 'DELETE' })
+  }
+})
+
+test('rooms allow 32 players with bounded defaults and refuse the next connection', { skip: !base, timeout: 30_000 }, async () => {
+  const create = async (max) => (await fetch(base + '/v1/servers', {
+    method: 'POST', body: JSON.stringify({ name: 'Capacity test', players: 1, max }),
+  })).json()
+  const large = await create(999), standard = await create(undefined), small = await create(1)
+  let host
+  const players = []
+  try {
+    const list = await (await fetch(base + '/v1/servers')).json()
+    assert.equal(list.find((s) => s.id === large.id).max, 32)
+    assert.equal(list.find((s) => s.id === standard.id).max, 16)
+    assert.equal(list.find((s) => s.id === small.id).max, 2)
+    host = await open(ws(`/v1/rooms/${large.id}?token=${large.token}`))
+    for (let i = 1; i < 32; ++i) {
+      const player = await open(ws(`/v1/rooms/${large.id}`))
+      players.push(player)
+      player.send(new Uint8Array([i]))
+      assert.deepEqual([...await host.next()], [i, 0, i], 'every admitted player gets a distinct relay id')
+    }
+    await assert.rejects(open(ws(`/v1/rooms/${large.id}`)), '32 is a hard limit including the host')
+  } finally {
+    for (const player of players) player.close()
+    host?.close()
+    for (const room of [large, standard, small])
+      await fetch(base + `/v1/servers/${room.id}?token=${room.token}`, { method: 'DELETE' })
+  }
+})
+
+test('one address cannot keep more than a few games listed', { skip: !base }, async () => {
+  const made = []
+  try {
+    let refused
+    for (let i = 0; i < 8 && !refused; ++i) {
+      const response = await fetch(base + '/v1/servers', { method: 'POST', body: JSON.stringify({ name: 'Cap test', max: 2 }) })
+      if (response.status === 429) refused = await response.json()
+      else made.push(await response.json())
+    }
+    assert.ok(refused, 'a sixth game from one address is refused')
+    assert.equal(made.length, 5)
+  } finally {
+    for (const room of made) await fetch(base + `/v1/servers/${room.id}?token=${room.token}`, { method: 'DELETE' })
+  }
+})

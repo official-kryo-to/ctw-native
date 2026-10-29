@@ -38,6 +38,7 @@
 #include "sinkingcar.h"
 #include "devmenu.h"
 #include "hotwiring.h"
+#include "multiplayerworld.h"
 #include "mission.h"
 #include "world/worldrenderer.h"
 #include <cstdint>
@@ -81,6 +82,8 @@ public:
     std::vector<VehicleInfo> vehicleInfos;   // resource 1994
     std::vector<Vehicle> cars;
     int playerCar = -1;                      // the car the player drives (index into cars), -1 = on foot
+    int playerSeat = 0;                      // shared vehicles: 0 drives, 1..3 ride as passengers
+    MultiplayerWorld multiplayerWorld;
     FollowCarCam carCam;
     bool enterPressed = false;               // the enter/exit button this frame
 
@@ -142,6 +145,8 @@ public:
     void updateView();                       // cBaseCam::RecalculateMatrix of the game camera
     void updateSectors();                    // the held sector and cPlayer::UpdateCriticalArea
     void updatePopulation();                 // cPopulationManager::Update
+    void updatePopulationAtFocus();          // one bounded generation pass, selected host/client interest
+    const int32_t* populationPosition() const { return populationOverride_ ? populationCentre_ : player.pos; }
     void collectSectors();                   // cWorld::GarbageCollection: deletes what is in unloaded sectors
     int pedPopulation() const;               // cPlayer::GetPopulation(network 1)
     int carPopulation() const;               // cPlayer::GetPopulation(network 0)
@@ -151,6 +156,9 @@ public:
     bool forceFreeVehicle();                 // cGlobalPopulationManager::ForceFreeVehicle(false, false)
     uint16_t cameraYaw() const;
     uint32_t nextUid = 1;
+    bool populationOverride_ = false;
+    int32_t populationCentre_[3]{};
+    uint32_t populationCursor_ = 0, populationFrame_ = 0;
     bool canSee(const int32_t pos[3], float radius) const;   // the drawn camera's frustum (rendering only)
     void spawnGenerated(int infoId, const int32_t pos[3], int16_t heading, int palette);   // cCarGenManager -> CreateRandomCar
     void focus(int32_t out[3]) const;           // the player (or his car)
@@ -170,8 +178,11 @@ public:
         int32_t end[3] = {0, 0, 0};     // get out: where the ped ends up (car space)
         bool jacked = false;            // the jack crime has been registered (cNewGetInVehicle::HandleJackCrime)
         bool shuffle = false;           // plan {6, 1}: in by the passenger door, then across to the driver's seat
+        int32_t waypoints[3][3]{};       // multiplayer passenger approach, in the moving car's local frame
+        int waypointCount = 0, waypointIndex = 0;
     } task;
     void startEnter(int target = -1);
+    void carDoorTarget(int32_t out[3]);   // next approach waypoint, then the actual door
     bool doorClear(const Vehicle& c, int seat);   // the world part of cVehicle::IsDoorValid
     void finishEnter(Vehicle& c);                 // cNewGetInVehicle::RunPostEnterSeat for the player
     void startExit();

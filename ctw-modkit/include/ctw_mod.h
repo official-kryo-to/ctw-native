@@ -30,7 +30,7 @@
 #include <stddef.h>
 #include "ctw_types.h"
 
-#define CTW_MOD_API_VERSION 13
+#define CTW_MOD_API_VERSION 16
 #define CTW_MOD_HAS(api, member) ((api) && (api)->size >= offsetof(CtwApi, member) + sizeof((api)->member) && (api)->member)
 
 #ifdef _WIN32
@@ -258,6 +258,53 @@ typedef struct CtwApi {
        it again to move it. Your mod's dots go when it is switched off. Ids are your own (1..65535). */
     void (*set_radar_blip)(CtwMod* mod, int id, const float xyz[3], uint32_t rgba);
     void (*remove_radar_blip)(CtwMod* mod, int id);
+    /* --- version 14: host-owned city entities and shared vehicle seats ---------------------------------- */
+    /* See CtwWorldVehicle/Ped/Explosion in ctw_types.h. Client mode disables independent ambient simulation;
+       OFF releases replicas. Apply/remove functions must only receive authenticated host state. */
+    int (*set_multiplayer_world)(int role);
+    int (*get_world_vehicle)(int index, CtwWorldVehicle* out);
+    int (*set_world_vehicle)(const CtwWorldVehicle* state);
+    CtwVehicle (*world_vehicle_handle)(uint32_t id);
+    uint32_t (*world_vehicle_id)(CtwVehicle vehicle);
+    int (*remove_world_vehicle)(uint32_t id);
+    int (*get_world_ped)(int index, CtwWorldPed* out);
+    int (*set_world_ped)(const CtwWorldPed* state);
+    int (*remove_world_ped)(uint32_t id);
+    int (*take_world_explosion)(CtwWorldExplosion* out);
+    int (*add_world_explosion)(const CtwWorldExplosion* state);
+    int (*get_player_seat)(void); /* -1 on foot, 0 driver, 1..3 passenger */
+    int (*set_player_seat)(CtwVehicle vehicle, int seat); /* authenticated assignment; vehicle 0 exits */
+    int (*set_puppet_seat)(CtwPuppet puppet, int seat);
+    /* Label an existing dot: 0..2 ASCII letters/digits, lowercase becomes uppercase; NULL/empty clears. */
+    void (*set_radar_blip_label)(CtwMod* mod, int id, const char* label);
+    int (*take_world_ped_damage)(uint32_t id);
+    int (*damage_world_ped)(uint32_t id, int amount);
+    int (*vehicle_seat_count)(CtwVehicle vehicle); /* 0 invalid; available seats including the driver */
+    int (*adopt_world_vehicle)(CtwVehicle local, uint32_t host_id); /* client: map an existing car to its accepted host ID */
+    int (*get_vehicle_visual)(CtwVehicle vehicle, CtwVehicleVisual* out);
+    int (*set_vehicle_visual)(CtwVehicle vehicle, const CtwVehicleVisual* state);
+    int (*get_puppet_position)(CtwPuppet puppet, float xyz[3]);
+    CtwVehicle (*get_player_vehicle_task)(int* seat);
+    /* This rendered frame, (x, y, w, h) in screen pixels is your UI: a mouse button pressed there is yours and does
+     * not fire or throw in the game until it is released. ctw_ui_panel claims its window for you. */
+    void (*claim_mouse_rect)(float x, float y, float w, float h);
+    int (*take_world_skid)(CtwSkidPoint* out);
+    int (*add_world_skid)(const CtwSkidPoint* point);
+    int (*get_world_pickup)(int index, CtwWorldPickup* out);
+    int (*set_world_pickup)(const CtwWorldPickup* state);
+    int (*remove_world_pickup)(uint32_t id);
+    uint32_t (*take_world_pickup_claim)(void);
+    int (*claim_world_pickup)(uint32_t id, const int32_t position[3], int in_vehicle, CtwWorldPickup* out);
+    int (*grant_world_pickup)(const CtwWorldPickup* state);
+    int (*take_puppet_world_damage)(CtwPuppet puppet);
+    /* The view this game's on-screen tests use. A host also tests another player's view (set on their puppet;
+     * NULL forgets it): cars and people one of them can see behave as seen, and nothing appears in their sight. */
+    int (*get_view)(CtwView* out);
+    int (*set_puppet_view)(CtwPuppet puppet, const CtwView* view);
+    /* The interface typeface (Kryoto's, as the Porter is set): px is the font size in pixels, tracking the letter
+     * spacing in em, style CTW_TEXT_BOLD | CTW_TEXT_UPPER. y is the top of a line box 1.5 px high. */
+    void (*draw_ui_text)(float x, float y, float px, float tracking_em, int style, uint32_t rgba, const char* utf8);
+    float (*ui_text_width)(float px, float tracking_em, int style, const char* utf8);
 } CtwApi;
 
 /*

@@ -22,7 +22,8 @@ bool CarGenManager::spotTaken(const Game& g, const int32_t p[3]) const {
         int64_t dx = q[0] - p[0], dy = q[1] - p[1];
         return dx * dx + dy * dy < 0x40000000LL;
     };
-    if (near8(g.player.pos)) return true;
+    for (const auto& centre : g.multiplayerWorld.interestCenters(g))
+        if (near8(centre.data())) return true;
     for (const Vehicle& c : g.cars)
         if (near8(c.pos)) return true;
     return false;
@@ -92,14 +93,14 @@ static bool sphereVisible(const WorldCamera& cam, const int32_t p[3], float r, f
 }
 
 void CarGenManager::update(Game& g) {
-    // cWorld streaming: the 3 x 3 sectors around the player; a sector that comes in spawns its generators
-    int32_t fp[3];
-    g.focus(fp);
-    int cx, cy;
-    Collision::cellOfPos(fp[0], fp[1], cx, cy);
+    // A shared world loads generators around every player. Overlapping areas still spawn a sector only once.
     std::set<int> now;
-    for (int dx = -1; dx <= 1; ++dx)
-        for (int dy = -1; dy <= 1; ++dy) now.insert((cx + dx) * 100 + (cy + dy));
+    for (const auto& centre : g.multiplayerWorld.interestCenters(g)) {
+        int cx, cy;
+        Collision::cellOfPos(centre[0], centre[1], cx, cy);
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dy = -1; dy <= 1; ++dy) now.insert((cx + dx) * 100 + (cy + dy));
+    }
     for (int k : now)
         if (!sectors_.count(k)) spawnAllInSector(g, k / 100, k % 100);
     sectors_ = now;

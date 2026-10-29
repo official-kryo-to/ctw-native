@@ -265,7 +265,8 @@ void Fires::processFire(Game& g, Fire& f) {   // cFire::Process
         f.petrolEmitter->setPos(f.pos);
         if (Rand16NonCritical(3) == 0) f.petrolEmitter->addParticle();
     }
-    if (f.attach == None) ignite(g, f);
+    // Replicated burnout flames are presentation on clients; their host copy owns ignition/damage.
+    if (f.attach == None && !(f.style == 5 && g.multiplayerWorld.client())) ignite(g, f);
 }
 
 void Fires::process(Game& g) {

@@ -129,12 +129,15 @@ public:
         // PC (multiplayer mods): another player's character, moved by a mod (CtwPuppetState) instead of the AI
         struct Puppet {
             bool on = false;
+            bool world = false;          // host-owned ambient NPC, excluded from player puppets
             int32_t target[3]{}, velocity[3]{};
             int16_t heading = 0;
             int move = 0;              // 0 standing .. 3 sprinting
             bool dead = false;
             uint32_t vehicle = 0;      // the vehicle it drives
+            int seat = 0;
             int damage = 0;            // what the player did to it since the mod last asked
+            int worldDamage = 0;       // host NPC damage awaiting delivery to the remote player
             int weapon = 0;            // the weapon it holds
             bool firing = false;       // its gun shoots (Weapons_CosmeticShot, at the weapon's fire rate)
             int cooldown = 0;          // frames to the next cosmetic shot

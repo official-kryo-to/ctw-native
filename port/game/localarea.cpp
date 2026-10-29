@@ -107,6 +107,7 @@ void FrameScheduler::setTiming(Schedule& s, int period) {
 
 void CameraView::set(const int32_t eye[3], uint16_t yaw, uint16_t pitch, int width, int height) {
     for (int k = 0; k < 3; ++k) pos[k] = eye[k];
+    this->yaw = yaw; this->pitch = pitch; this->width = width; this->height = height;
     // CMatrix43::MakeRotationZ(yaw), MakeRotationX(-0x4000 - pitch), MatrixMultiply(x, z)
     const int sz = fastsin((int16_t)yaw), cz = fastsin((int16_t)yaw + 0x4000);
     const int16_t ax = (int16_t)(-0x4000 - (int)pitch);
@@ -147,6 +148,7 @@ void WorldSectors::reset() {
     memset(refs_, 0, sizeof refs_);
     memset(loaded_, 0, sizeof loaded_);
     list_.clear();
+    additional_.clear();
     critical_ = 0;
     held_ = -1;
 }
@@ -166,6 +168,23 @@ void WorldSectors::hold(int32_t x, int32_t y) {
     load(i);                                                       // cEntity::DoAddToSector -> cWorld::ForceLoad
     refs_[i] = (uint8_t)(refs_[i] + 1);                            // cWorldSector::Add
     held_ = i;
+}
+
+void WorldSectors::setAdditionalAreas(const std::vector<std::array<int32_t, 3>>& centres) {
+    std::vector<uint16_t> next;
+    next.reserve(centres.size());
+    for (const auto& centre : centres) {
+        int sx, sy;
+        sectorOf(centre[0], centre[1], sx, sy);
+        next.push_back((uint16_t)(sx * kRows + sy));
+    }
+    std::sort(next.begin(), next.end());
+    next.erase(std::unique(next.begin(), next.end()), next.end());
+    for (uint16_t old : additional_)
+        if (!std::binary_search(next.begin(), next.end(), old)) area(old / kRows, old % kRows, -1);
+    for (uint16_t added : next)
+        if (!std::binary_search(additional_.begin(), additional_.end(), added)) area(added / kRows, added % kRows, 1);
+    additional_ = std::move(next);
 }
 
 bool WorldSectors::inBox(const int32_t centre[3], int32_t radius, int32_t x, int32_t y) {
@@ -304,6 +323,12 @@ void LocalArea::update(Game& g) {   // cLocalAreaKnowledge::Update
     roads_ = !roads_;
 }
 
+void LocalArea::rebuildForFocus(Game& g, const int32_t centre[3]) {
+    roadLinks_.clear(); links_.clear(); cursor_ = 0;
+    addRoads(g, centre); addPavement(g, centre);
+    rebuiltEntities_ = true; entityCacheResetDue_ = false;
+}
+
 // Native loaded-sector road-link collection (0x911730..0x911E50). Read each sector's global-node references
 // in load order, visiting a node once, and keep chords of the 100-unit player circle. On land the budgets are
 // 48 land links / 12 water links, with 48 total slots. The reverse-link lookup suppresses an already-seen link.
@@ -414,7 +439,8 @@ bool LocalArea::createPosition(Game& g, const int32_t centre[3], int32_t radius,
                 for (int k = 0; k < 3; ++k)
                     out[k] = A[k] + (int32_t)((uint64_t)((int64_t)(int32_t)((uint64_t)(scaled * dir[k]) >> 32) * t) >> 12);
                 // cPositionConstraints::IsPositionValid: a loaded sector, and nobody sees it (radius 1)
-                found = g.sectors.loadedAt(out[0], out[1]) && !g.view.canSee(out, 4096);
+                found = g.sectors.loadedAt(out[0], out[1]) && !g.view.canSee(out, 4096) &&
+                        !g.multiplayerWorld.seenByOthers(g, out, 4096);
                 if (found) { a = l.a; b = l.b; }
             }
         }

@@ -17,3 +17,7 @@ float Hud_TextWidth(const std::string& utf8, float scale);
 float Hud_LineHeight(float scale);
 void Hud_Rect(float x, float y, float w, float h, uint32_t rgba);
 std::u16string Hud_Utf8To16(const std::string& s);
+// The interface typeface (the Porter's, gfx/uifont.h): CSS pixels, tracking in em, UiFont::Style bits. y is the top
+// of a line box 1.5 px high. Without the typeface, the game's font at a matching size.
+void Hud_UiText(float x, float y, float px, float trackingEm, int style, uint32_t rgba, const char* utf8);
+float Hud_UiTextWidth(float px, float trackingEm, int style, const char* utf8);

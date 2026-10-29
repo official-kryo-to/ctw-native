@@ -133,10 +133,10 @@ void Game::affectBlast(const ExplosionBlast& blast) {
     if (playerCar < 0 && !player.dead && !player.hidden && !player.attached && inFire(player.pos) &&
         !fires.burning(Fires::Player, 0))
         fires.start(*this, player.pos, Fires::Player, 0, 0x1E0, 1, true, true);
-    for (const Pedestrians::Ped& p : peds.peds)
+    if (!multiplayerWorld.client()) for (const Pedestrians::Ped& p : peds.peds)
         if (!p.vehicle && !p.body.dead && inFire(p.body.pos)) Fires_SetPedOnFire(*this, p.uid);
     // vehicles closer than the radius (whole-unit distance), except helicopters, catch fire (cVehicle::SetOnFire)
-    if (blast.fireRadius)
+    if (blast.fireRadius && !multiplayerWorld.client())
         for (Vehicle& car : cars) {
             if (car.dead() || !blast.includesCell(car.pos)) continue;
             const int32_t distance = (int32_t)std::sqrt((double)ExplosionBlast::distanceSquared(car.pos, blast.pos));
@@ -153,9 +153,11 @@ void Game::affectBlast(const ExplosionBlast& blast) {
             deathFrames_ = 0; deathCameraSettled_ = false;
         }
     }
-    peds.explosion(*this, blast);
-    for (Vehicle& car : cars) car.explosionHit(blast, playerCar >= 0 && &car == &cars[playerCar]);
-    propDynamics.explosion(*this, blast);
+    if (!multiplayerWorld.client()) {
+        peds.explosion(*this, blast);
+        for (Vehicle& car : cars) car.explosionHit(blast, playerCar >= 0 && &car == &cars[playerCar]);
+        propDynamics.explosion(*this, blast);
+    }
 }
 
 bool Game::queueExplosion(const Explosion& explosion) {
@@ -173,6 +175,8 @@ bool Game::queueExplosion(const Explosion& explosion) {
         }
     }
     explosions_.push_back(explosion);
+    int32_t velocity[3] = {explosion.dir[0], explosion.dir[1], explosion.dir[2]};
+    multiplayerWorld.captureExplosion(explosion.type, explosion.pos, explosion.scale / 4096.f, velocity);
     if (explosion.type != 8 && explosion.type != 9) stats.incExplosions();   // Explosion::AddExplosion
     return true;
 }

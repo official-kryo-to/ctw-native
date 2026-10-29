@@ -58,6 +58,7 @@ struct RadarBlip {
     int32_t pos[3];
     uint32_t colour;   // 0xRRGGBBAA
     int id;
+    char label[3]{};   // optional short plugin marker, e.g. A or AA; empty keeps the normal dot
 };
 
 // gp_MissionText objectives (HUDImpl::DisplayObjective): a line at the bottom of the screen for a while

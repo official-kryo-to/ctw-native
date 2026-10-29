@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "ctw_types.h"
 
 class Collision;
 struct Model;
@@ -51,7 +52,7 @@ public:
     void init(const VehicleInfo& info, int infoId, const int32_t pos[3], int16_t heading, int palette);
     void act(const Controls& c, bool playerDriving, Collision* col);   // cVehicle::Process / cWheeledVehicle::Act
     void integrate(Collision* col);                                      // cPhysicalIntegrator::Process (this car)
-    void processAlways();                                                // cWheeledVehicle::ProcessAlways (body sway)
+    void processAlways(bool remote = false); // remote doors follow snapshots rather than autonomous animations
     void render(const Model* model) const;
     // cPhysicalIntegrator::PhysicalToPhysicalProcess for the cars (before their integrate): moving cars against
     // every other car (sphere pairs -> ResolvePhysicalCollision -> CalcImpactCar). Wakes up parked cars it hits.
@@ -89,13 +90,20 @@ public:
     // SetHealth(health, false) below full health: at 31 or more the burn timer restarts (190 or more would also
     // release the smoke, 255 close the flaps and 0 kill the vehicle; no caller needs those yet)
     void setHealthBelowSmoke(unsigned health);
+    void setReplicatedHealth(int health, bool dead); // authoritative snapshot; never queues another explosion
+    uint32_t destructionState() const; // shared-world flags: flaps, detached parts, tyres and burn timer
+    void getVisual(CtwVehicleVisual& out, uint32_t frame) const;
+    void setVisual(const CtwVehicleVisual& state, uint32_t frame, int preserveDoor = -1);
+    uint32_t visualFrame(uint32_t frame) const { return frame + visualFrameOffset_; }
+    uint32_t visualSource() const { return visualSource_ ? visualSource_ : uid; }
+    void setReplicatedDestruction(uint32_t flags, const Model* model);
     void explosionHit(const struct ExplosionBlast& blast, bool occupiedByPlayer);
     bool repair();                               // mod API: restore a living vehicle, without resurrecting wrecks
     void teleport(const int32_t pos[3], int16_t heading); // rebuild the physics transform, upright and stationary
     // PC (multiplayer mods): any rotation (quaternion x, y, z, w) and motion, left under physics
     void setPose(const int32_t pos[3], const float q[4], const int32_t velocity[3]);
     void orientation(float q[4]) const { for (int k = 0; k < 4; ++k) q[k] = q_[k]; }
-    void processDamage(uint32_t frame);           // the damage part of cVehicle::Process
+    void processDamage(uint32_t frame, bool authoritative = true); // replicas render effects without advancing death
     void checkForDriverFallingOut();              // cVehicle::CheckForDriverFallingOut
     void processDebris(const Model* model);
     void explosionDebris(const Model* model);
@@ -295,6 +303,8 @@ private:
     // doors
     struct Door { uint16_t angle = 0; int8_t speed = 0; uint8_t mode = 0; };   // cVehicleDoor (+0x930 + seat x 4)
     Door doors_[5];
+    uint32_t visualFrameOffset_ = 0;
+    uint32_t visualSource_ = 0;
     struct Debris {
         bool detached = false;
         int32_t pos[3]{}, velocity[3]{}, angular[3]{}, q[4]{0,0,0,4096};
@@ -316,7 +326,8 @@ private:
     void renderRoofLights(const struct WorldCamera& cam, uint32_t frame) const;
     uint8_t doorOpenBits_ = 0;
     int numSeats_ = 1;                             // info +0x10C
-    void updateDoors();
+    void updateDoors(uint32_t mask = 31);
+    uint32_t localDoors_ = 0; // locally initiated enter/exit animations retain ownership through closing
     void setDoorClosed(int seat);
     friend struct VehicleTestAccess;
     friend class PropDynamics;

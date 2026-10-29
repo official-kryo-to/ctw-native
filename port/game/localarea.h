@@ -23,6 +23,7 @@
 // nearest point on one.
 #pragma once
 #include "peds.h"
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -45,6 +46,8 @@ struct CameraView {
     int32_t pos[3] = {0, 0, 0};
     int16_t m[9] = {4096, 0, 0, 0, 4096, 0, 0, 0, 4096};   // rows: right, up, back (the camera looks along -row 2)
     int16_t tanH = 0, tanV = 0, invCos = 0;               // cBaseCam +0xC4, +0xC8, +0xC6 / +0xCA
+    uint16_t yaw = 0, pitch = 0;                          // what set() was given (multiplayer sends it on)
+    int width = 0, height = 0;
     void set(const int32_t eye[3], uint16_t yaw, uint16_t pitch, int screenWidth, int screenHeight);
     bool canSee(const int32_t p[3], int32_t radius) const;   // cBaseCam::CanSee
 };
@@ -58,6 +61,8 @@ public:
     // cEntity::DoSectorTransition for an entity that holds its sector (cEntity +0x38: the player, and through
     // cPed::SetVehicle his vehicle): it references the sector it is in, which cWorld::ForceLoad loads if needed.
     void hold(int32_t x, int32_t y);
+    // Shared-world players retain the union of their nearby sectors alongside the local camera's area.
+    void setAdditionalAreas(const std::vector<std::array<int32_t, 3>>& centres);
     void collect();                                 // cWorld::GarbageCollection (the caller deletes the entities)
     bool loaded(int sx, int sy) const;
     bool loadedAt(int32_t x, int32_t y) const;
@@ -70,6 +75,7 @@ private:
     uint8_t refs_[kColumns * kRows] = {};
     bool loaded_[kColumns * kRows] = {};
     std::vector<uint16_t> list_;
+    std::vector<uint16_t> additional_;
     uint16_t critical_ = 0;                        // cPlayer +0x392: the area's centre (byte 0 sy, byte 1 sx), 0 none
     int held_ = -1;                                // the held sector (sx * 100 + sy)
     void load(int i);
@@ -81,6 +87,7 @@ public:
     struct Link { NodeRef a, b; int32_t length = 0; uint16_t t0 = 0, t1 = 0; };   // sNodeData
     void reset(FrameScheduler& scheduler);
     void update(Game& g);                           // cLocalAreaKnowledge::Update (from cPlayer::Think)
+    void rebuildForFocus(Game& g, const int32_t centre[3]); // bounded population cache for a remote player's area
     // GetCreatePosition with GenerateRandomPed's constraints: off screen (radius 1), in a loaded sector, where a
     // link crosses the circle of `radius` around `centre`. a / b: the link, walked from a to b.
     bool createPosition(Game& g, const int32_t centre[3], int32_t radius, int32_t out[3], NodeRef& a, NodeRef& b);
