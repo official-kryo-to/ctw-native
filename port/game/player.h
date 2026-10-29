@@ -22,7 +22,15 @@
 //   AnimateWalkRunCycle - the sprite pair for the level, stepped by CurrentSpeed x 0x88 >> 16.
 //   AnimateWalkRunCycleWeapons - the held weapon replaces the upper-body animation while it fires or reloads
 //                  (and for some weapons always); weapons.cpp fills in weaponType / weaponState / weaponFlags.
-// Not ported: swimming (the player won't step into water), jumping/diving, melee and the fight idle.
+// Swimming (cPed::Integrate's water branch, cPed::Act / AnimateSwimCycle): within 0.6 above a water surface the ped
+//   is in the water (cEntity +0x64 bit 1): not on the ground and without gravity; falling in faster than 16 units a
+//   second makes a splash (Explosion type 9) and stops the fall. It moves along its facing at PED_BASE_SPEED x
+//   {0, 1, 2, 2} for the speed level (no sprint), animated by the swim pair (275 x body set + 0x26 / 0x27 moving,
+//   + 0xDA / 0xDB still) at the fixed step 0x88 >> 4, drawn in sprite pose 5. Each frame in the water it tries to
+//   climb out: at a point ahead (the next position plus 0.7 radius along the motion) and then where it is, flat
+//   solid ground (normal z >= 0xFD9) within 1.5 units of its height, with room for a 0.7-radius sphere on it, takes
+//   it up (0.01 above), still. Other peds keep away from water (advance's avoidWater).
+// Not ported: jumping/diving, melee and the fight idle.
 #pragma once
 #include <cstdint>
 #include <vector>
@@ -51,6 +59,8 @@ public:
     int16_t groundNormal[3] = {0, 0, 0x1000};          // cPed +0x324
     int bodySet = 1, palUpper = 4, palLegs = 5;
     bool blockedByWater = false;
+    bool inWater = false;          // cEntity +0x64 bit 1: swimming
+    bool splashed = false;         // fell in this frame (the game makes the type 9 splash)
 
     void placeOnGround(Collision* col);
     void update(const Input& in, Collision* col, const PedSprites* sprites);
@@ -132,12 +142,15 @@ private:
     void updateSpeed(const Input& in);
     void turnTo(int16_t target, int16_t maxStep);
     void integrate(Collision* col);
+    void climbOut(Collision* col);
+    static bool sphereBlocked(Collision* col, const int32_t c[3], int32_t r);
     void constrainByCollision(Collision* col, int32_t moveLen, bool& walkable, bool& hit);
     void animate(const PedSprites* sprites);
     bool fightIdle(int& upper, int& legs);
     void reactionPose(int state);
 
     uint8_t level_ = 0, counter_ = 0, exhaustion_ = 0;   // cPed +0x357, +0x35A, +0x365
+    bool swims_ = false;                                  // advance without avoidWater: may enter the water
     bool slowing_ = false;                                // +0x338 bit 25
     bool onGround_ = true;                                // +0x338 bit 9
     uint8_t airFrames_ = 0, stuckFrames_ = 0;             // +0x36E, +0x36D

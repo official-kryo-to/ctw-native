@@ -1226,6 +1226,7 @@ void Game::tick() {
     updateSequence();
     screenFade.tick();
     if (objective.frames > 0) --objective.frames;
+    sinkingCar.process(frame);
     gameplayHud.process(*this);   // (this frame's HUD state, as the game left it last frame)
     for (auto& c : contrails) c->process(frame);
     if (mission) {
@@ -1251,7 +1252,7 @@ void Game::tick() {
     // input -> the player's yoke (cPlayerOnFoot::HandleStrafe: wanted heading = camera yaw + stick angle)
     float mx = 0, my = 0;
     bool sprint = false, walk = false;
-    if (Plugins_GameInput()) {
+    if (gameKeyboard()) {
         const Uint8* ks = SDL_GetKeyboardState(nullptr);
         if (ks[SDL_SCANCODE_W] || ks[SDL_SCANCODE_UP]) my += 1;
         if (ks[SDL_SCANCODE_S] || ks[SDL_SCANCODE_DOWN]) my -= 1;
@@ -1284,7 +1285,7 @@ void Game::tick() {
     }
     if (playerCar >= 0) {   // driving: cPlayer::FillInDrivingYoke (accelerate / brake-reverse / steer / handbrake)
         Vehicle::Controls dc;
-        if (Plugins_GameInput() && !cutscene) {
+        if (gameKeyboard() && !cutscene) {
             const Uint8* ks = SDL_GetKeyboardState(nullptr);
             bool gas = ks[SDL_SCANCODE_W] || ks[SDL_SCANCODE_UP];
             bool brake = ks[SDL_SCANCODE_S] || ks[SDL_SCANCODE_DOWN];
@@ -1430,15 +1431,16 @@ void Game::tick() {
     {   // fire: Space or the left mouse button (the phone game's fire button, sVirtYoke +0x61);
         // throw: G or the right mouse button (the secondary weapon button: hold for more power)
         bool fire = false, throwing = false;
-        if (Plugins_GameInput()) {
+        if (gameKeyboard()) {
             const Uint8* ks = SDL_GetKeyboardState(nullptr);
             const Uint32 mouse = SDL_GetMouseState(nullptr, nullptr);
-            fire = ks[SDL_SCANCODE_SPACE] || (mouse & SDL_BUTTON(SDL_BUTTON_LEFT));
-            throwing = ks[SDL_SCANCODE_G] || (mouse & SDL_BUTTON(SDL_BUTTON_RIGHT));
+            fire = ks[SDL_SCANCODE_SPACE] || ((mouse & SDL_BUTTON(SDL_BUTTON_LEFT)) && !Plugins_MouseOnUi(0));
+            throwing = ks[SDL_SCANCODE_G] || ((mouse & SDL_BUTTON(SDL_BUTTON_RIGHT)) && !Plugins_MouseOnUi(2));
             PadInput_Weapons(Host_Pad(), fire, throwing);   // a controller: RT fires, LT throws (hold for power)
         }
         if (scriptedInput) { fire = scriptedFire; throwing = scriptedThrow; }
         if (cutscene) fire = throwing = false;
+        if (player.inWater && playerCar < 0) fire = throwing = false;   // cPlayer::HandleAiming: not while swimming
         playerFiring = fire && !busy;
         Weapons_PlayerFrame(*this, fire && !busy, weaponCycle, throwing && !busy);
         weaponCycle = 0;
@@ -1457,7 +1459,10 @@ void Game::tick() {
         deathYaw_ = (uint16_t)camera.yaw; deathPitch_ = camera.pitch();
         deathFrames_ = 0; deathCameraSettled_ = false;
     }
-    if (!player.hidden && !player.attached && (!busy || player.reacting())) player.advance(&collision);
+    if (!player.hidden && !player.attached && (!busy || player.reacting())) {
+        player.advance(&collision, false);   // the player may swim
+        if (player.splashed) addWaterSplash(player.pos, 9, player.vel, -1);   // cPed::Integrate: fell in
+    }
     Vehicle::collideCars(cars, -1, frame);
     propDynamics.checkImpacts(*this);
     for (Vehicle& c : cars) { c.integrate(&collision); c.processAlways(); Vehicles_AddSkidmarks(*this, c); c.processDebris(carModel(c.infoId)); c.processDamage(frame); c.checkForDriverFallingOut(); }
@@ -1596,12 +1601,18 @@ void Game::render(int W, int H) {
     }
     float p[3];
     player.posf(p);
-    if (showDebug) { collision.debugDraw(p[0], p[1], 40.f); roads.debugDraw(p[0], p[1], 80.f); }
+    if (showCollision) { collision.debugDraw(p[0], p[1], 40.f); roads.debugDraw(p[0], p[1], 80.f); }
     if (scope.active && playerCar < 0) scope.renderScope(W, H);   // cSniperCam::Set's scope model
     glDisable(GL_DEPTH_TEST);
     applyGrade(W, H);
     deathScreen.render(W, H);   // the death app: the captured frame's shards over black
     renderCutscene(W, H);       // the comic overlay and its subtitles
+    if (sinkingCar.active()) {   // the minigame's panel over the world; a tap is its OnPress
+        sinkingCar.render(W, H);
+        int mx, my;
+        Host_GetMouse(&mx, &my);
+        if (!pauseOpen && Plugins_HostApi().mouse_clicked(0)) sinkingCar.press((float)mx, (float)my, W, H);
+    }
     renderMissionHud(W, H);     // the screen fade and the objective line
 
     Hud_Begin(W, H);
@@ -1629,6 +1640,7 @@ void Game::render(int W, int H) {
     radio.renderApp(W, H, *this);
     renderPause(W, H);
     Hud_End();
+    if (!pauseOpen) devMenu.render(*this, W, H);   // F3, over everything but the pause screen
     restoreInterpolation();
 }
 
@@ -1655,14 +1667,23 @@ void Game::run() {
     }
 }
 
+bool Game::gameKeyboard() const { return Plugins_GameInput() && !devMenu.open(); }
+
 bool Game::key(int k) {
     if (pauseOpen) return pauseKey(k);
-    if (WeaponHud_WheelOpen() && WeaponHud_Key(*this, k)) return true;
-    if (k == SDL_SCANCODE_F3) { showDebug = !showDebug; return true; }
-    if (cutsceneKey(k)) return true;
+    if (k == SDL_SCANCODE_F3 && !devMenu.open() && Plugins_GameInput()) { devMenu.toggle(); return true; }
+    if (devMenu.open()) return devMenu.key(*this, k);   // the menu has the keyboard
+    if (WeaponHud_WheelOpen() && WeaponHud_Key(*this, k)) return true;   // (an open wheel closes on Escape)
+    // the mods first: a focused text field (chat, a search box) takes the key, and while a mod has the keyboard
+    // nothing reaches the game (no cutscene skip, no weapon wheel, no Enter getting into a car)
     if (Plugins_Key(k)) return true;   // (an open mod menu closes on Esc here)
+    if (!Plugins_GameInput()) return true;
+    if (cutsceneKey(k)) return true;
+    if (sinkingCar.active()) {   // the pad's L and R (LB / RB arrive as Q / E) in turn smash the window
+        if (k == SDL_SCANCODE_Q || k == SDL_SCANCODE_E) sinkingCar.shoulder(k == SDL_SCANCODE_E);
+        if (k != SDL_SCANCODE_ESCAPE) return true;
+    }
     if (k == SDL_SCANCODE_ESCAPE && !radio.appOpen()) { setPause(true); return true; }
-    if (!Plugins_GameInput()) return false;
     if (radio.key(k, *this)) return true;
     if (WeaponHud_Key(*this, k)) return true;
     // PC: the phone game cycles weapons by tapping the HUD weapon icon (sVirtYoke +0x67 / +0x68)

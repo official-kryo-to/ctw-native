@@ -35,6 +35,8 @@
 #include "targeting.h"
 #include "sequence.h"
 #include "comicscreen.h"
+#include "sinkingcar.h"
+#include "devmenu.h"
 #include "mission.h"
 #include "world/worldrenderer.h"
 #include <cstdint>
@@ -220,6 +222,10 @@ public:
     bool startMission(const std::string& name);   // false: no such mission
     ScreenFade screenFade;
     Objective objective;
+    SinkingCar sinkingCar;               // the sinking-car minigame (cSinkingCarApp), over everything while it runs
+    // cGenericPlayerMiniGameTask for the sinking car: the app with the game's sound, fade and splash; drowned, the
+    // player dies (cSinkingCarApp::Process state 5). done(escaped) runs after SetFinished.
+    bool startSinkingCar(int style, std::function<void(bool escaped)> done = nullptr);
     std::vector<RadarBlip> blips;
     static constexpr int kPluginBlips = 0x40000000;   // ids from here on are the plugins' (set_radar_blip)
     void showObjective(const std::u16string& text, int frames = 0xD2);   // HUDImpl::DisplayObjective(.., 210)
@@ -264,7 +270,11 @@ public:
         }
     } renderStyle;
     void applyGrade(int width, int height);   // postfx.cpp: the colour grade of renderStyle over the drawn world
-    bool showDebug = false;              // F3: the debug overlay and collision diagnostics (off by default)
+    bool showDebug = false;              // the debug overlay (the F3 menu's Overlay page)
+    bool showCollision = false;          // collision and road diagnostics drawn in the world (same page)
+    DevMenu devMenu;                     // F3: the developer menu (devmenu.h)
+    // the game reads the keyboard: no mod text field or menu has it, and the developer menu is closed
+    bool gameKeyboard() const;
     float fps = 0.f;                     // display frames per second, smoothed (the debug overlay)
     bool scriptedInput = false;          // testing: use scriptedMove instead of the keyboard
     float scriptedMove[2] = {0, 0};

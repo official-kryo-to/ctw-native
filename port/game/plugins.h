@@ -16,6 +16,10 @@ void Plugins_BeginFrame(int width, int height);   // a rendered frame starts: co
 void Plugins_DrawHud(int width, int height);   // inside Hud_Begin/End
 bool Plugins_Key(int scancode);          // true = a plugin swallowed the key
 bool Plugins_GameInput();                // false while a plugin (a menu) has taken the keyboard
+// claim_mouse_rect for the game's own panels; Plugins_MouseOnUi: the button's current press began on a claimed
+// rectangle (a mod window, the dev menu), so it is not gunfire
+void Plugins_ClaimMouseRect(float x, float y, float w, float h);
+bool Plugins_MouseOnUi(int button);
 void Plugins_RefreshMouseCapture();      // native paused UI owns the cursor, even when a mod requests mouse look
 void Plugins_Log(const std::string& line);
 const CtwHostApi& Plugins_HostApi();     // same public table used when loading DLLs

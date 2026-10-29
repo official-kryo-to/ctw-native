@@ -566,6 +566,19 @@ bool Collision::staticLine(const int32_t a[3], const int32_t b[3], uint32_t flag
     return found;
 }
 
+bool Collision::sphereVCylinder(const int32_t c[3], int32_t r, const Cyl& cyl) {
+    // the centre within the cylinder's height, and within its radius plus the sphere's across
+    const int32_t half = cyl.h >> 1, dz = std::abs(c[2] - cyl.z - half);
+    if (half < dz) return false;
+    const int64_t dx = c[0] - cyl.x, dy = c[1] - cyl.y, reach = (int64_t)cyl.r + r;
+    if (reach * reach < dx * dx + dy * dy) return false;
+    const int32_t inner = half - cyl.r;
+    if (inner >= 1 && dz < inner) return true;
+    // (near a cap the original compares against the centre's own coordinates, not its offset from the cylinder)
+    const int64_t cz = (int64_t)cyl.r + c[2];
+    return reach * reach >= (int64_t)c[0] * c[0] + (int64_t)c[1] * c[1] + cz * cz;
+}
+
 bool Collision::sweptSphereHitsBoxes(const int32_t a[3], const int32_t b[3], int32_t r, int32_t contact[3], int32_t n[3]) {
     // GetSphereIntersectWithStatics, boxes only (flag 0x200): the earliest hit; the normal points from the
     // contact to the sphere centre at that moment.

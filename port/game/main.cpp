@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
     const char* giveWeapons = nullptr;
     int fireFrom = -1, throwFrom = -1, throwTo = -1;
     for (int i = 1; i < argc; ++i) {
-        if (!strcmp(argv[i], "--collision")) { TheGame().showDebug = true; continue; }
+        if (!strcmp(argv[i], "--collision")) { TheGame().showDebug = TheGame().showCollision = true; continue; }
         if (!strcmp(argv[i], "--trace")) { trace = true; continue; }
         if (!strcmp(argv[i], "--play-movie")) { playMovie = true; continue; }
         const char* option = argv[i];

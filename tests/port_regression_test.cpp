@@ -1236,8 +1236,9 @@ static void fireAndCamera() {
     check(!VehicleTestAccess::fire(car), "vehicle removal releases its flame emitter");
     Game game; game.freeCam.on = true; game.freeCam.cam.eye[2] = 400; game.freeCam.cam.zFar = 150;
     check(!game.showDebug, "prototype HUD and collision diagnostics are off by default");
-    check(game.key(SDL_SCANCODE_F3) && game.showDebug, "F3 enables all debug drawing");
-    check(game.key(SDL_SCANCODE_F3) && !game.showDebug, "F3 disables all debug drawing again");
+    check(game.key(SDL_SCANCODE_F3) && game.devMenu.open() && !game.showDebug, "F3 opens the developer menu");
+    check(game.key(SDL_SCANCODE_W), "the developer menu keeps the keys from the game");
+    check(game.key(SDL_SCANCODE_F3) && !game.devMenu.open(), "F3 closes it again");
     // PC bindings for the original pause overlay: gameplay keys stay consumed while paused.
     check(game.key(SDL_SCANCODE_ESCAPE) && game.pauseOpen && game.uiPaused && !game.quitRequested,
           "Esc opens the pause menu and pauses the simulation");

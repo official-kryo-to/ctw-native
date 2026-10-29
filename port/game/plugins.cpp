@@ -45,6 +45,11 @@ int g_clicks = 0;
 float g_wheel = 0, g_dx = 0, g_dy = 0;
 std::string g_text;
 bool g_captureRequested = false;
+// Plugins_ClaimMouseRect: the UI rectangles of the rendered frame being drawn, and whether each button's current press
+// began on one (then the game does not see that button until it is released)
+struct ClaimRect { float x, y, w, h; };
+std::vector<ClaimRect> g_claims;
+bool g_pressOnUi[3] = {false, false, false};
 bool g_wheelConsumed = false;
 float g_clip[4] = {0, 0, 0, 0};   // the mods' clip rectangle (w <= 0: none)
 
@@ -436,6 +441,18 @@ void Plugins_BeginFrame(int w, int h) {
     Plugins_RefreshMouseCapture();
     g_w = w; g_h = h;
     g_clicks = Host_PopClicks();
+    {   // a press belongs to the UI it began on (the rectangles claimed while the last frame was drawn)
+        int mx = 0, my = 0;
+        Host_GetMouse(&mx, &my);
+        for (int b = 0; b < 3; ++b) {
+            if (g_clicks >> b & 1) {
+                g_pressOnUi[b] = false;
+                for (const ClaimRect& r : g_claims)
+                    g_pressOnUi[b] |= mx >= r.x && my >= r.y && mx < r.x + r.w && my < r.y + r.h;
+            } else if (!Host_MouseDown(b)) g_pressOnUi[b] = false;
+        }
+        g_claims.clear();
+    }
     g_wheel = 0;
     g_wheelConsumed = false;
     while (int notch = Host_PopWheel()) g_wheel += (float)notch;
@@ -454,11 +471,22 @@ void Plugins_DrawHud(int w, int h) {
 }
 
 bool Plugins_Key(int sc) {
+    const bool hadKeyboard = g_gameInput;
     const auto keys = g_keys;
+    bool used = false;
     for (const auto& k : keys)
-        if (k.fn(sc, k.user)) return true;
-    return false;
+        if (k.fn(sc, k.user)) { used = true; break; }
+    // a key that opened a text field (it took the keyboard from the game) is not also typed into it: T for a chat
+    // box would otherwise start the message with "t"
+    if (hadKeyboard && !g_gameInput) Host_PopText();
+    return used;
 }
+
+void Plugins_ClaimMouseRect(float x, float y, float w, float h) {
+    if (w > 0 && h > 0) g_claims.push_back({x, y, w, h});
+}
+
+bool Plugins_MouseOnUi(int button) { return button >= 0 && button < 3 && g_pressOnUi[button]; }
 
 bool Plugins_GameInput() { return g_gameInput; }
 

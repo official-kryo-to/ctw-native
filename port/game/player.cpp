@@ -35,6 +35,7 @@ static void normalise(int32_t v[3]) {   // Normalise(tv3d)
 // PED_BASE_ACCELFRAME >> 12
 static const int32_t kBaseSpeed = 819;
 static const int32_t kLevelMul[4] = {0, 0x1000, 0x2000, 0x3000};
+static const int32_t kSwimMul[4] = {0, 0x1000, 0x2000, 0x2000};   // xmmword_105F760 (from xmmword_468EA0)
 static const int32_t kHoldMul = 0x1000;
 static const int kAccelFrames = 8;
 static const int32_t kGravity = 0x1ED0;   // per frame, units per second
@@ -52,6 +53,7 @@ int Player::walkFrame() const {
 int32_t Player::currentSpeed() const {
     if (level_ == 0) return 0;
     const int32_t base=mulq(kBaseSpeed,weaponMovementScale); // native 0x87cd44/0x87cd54, before gait rounding
+    if (inWater) return mulq(kSwimMul[level_], base) * 30;   // the swim table, without the hold factor
     int32_t s = mulq(kLevelMul[level_],base);
     if (level_ != 3) s = (int32_t)(((int64_t)s * kHoldMul) >> 12);
     return s * 30;
@@ -129,7 +131,7 @@ void Player::act(const Input& in, const PedSprites* sprites) {
     // cPed::Act
     updateSpeed(in);
     if (!in.taskAnimation) animate(sprites);
-    if (onGround_) {   // velocity from the facing, only while standing on something
+    if (onGround_ || inWater) {   // velocity from the facing, only while standing on something or swimming
         int32_t sp = (int32_t)(currentSpeed() * speedScale);
         int32_t v[3] = {mulq(sp, fwd[0]), mulq(sp, fwd[1]), vel[2] + mulq(sp, fwd[2])};
         if (groundNormal[2] != 0x1000) {   // along the slope
@@ -147,7 +149,44 @@ void Player::act(const Input& in, const PedSprites* sprites) {
 
 }
 
+// cPed::Integrate in the water: climb out at a point ahead (the next position plus 0.7 radius along the motion),
+// else where it is, onto flat solid ground within 1.5 units of that height with room for a 0.7-radius sphere
+void Player::climbOut(Collision* col) {
+    const int32_t r7 = (int32_t)(((int64_t)kRadius * 0xB33) >> 12);
+    int32_t ahead[3], dir[3] = {vel[0], vel[1], vel[2]};
+    for (int i = 0; i < 3; ++i) ahead[i] = pos[i] + (int32_t)(((int64_t)vel[i] * 0x11) >> 9);
+    if ((int64_t)dir[0] * dir[0] + (int64_t)dir[1] * dir[1] + (int64_t)dir[2] * dir[2] >= 0x641) normalise(dir);
+    for (int i = 0; i < 3; ++i) ahead[i] += mulq(dir[i], r7);
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        const int32_t p[3] = {attempt ? pos[0] : ahead[0], attempt ? pos[1] : ahead[1], attempt ? pos[2] : ahead[2]};
+        const Collision::Ground g = col->ground(p[0] / 4096.f, p[1] / 4096.f, (p[2] + 0x1800) / 4096.f);
+        const int32_t gz = (int32_t)lroundf(g.z * 4096.f);
+        if (std::abs(gz - p[2]) > 0x17FF || lroundf(g.normal[2] * 4096.f) < 0xFD9 || g.surface == 2) continue;
+        const int32_t target[3] = {p[0], p[1], gz + 0x28};
+        for (int i = 0; i < 3; ++i) vel[i] = target[i] - pos[i];   // (SetVelocity: the step)
+        const int32_t centre[3] = {target[0], target[1], target[2] + r7};
+        if (sphereBlocked(col, centre, r7)) continue;
+        vel[2] = 0;
+        onGround_ = true;
+        std::copy(target, target + 3, pos);
+        return;
+    }
+}
+
+// CCollision::GetSphereCollision (flags 0xF00) at rest: any box, cylinder or mesh triangle overlapping the sphere
+bool Player::sphereBlocked(Collision* col, const int32_t c[3], int32_t r) {
+    Collision::Candidates cand;
+    col->candidates(c, r, false, cand);
+    int32_t contact[3], n[3], depth;
+    for (const Collision::Box* b : cand.boxes) if (Collision::sphereVBox(c, r, *b, contact, n, depth)) return true;
+    for (const Collision::TriRef& tr : cand.tris) if (Collision::sphereVTri(c, r, tr, contact, n, depth)) return true;
+    for (const Collision::Cyl* cy : cand.cyls) if (Collision::sphereVCylinder(c, r, *cy)) return true;
+    return false;
+}
+
 void Player::advance(Collision* col, bool avoidWater) {
+    swims_ = !avoidWater;
+    splashed = false;
     // cPed::Integrate (swimming is not ported: don't let walkers walk into water)
     int32_t before[3] = {pos[0], pos[1], pos[2]};
     integrate(col);
@@ -411,34 +450,40 @@ void Player::integrate(Collision* col) {
     }
     if (!full) {
         freeMove();
-        if (!onGround_) vel[2] -= kGravity;
+        if (!onGround_ && !inWater) vel[2] -= kGravity;   // (no gravity in the water)
     } else {
         bool walkable = false, hit = false;
         constrainByCollision(col, moveLen, walkable, hit);
         // cPed::Integrate's vertical/full path applies gravity after the
         // constrained move. Being within 0.6 units of ground does not cancel
         // it: that distance marks standing, it is not a vertical impulse.
-        const bool appliedGravity = vz0 != 0;
+        const bool appliedGravity = vz0 != 0 && !inWater;
         if (appliedGravity) vel[2] -= kGravity;
         if (vz0 < 0 && hit && std::abs(z0 - pos[2]) < 0x28) walkable = true;
         Collision::Ground g = col->ground(pos[0] / 4096.f, pos[1] / 4096.f, (pos[2] + 0x28) / 4096.f);
         int32_t gz = (int32_t)lroundf(g.z * 4096.f);
         for (int i = 0; i < 3; ++i) groundNormal[i] = (int16_t)lroundf(g.normal[i] * 4096.f);
-        if (!walkable || g.surface == 2) {
+        if (swims_ && g.surface == 2 && pos[2] - gz < 0x999) {   // in the water: SetInWater(true), not on the ground
+            if (!inWater && vz0 <= -0x10000) { splashed = true; vel[2] = 0; }   // fell in: Explosion type 9
+            inWater = true;
+            onGround_ = false;
+            climbOut(col);
+        } else if (!walkable || g.surface == 2) {
+            inWater = false;
             if (pos[2] - gz < 0x999) onGround_ = true;
             else { if (!appliedGravity) vel[2] -= kGravity; onGround_ = false; }
-        } else onGround_ = true;
+        } else { inWater = false; onGround_ = true; }
     }
     // cPed::Integrate, player part: one frame of grace when leaving the ground, and a ped hanging still in the
     // air for 10 frames counts as standing
-    if (playerControlled && !reacting() && !onGround_) {
+    if (playerControlled && !reacting() && !onGround_ && !inWater) {
         if (airFrames_++ == 0) {
             int32_t v = vel[2] + kGravity;
             vel[2] = v != 0 ? v : vel[2] + 0x1EA8;
             onGround_ = true;
         }
     } else airFrames_ = 0;
-    if (playerControlled && !reacting() && !onGround_ && std::abs(vel[2]) < 0x1000) {
+    if (playerControlled && !reacting() && !onGround_ && !inWater && std::abs(vel[2]) < 0x1000) {
         if (stuckFrames_ == 10) onGround_ = true;
         else ++stuckFrames_;
         return;
@@ -665,6 +710,27 @@ void Player::animate(const PedSprites* sprites) {
     if (!sprites || !sprites->ok()) return;
     int base = bodySet * 0x113, up, legs;
     flip_ = false;
+    if (inWater) {   // cPed::Act: AnimateSwimCycle instead of the walk cycle
+        if (level_ > 3) return;
+        up = base + (level_ ? 0x26 : 0xDA);
+        legs = base + (level_ ? 0x27 : 0xDB);
+        if (up != animUpper_ || legs != animLegs_) {   // the new pair keeps the phase
+            const int nOld = animUpper_ >= 0 ? sprites->numFrames(animUpper_) : 0, nNew = sprites->numFrames(up);
+            const int f = nOld ? (int)((int64_t)frameUpper_ * nNew * 16 / nOld) : 0;
+            animUpper_ = up;
+            frameUpper_ = f >> 4;
+            const int nLegs = sprites->numFrames(legs);
+            if (nNew == nLegs) frameLegs_ = f >> 4;
+            else {
+                const int nLo = animLegs_ >= 0 ? sprites->numFrames(animLegs_) : 0;
+                frameLegs_ = nLo ? (int)((int64_t)frameLegs_ * nLegs * 16 / nLo) >> 4 : 0;
+            }
+            animLegs_ = legs;
+        }
+        frameUpper_ = sprites->advance(animUpper_, frameUpper_, 0x88 >> 4);   // (0x88 << timeslice) >> 4
+        frameLegs_ = sprites->advance(animLegs_, frameLegs_, 0x88 >> 4);
+        return;
+    }
     switch (level_) {
         case 1: up = base + 2; legs = base + 3; break;
         case 2: up = base + 4; legs = base + 5; break;
@@ -816,6 +882,14 @@ void Player::render(const PedSprites* sprites, const PedLight* light) const {
     const bool lowUpper = fallen || reaction_ == 1;
     const bool lowLegs = fallen || reaction_ == 7 || reaction_ == 14;
     const float low = 0x733 / 4096.f;
+    if (inWater && !reacting()) {   // AnimateSwimCycle's SetPose(5, 5): cPedSprite::mZPositions pose 5
+        sprites->draw(p, h, animLegs_, frameLegs_, palUpper, palLegs, 0x1800 / 4096.f, 0x1800 / 4096.f, light, flip_);
+        sprites->draw(p, h, animUpper_, frameUpper_, palUpper, palUpper, 0x1B33 / 4096.f, 0x1800 / 4096.f, light, flip_);
+        glDisable(GL_ALPHA_TEST);
+        glDisable(GL_BLEND);
+        glDisable(GL_TEXTURE_2D);
+        return;
+    }
     sprites->draw(p, h, animLegs_, frameLegs_, palUpper, palLegs, lowLegs ? low : 1.0f, lowLegs ? low : 0.5f, light, flip_);
     const float hu = upperAim && !lowUpper ? atan2f((float)-fireDir[0], (float)fireDir[1]) : h;
     sprites->draw(p, hu, animUpper_, frameUpper_, palUpper, palUpper, lowUpper ? low : 2.0f, lowUpper ? low : 1.5f, light, flip_);

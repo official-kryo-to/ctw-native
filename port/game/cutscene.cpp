@@ -5,6 +5,7 @@
 #include "game.h"
 #include "hud.h"
 #include "os/gamefs.h"
+#include "sound.h"
 #include <SDL.h>
 #include <glad/gl.h>
 #include <cmath>
@@ -111,6 +112,28 @@ void Game::renderCutscene(int W, int H) {
         Hud_End();
     }
     comic.render(W, H);
+}
+
+// ---- the sinking car minigame (sinkingcar.h) ----
+
+bool Game::startSinkingCar(int style, std::function<void(bool)> done) {
+    sinkingCar.playSfx = [](int sample, int volume) { TheSound().playHud(sample, volume); };
+    sinkingCar.fade = [this](bool toBlack, int frames) { if (toBlack) screenFade.toBlack(frames); else screenFade.in(frames); };
+    sinkingCar.fading = [this] { return screenFade.fading(); };
+    sinkingCar.splash = [this] {   // CreateWaterExplosion: explosion 8 at the player (or their vehicle), z -7.5
+        int32_t at[3];
+        focus(at);
+        at[2] = -0x7800;
+        const int32_t still[3] = {0, 0, 0};
+        addWaterSplash(at, 8, still, -1);
+    };
+    return sinkingCar.start(dataDir, style, [this, done](bool escaped) {
+        if (!escaped) {   // state 5: SetHealth(0), cStatsManager::IncFishesFed
+            player.takeDamage(1000, true);
+            stats.incFishesFed();
+        }
+        if (done) done(escaped);
+    });
 }
 
 // ---- missions (mission.h) ----

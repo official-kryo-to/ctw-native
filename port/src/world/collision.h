@@ -104,6 +104,8 @@ public:
     // Static overlap (CCollision::SphereVBox / SphereVTri): contact point, push-out normal (Q12) and depth.
     static bool sphereVBox(const int32_t c[3], int32_t r, const Box& box, int32_t contact[3], int32_t n[3], int32_t& depth);
     static bool sphereVTri(const int32_t c[3], int32_t r, const TriRef& tr, int32_t contact[3], int32_t n[3], int32_t& depth);
+    // CCollision::SphereVCylinder: overlap only (the original leaves the contact, normal and depth zero)
+    static bool sphereVCylinder(const int32_t c[3], int32_t r, const Cyl& cyl);
 
     // Vehicles (cPhysicalIntegrator):
     // CCollision::CircleVBox: a vertical circle at c (height h below c) against a box, in the box's plane.
