@@ -37,6 +37,7 @@
 #include "comicscreen.h"
 #include "sinkingcar.h"
 #include "devmenu.h"
+#include "hotwiring.h"
 #include "mission.h"
 #include "world/worldrenderer.h"
 #include <cstdint>
@@ -226,6 +227,15 @@ public:
     // cGenericPlayerMiniGameTask for the sinking car: the app with the game's sound, fade and splash; drowned, the
     // player dies (cSinkingCarApp::Process state 5). done(escaped) runs after SetFinished.
     bool startSinkingCar(int style, std::function<void(bool escaped)> done = nullptr);
+    // hotwiring (hotwiring.h): the app while the player sits in a car that needs it (cPlayerInVehicleHotwire);
+    // cHotWire's record: the vehicle types learnt and the successes a class (at most 15); a mission's
+    // ScriptPlayer::WhenSucceedsHotwire / WhenFailsHotwire (onHotwire) and SuppressHotwireTimelimit
+    HotWiring hotwiring;
+    uint32_t hotwireLearnt[4] = {0, 0, 0, 0};
+    uint8_t hotwireAttempts[4] = {0, 0, 0, 0};
+    std::function<void(bool success)> onHotwire;
+    bool suppressHotwireTimer = false;
+    void updateHotwire();   // cPlayer::ApplyDefaultOrders' hotwire task, once a frame
     std::vector<RadarBlip> blips;
     static constexpr int kPluginBlips = 0x40000000;   // ids from here on are the plugins' (set_radar_blip)
     void showObjective(const std::u16string& text, int frames = 0xD2);   // HUDImpl::DisplayObjective(.., 210)

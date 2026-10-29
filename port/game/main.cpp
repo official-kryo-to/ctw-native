@@ -269,7 +269,10 @@ int main(int argc, char** argv) {
                     char what[8] = "";
                     if (sscanf(p, "%d:%7[a-z]=%d,%d,%d", &at, what, &x, &y, &n) >= 3 && at == f) {
                         if (!strcmp(what, "key")) game.key(x);
-                        else Host_TestMouse(x, y, !strcmp(what, "click") ? 1 : 0, !strcmp(what, "wheel") ? n : 0);
+                        else if (!strcmp(what, "down") || !strcmp(what, "up")) {   // a held left button (drags)
+                            Host_TestMouse(x, y, !strcmp(what, "down") ? 1 : 0, 0);
+                            Host_TestMouseHeld(!strcmp(what, "down") ? 1 : 0);
+                        } else Host_TestMouse(x, y, !strcmp(what, "click") ? 1 : 0, !strcmp(what, "wheel") ? n : 0);
                     }
                     while (*p && *p != ';') ++p;
                     if (*p) ++p;

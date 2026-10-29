@@ -244,7 +244,12 @@ void Host_SetRelativeMouse(bool on) {
 }
 void Host_PopMouseDelta(float* dx, float* dy) { *dx = g_dx; *dy = g_dy; g_dx = g_dy = 0; }
 int Host_PopWheel() { if (g_wheel.empty()) return 0; int w = g_wheel.front(); g_wheel.pop_front(); return w; }
-bool Host_MouseDown(int b) { return (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON(b + 1)) != 0; }
+static int g_testHeld = -1;
+void Host_TestMouseHeld(int buttons) { g_testHeld = buttons; }
+bool Host_MouseDown(int b) {
+    if (g_testHeld >= 0) return (g_testHeld >> b & 1) != 0;
+    return (SDL_GetMouseState(nullptr, nullptr) & SDL_BUTTON(b + 1)) != 0;
+}
 int Host_PopKey() {
     if (g_keys.empty()) return 0;
     int k = g_keys.front();

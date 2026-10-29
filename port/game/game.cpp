@@ -203,7 +203,7 @@ bool Game::removeCar(int index) {
 void Game::spawnGenerated(int infoId, const int32_t pos[3], int16_t heading, int palette) {
     if (infoId < 0 || infoId >= (int)vehicleInfos.size()) return;
     int i = spawnCar(infoId, pos, heading, palette);
-    if (i >= 0) cars[i].generated = true;
+    if (i >= 0) cars[i].generated = cars[i].carGenerated = true;   // (cCarGenManager::Process: SetIsGeneratedCar)
 }
 
 void Game::renderProps(const WorldCamera& cam, bool draw) {   // cDynamicPropManager + cLightManager::AddPropLights
@@ -636,7 +636,7 @@ void Game::finishEnter(Vehicle& c) {   // RunPostEnterSeat: in the seat; the doo
     if (!c.isBike()) c.closeDoor(task.seat);
     else c.bikeMounted = 1;
     c.seatUser[0] = -2;
-    c.engineOn = true;
+    c.engineOn = !c.needsHotwiring();   // (a car to hotwire starts when it is hotwired)
     c.keep = true;   // a car the player used is not cleaned up (cVehicle +0x945 bit 3)
     player.hidden = true;
     player.attached = false;
@@ -1227,6 +1227,8 @@ void Game::tick() {
     screenFade.tick();
     if (objective.frames > 0) --objective.frames;
     sinkingCar.process(frame);
+    updateHotwire();
+    hotwiring.process(frame, world.timeCycle().time() / 4096.f);
     gameplayHud.process(*this);   // (this frame's HUD state, as the game left it last frame)
     for (auto& c : contrails) c->process(frame);
     if (mission) {
@@ -1319,6 +1321,7 @@ void Game::tick() {
             dc.throttle = back ? 0x1000 : -0x1000;
             dc.handbrake = !back;
         } else if (task.op == CarTask::ClimbOut) dc = Vehicle::Controls{};
+        if (hotwiring.active()) dc = Vehicle::Controls{};   // (the hotwire task holds the yoke)
         if (arrestStopVehicle || arrestGrabbed) {
             dc = Vehicle::Controls{};
             dc.throttle = -4096;
@@ -1607,6 +1610,15 @@ void Game::render(int W, int H) {
     applyGrade(W, H);
     deathScreen.render(W, H);   // the death app: the captured frame's shards over black
     renderCutscene(W, H);       // the comic overlay and its subtitles
+    if (hotwiring.active()) {   // the dashboard over the world; the mouse is the touch
+        hotwiring.render(W, H);
+        int mx, my;
+        Host_GetMouse(&mx, &my);
+        if (!pauseOpen) {
+            hotwiring.touch(Host_MouseDown(0), mx, my, W, H);
+            if (Plugins_HostApi().mouse_clicked(0)) hotwiring.click(mx, my, W, H);
+        }
+    }
     if (sinkingCar.active()) {   // the minigame's panel over the world; a tap is its OnPress
         sinkingCar.render(W, H);
         int mx, my;
@@ -1679,6 +1691,10 @@ bool Game::key(int k) {
     if (Plugins_Key(k)) return true;   // (an open mod menu closes on Esc here)
     if (!Plugins_GameInput()) return true;
     if (cutsceneKey(k)) return true;
+    if (hotwiring.active() && (k == SDL_SCANCODE_F || k == SDL_SCANCODE_RETURN)) {   // the vehicle button
+        hotwiring.quit();   // (cPlayerInVehicleHotwire: it gives up and gets out)
+        return true;
+    }
     if (sinkingCar.active()) {   // the pad's L and R (LB / RB arrive as Q / E) in turn smash the window
         if (k == SDL_SCANCODE_Q || k == SDL_SCANCODE_E) sinkingCar.shoulder(k == SDL_SCANCODE_E);
         if (k != SDL_SCANCODE_ESCAPE) return true;
@@ -1697,6 +1713,38 @@ bool Game::key(int k) {
         return true;
     }
     return false;
+}
+
+// cPlayer::ApplyDefaultOrders: in the driver's seat of a car that needs hotwiring, the cPlayerInVehicleHotwire task
+// runs the app; cPlayerInVehicleHotwire::OnFinished: hotwired, cHotWire::OnHotwired (the type learnt, a success for
+// the class), ClearIsGeneratedCar and the engine on; given up, the immobiliser fires and the player gets out.
+// (The task's further conditions, vehicle +0x948 bit 5 and player +0x1184 bit 7, and the alarm, are not ported; nor
+// are medium and hard hotwiring: those cars start as before.)
+void Game::updateHotwire() {
+    if (hotwiring.active() || playerCar < 0 || task.op != CarTask::None || player.dead) return;
+    Vehicle& c = cars[playerCar];
+    if (!c.needsHotwiring()) return;
+    const int cls = c.hotwireClass;
+    const uint32_t uid = c.uid;
+    hotwiring.playSfx = [](int sample, int volume) { TheSound().playHud(sample, volume); };
+    const bool showTimer = !suppressHotwireTimer && hotwireAttempts[cls] != 0;
+    const bool started = hotwiring.start(dataDir, cls, showTimer, [this, uid, cls](bool success, bool quit) {
+        Vehicle* car = nullptr;
+        for (Vehicle& v : cars) if (v.uid == uid) car = &v;
+        if (success && car) {
+            hotwireLearnt[car->infoId >> 5 & 3] |= 1u << (car->infoId & 31);
+            if (hotwireAttempts[cls] <= 0xE) ++hotwireAttempts[cls];
+            car->carGenerated = false;
+            car->engineOn = true;
+        } else if (car) car->immobiliserFired = true;
+        (void)quit;
+        if (!success && playerCar >= 0 && cars[playerCar].uid == uid) startExit();   // cExitCarPlayer
+        if (onHotwire) {
+            auto callback = onHotwire;
+            callback(success);
+        }
+    });
+    if (!started) { c.carGenerated = false; c.engineOn = true; }   // (a class not ported yet)
 }
 
 // ---- HUD pause screen ---------------------------------------------------------------------------------------

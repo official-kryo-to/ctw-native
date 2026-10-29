@@ -119,6 +119,12 @@ public:
     void renderLights(const struct WorldCamera& cam, uint32_t frame, bool night, Collision* col) const;                        // the car is being removed: let its smoke fade out                        // set on the frame it blew up (the game ejects / kills occupants)
     int seatUser[4] = {-1, -1, -1, -1};
     bool generated = false;   // cVehicle::SetIsGeneratedCar
+    // hotwiring (cVehicle +0x944): the class (bits 12-13, eHotWireClass, from the info +0x8E bits 3-4 or
+    // Vehicle::SetHotWireMode), parked by a car generator (bit 11) and the immobiliser fired (bit 10)
+    int hotwireClass = 0;
+    bool carGenerated = false, immobiliserFired = false;
+    bool needsHotwiring() const { return hotwireClass != 0 && carGenerated; }   // cVehicle::NeedsHotwiring
+    void setHotWireMode(int c) { if (c) carGenerated = true; hotwireClass = c & 3; }   // Vehicle::SetHotWireMode
     uint8_t screenTimer = 0xFF;   // +0x99C: 255 while on screen, counting down off screen (cVehicle::ProcessAlways)
     uint32_t uid = 0;         // stable id (the game's entity id byte +0x63 = uid & 0xFF)
     int radioStation = -1;    // station selection stays with the vehicle

@@ -5,6 +5,7 @@
 #include "game.h"
 #include "hud.h"
 #include "plugins.h"
+#include "sound.h"
 #include "os/os.h"
 #include <SDL.h>
 #include <algorithm>
@@ -113,7 +114,19 @@ void DevMenu::build(Game& g) {
             status_ = g.startSinkingCar(carStyle_, [&g](bool) { g.screenFade.in(15); }) ? "Sinking car started."
                                                                                        : "The sinking car could not load.";
         });
-        action("Stop the minigame", [this, &g] { g.sinkingCar.stop(); g.screenFade.in(1); status_ = "Stopped."; });
+        action("Start hotwiring (easy)", [this, &g] {
+            open_ = false;
+            g.hotwiring.playSfx = [](int sample, int volume) { TheSound().playHud(sample, volume); };
+            status_ = g.hotwiring.start(g.dataDir, 1, false, [this](bool success, bool quit) {
+                status_ = success ? "Hotwired." : quit ? "Hotwiring given up." : "Hotwiring failed.";
+            }) ? "Hotwiring started." : "Hotwiring could not load.";
+        });
+        action("Stop the minigame", [this, &g] {
+            g.sinkingCar.stop();
+            g.hotwiring.stop();
+            g.screenFade.in(1);
+            status_ = "Stopped.";
+        });
         break;
     }
     case 4: {   // World

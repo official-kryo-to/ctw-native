@@ -64,6 +64,8 @@ static int32_t speedUnits(int32_t speed) {
 void Vehicle::init(const VehicleInfo& info, int id, const int32_t p[3], int16_t h, int pal) {
     infoId = id;
     bike_ = info.type() == 1;   // cPopulationManager: type 1 -> cBike
+    hotwireClass = ((uint16_t)info.s16(0x8E) >> 3) & 3;   // cVehicle::cVehicle: +0x944 bits 12-13
+    carGenerated = immobiliserFired = false;
     // +0x957 is never initialised by the constructors and only scripts change it; a free-roam bike throws its rider
     // in a crash, so riders may fall off bikes (an assumption) and never out of other vehicles
     canFallOff = bike_;

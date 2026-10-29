@@ -495,7 +495,11 @@ private:
         if (!car()) {
             const int32_t at[3] = {fx(-281.78f), fx(-64.5f), 0};
             const int i = g_->spawnCar(5, at, (int16_t)deg(0x64), 4);
-            if (i >= 0) { g_->cars[i].keep = true; carUid_ = g_->cars[i].uid; }
+            if (i >= 0) {
+                g_->cars[i].keep = true;
+                g_->cars[i].setHotWireMode(1);   // (easy, whatever the vehicle's own class)
+                carUid_ = g_->cars[i].uid;
+            }
         }
         carInWater();
     }
@@ -712,8 +716,36 @@ private:
         g_->cutscene = g_->scriptCutscene = false;
         if (!chaseOn_ && !chase_[kChaseCar].uid) policeChaseInit();   // GetToShoreComplete: cPoliceChase::Init
         if (const Vehicle* c = car()) g_->addBlip(c->pos, 0x4080FFFF, 1);
-        g_->showObjective(text(0x53B));   // "Get a car."
-        when([this] { return g_->playerCar >= 0; }, [this] { findACarComplete(); });
+        g_->suppressHotwireTimer = true;   // ScriptPlayer::SuppressHotwireTimelimit (and EnableMoreTextForEasyHotwire)
+        g_->showObjective(text(hotwireFailed_ ? 0x53D : 0x53B));   // "Get back in the car." / "Get a car."
+        when([this] { return g_->playerCar >= 0; }, [this] { checkForHotwiring(); });
+    }
+
+    // CheckForHotwiring: in the car to steal while it still needs hotwiring, wait for the outcome (WhenSucceedsHotwire,
+    // WhenFailsHotwire, WhenExitsVehicle); in any other car, or once it is hotwired, on to Kenny's
+    bool hotwireFailed_ = false;
+    void checkForHotwiring() {
+        const Vehicle* c = g_->playerCar >= 0 ? &g_->cars[g_->playerCar] : nullptr;
+        if (!c || c->uid != carUid_ || !c->needsHotwiring()) { findACarComplete(); return; }
+        g_->onHotwire = [this](bool success) {
+            g_->onHotwire = nullptr;
+            if (success) hotwiringComplete();
+            else hotwiringFailed();
+        };
+        // (got out before the outcome: failed; once there is an outcome this check ends without doing anything)
+        when([this] { return !g_->onHotwire || g_->playerCar < 0; }, [this] {
+            if (!g_->onHotwire) return;
+            g_->onHotwire = nullptr;
+            hotwiringFailed();
+        });
+    }
+    void hotwiringComplete() {   // HotwiringComplete: the time limit back, on to Kenny's
+        g_->suppressHotwireTimer = false;
+        findACarComplete();
+    }
+    void hotwiringFailed() {     // HotwiringFailed: back to FindACar
+        hotwireFailed_ = true;
+        findACar();
     }
 
     const Vehicle* car() const {
