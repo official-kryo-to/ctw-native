@@ -205,3 +205,8 @@ void Game::renderScriptProps() {
         PropLibrary::drawModel(*m, M);
     }
 }
+
+Vehicle::Controls Game::carControls(const Vehicle& car) const {
+    const auto it = scriptCarControls.find(car.uid);
+    return it != scriptCarControls.end() ? it->second : traffic.controls(car.uid);
+}

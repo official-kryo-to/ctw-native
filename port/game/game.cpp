@@ -1277,6 +1277,11 @@ void Game::tick() {
     bool stickHeld = mx != 0 || my != 0;
     const int16_t inputYaw = controlYaw.on ? controlYaw.yaw : (int16_t)camera.yaw;
     int16_t stickHeading = stickHeld ? (int16_t)(inputYaw + padAngle(mx, my)) : 0;
+    if (scriptWalk.on && playerCar < 0) {   // a mission walks the player to a point (Ped::SetGoTo)
+        const float dx = (float)(scriptWalk.target[0] - player.pos[0]), dy = (float)(scriptWalk.target[1] - player.pos[1]);
+        if (dx * dx + dy * dy < 0x800 * 0x800) scriptWalk.on = false;
+        else { stickHeld = true; stickHeading = padAngle(dx, dy); walk = scriptWalk.walking; sprint = false; }
+    }
     if (playerCar >= 0) {   // driving: cPlayer::FillInDrivingYoke (accelerate / brake-reverse / steer / handbrake)
         Vehicle::Controls dc;
         if (Plugins_GameInput() && !cutscene) {
@@ -1327,7 +1332,7 @@ void Game::tick() {
             return;
         }
         traffic.update(*this);
-        for (int i = 0; i < (int)cars.size(); ++i) cars[i].act(i == playerCar ? dc : traffic.controls(cars[i].uid), i == playerCar, &collision);
+        for (int i = 0; i < (int)cars.size(); ++i) cars[i].act(i == playerCar ? dc : carControls(cars[i]), i == playerCar, &collision);
         peds.update(*this);
         Vehicle::collideCars(cars, playerCar, frame);
         propDynamics.checkImpacts(*this);
@@ -1387,7 +1392,7 @@ void Game::tick() {
             stickHeld = false;
         }
     }
-    bool busy = player.dead || arrested_ || arrestGrabbed || player.reacting() || tickTask(stickHeld, stickHeading);
+    bool busy = player.dead || arrested_ || arrestGrabbed || player.reacting() || scriptAnim || tickTask(stickHeld, stickHeading);
     Player::Input in;
     in.moving = stickHeld;
     in.heading = stickHeading;
@@ -1440,11 +1445,11 @@ void Game::tick() {
     }
     // Prepare movement before dynamic contacts; the shared integration below advances it once.
     if (!busy) player.act(in, &pedSprites);
-    else if (player.dead || arrested_) player.stepOneShot(&pedSprites);
+    else if (player.dead || arrested_ || scriptAnim) player.stepOneShot(&pedSprites);
     else if (player.reacting() && player.actReaction(&pedSprites,Pedestrians::vehicleAbove(*this,player)))
         TheSound().pedThrownBack(player.pos);   // cAnimation::HandleFrameResets
     traffic.update(*this);
-    for (Vehicle& c : cars) c.act(traffic.controls(c.uid), false, &collision);
+    for (Vehicle& c : cars) c.act(carControls(c), false, &collision);
     const bool wasDead = player.dead;
     peds.update(*this);
     if (!wasDead && player.dead) {

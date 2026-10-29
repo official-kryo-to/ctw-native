@@ -72,7 +72,9 @@ void drawPicture(unsigned texture, bool picture) {
 }
 }
 
-bool IntroMovie::play(const std::string& dataDir) {
+bool IntroMovie::play(const std::string& dataDir) { return play(dataDir, nullptr); }
+
+bool IntroMovie::play(const std::string& dataDir, const std::function<void(double, int, int)>& overlay) {
     Movie movie;
     if (!movie.open(dataDir + "/ctw_iphone_intro.mp4")) return true;   // no movie or no decoder: straight on
     const bool musicWasPaused = !Audio_MusicPlaying();
@@ -107,6 +109,15 @@ bool IntroMovie::play(const std::string& dataDir) {
             uploaded = true;
         }
         draw(texture, uploaded);
+        if (overlay) {
+            glPushAttrib(GL_ALL_ATTRIB_BITS);
+            glMatrixMode(GL_PROJECTION); glPushMatrix();
+            glMatrixMode(GL_MODELVIEW); glPushMatrix();
+            overlay(now - start, (int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());
+            glMatrixMode(GL_PROJECTION); glPopMatrix();
+            glMatrixMode(GL_MODELVIEW); glPopMatrix();
+            glPopAttrib();
+        }
         OS_ScreenSwapBuffers();
     }
     movie.close();
