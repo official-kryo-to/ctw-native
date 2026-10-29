@@ -1226,6 +1226,7 @@ void Game::tick() {
     updateSequence();
     screenFade.tick();
     if (objective.frames > 0) --objective.frames;
+    gameplayHud.process(*this);   // (this frame's HUD state, as the game left it last frame)
     if (mission) {
         mission->tick(*this);
         if (mission && mission->finished()) mission.reset();

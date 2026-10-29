@@ -191,13 +191,14 @@ void Game::renderScriptProps() {
     for (const ScriptProp& p : scriptProps) {
         const Model* m = props.model(p.prop);
         if (!m) continue;
-        // heading about z, then the pitch about the prop's own y axis: a model's nose is its +x (cPlaneLand's
-        // plane flies south-west at heading 225 degrees), and a negative pitch lifts it (MovePlane's flare)
+        // SimpleMover::SetHeading turns clockwise: a model's nose is its +y and points along (sin h, cos h)
+        // (cPreIntro's plane at heading 0 leaves its contrails to the south; cPlaneLand's at 225 degrees flies
+        // south-west). The pitch turns the nose about the model's x axis; a negative pitch lifts it (the flare).
         const float h = p.heading * 3.14159265f / 32768.f, a = -p.pitch * 3.14159265f / 32768.f;
-        const float ch = std::cos(h), sh = std::sin(h), ca = std::cos(a), sa = std::sin(a);
-        const float M[16] = {ch * ca, sh * ca, sa, 0,
-                             -sh, ch, 0, 0,
-                             -ch * sa, -sh * sa, ca, 0,
+        const float c = std::cos(h), s = std::sin(h), ca = std::cos(a), sa = std::sin(a);
+        const float M[16] = {c, -s, 0, 0,
+                             s * ca, c * ca, sa, 0,
+                             -s * sa, -c * sa, ca, 0,
                              p.pos[0] / 4096.f, p.pos[1] / 4096.f, p.pos[2] / 4096.f, 1};
         PropLibrary::drawModel(*m, M);
     }

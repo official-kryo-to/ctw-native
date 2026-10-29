@@ -100,6 +100,35 @@ void GameplayHud::sprite(int index, float x, float y, float scale, float angle, 
     glDisable(GL_TEXTURE_2D);
 }
 
+// cHudApp::Process's steps, once per game frame (whether or not a frame is drawn): the radar's flashing
+// (cRadar::Render / RenderRadar), the wanted stars (cMiniHud::ProcessWantedRating, cSprite::RefreshSprite) and the
+// money (cCashMeter::Process)
+void GameplayHud::process(const Game& game) {
+    if (game.frame == flashFrame_) return;
+    flashFrame_ = starFrame_ = cashFrame_ = game.frame;
+    flash_.setStyle(wantedFlashStyle(game.wanted, game.frame), 0xC);
+    flash_.process();
+    flash_.stepTint();
+    const WantedManager& w = game.wanted;
+    if (w.ok()) {
+        for (float& s : starScale_) {
+            if (s > 1.f) s = std::max(s - 0x199 / 4096.f, 1.f);
+            else if (s < 1.f) s = std::max(s, 0x199 / 4096.f) - 0x199 / 4096.f;
+        }
+        const int level = w.actualLevel();   // GetStarDisplayLevel
+        if (level != starLevel_) {
+            for (int i = 0; i < level && i < 6; ++i) starScale_[i] = i < starLevel_ ? 1.f : 2.f;
+            for (int i = level; i < 6; ++i) if (starScale_[i] != 0.f) starScale_[i] = 0xE66 / 4096.f;
+            starLevel_ = level;
+        }
+        const bool flashing = w.starsFlashing();
+        if (flashing && !wasFlashing_) { flashCount_ = 0; flashOn_ = true; }   // SetFlashing(true)
+        else if (flashing && flashCount_++ > 5) { flashCount_ = 0; flashOn_ = !flashOn_; }
+        wasFlashing_ = flashing;
+    }
+    if (cash_.step(game.money)) TheSound().playHud(0x193, 0x14);
+}
+
 void GameplayHud::render(const Game& game, int width, int height) const {
     if (!texture_ || width <= 0 || height <= 0 || !map_.columns()) return;
     // The normal phone radar uses 150 HUD units. Like GetRadarLeft, anchor it to the left edge as aspect changes.
@@ -112,12 +141,6 @@ void GameplayHud::render(const Game& game, int width, int height) const {
     RadarMap::worldToMap(pos, mx, my);
     const uint16_t yaw = rotation_ ? game.cameraYaw() : 0;
     const RadarProjection projection(yaw);
-    if (game.frame != flashFrame_) {   // once per game frame: cHudApp::Process, cRadar::Render and RenderRadar
-        flashFrame_ = game.frame;
-        flash_.setStyle(wantedFlashStyle(game.wanted, game.frame), 0xC);
-        flash_.process();
-        flash_.stepTint();
-    }
     glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT | GL_CURRENT_BIT | GL_TEXTURE_BIT);
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_ALPHA_TEST);
@@ -199,24 +222,6 @@ void GameplayHud::render(const Game& game, int width, int height) const {
 void GameplayHud::renderWantedStars(const Game& game, float k, int width, int height) const {
     const WantedManager& w = game.wanted;
     if (!w.ok()) return;
-    // once per game frame: cMiniHud::ProcessWantedRating's scales and the stars' flashing (cSprite::RefreshSprite)
-    if (game.frame != starFrame_) {
-        starFrame_ = game.frame;
-        for (float& s : starScale_) {
-            if (s > 1.f) s = std::max(s - 0x199 / 4096.f, 1.f);
-            else if (s < 1.f) s = std::max(s, 0x199 / 4096.f) - 0x199 / 4096.f;
-        }
-        const int level = w.actualLevel();   // GetStarDisplayLevel
-        if (level != starLevel_) {
-            for (int i = 0; i < level && i < 6; ++i) starScale_[i] = i < starLevel_ ? 1.f : 2.f;
-            for (int i = level; i < 6; ++i) if (starScale_[i] != 0.f) starScale_[i] = 0xE66 / 4096.f;
-            starLevel_ = level;
-        }
-        const bool flashing = w.starsFlashing();
-        if (flashing && !wasFlashing_) { flashCount_ = 0; flashOn_ = true; }   // SetFlashing(true)
-        else if (flashing && flashCount_++ > 5) { flashCount_ = 0; flashOn_ = !flashOn_; }
-        wasFlashing_ = flashing;
-    }
     // WANTED_STARS_POS_X from cMiniHud::Init, in the 768-high HUD space; 22 apart at y 12
     const int virtualWidth = height ? 3 * width * 256 / height : 1024;
     const int extra = (virtualWidth - 0x400) >> 1;
@@ -264,10 +269,6 @@ int32_t CashMeter::widthTemplate(int32_t shown) {   // UpdateCash's thresholds (
 }
 
 void GameplayHud::renderCash(const Game& game, float k) const {
-    if (game.frame != cashFrame_) {   // once per game frame (cHudApp::Process)
-        cashFrame_ = game.frame;
-        if (cash_.step(game.money)) TheSound().playHud(0x193, 0x14);
-    }
     if (cash_.slide() >= 0x2A && !cash_.delta()) return;
     // font 5 is the game's large font and font 3 its small one; the port draws both with the HUD font
     const float big = 2.f * k, small = 1.5f * k;

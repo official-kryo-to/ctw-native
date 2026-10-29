@@ -38,6 +38,7 @@ public:
     GameplayHud& operator=(const GameplayHud&) = delete;
     bool init(const std::string& dataDir);
     void shutdown();
+    void process(const Game& game);   // once per game frame
     void render(const Game& game, int width, int height) const;
     void setRotation(bool enabled) { rotation_ = enabled; }
     bool rotation() const { return rotation_; }

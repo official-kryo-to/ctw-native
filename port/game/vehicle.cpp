@@ -102,6 +102,7 @@ void Vehicle::init(const VehicleInfo& info, int id, const int32_t p[3], int16_t 
     gripBase_ = info.s16(0x48);
     for (int i = 0; i < 6; ++i) swayK_[i] = info.s32(0x74 + i * 4);
     for (int i = 0; i < 6; ++i) info_[i] = info.s32(0xC4 + i * 4);   // +0xC4 rear lamps, +0xD0 headlamps
+    for (int i = 0; i < 3; ++i) roof_[i] = info.s32(0xB8 + i * 4);   // +0xB8 the roof light
     for (int i = 0; i < 4; ++i) {
         doorNode_[i] = (int8_t)info.raw[0x94 + i];
         doorOff_[i][0] = info.s32(0x98 + i * 8); doorOff_[i][1] = info.s32(0x9C + i * 8);
@@ -1677,6 +1678,7 @@ void Vehicle::renderLights(const WorldCamera& cam, uint32_t frame, bool night, C
         world(rx, ry - 0x333, rz + 0x333, p);
         DrawSheetSprite(0xE, colour, p, cam.right, cam.up, 0.7f, 0.7f);
     }
+    if (siren) renderRoofLights(cam, frame);
     if ((driver && indicators) || (!driver && indicators == 3)) {   // blinking, 8 frames on / 8 off
         if (8 < ((frame + uid) & 0xF)) {
             float p[3];
@@ -1819,4 +1821,44 @@ void Vehicle::render(const Model* m) const {
     glDisable(GL_TEXTURE_2D);
     glDisable(GL_CULL_FACE);
     glDepthMask(GL_TRUE);
+}
+
+// cWheeledVehicle::RenderRoofLights: while the siren sounds, one camera-facing light above the roof, flashing between
+// sides and colours (RGB555) in each vehicle's own pattern. Police cars (4 and 18) flash white across the roof and
+// the headlamps with blue and red bursts; the fire truck (6) red and white, 8 red and grey, 13 a steady amber, 34
+// blue and red, and the rest magenta and green.
+void Vehicle::renderRoofLights(const WorldCamera& cam, uint32_t frame) const {
+    const uint32_t t = frame + uid * 7;   // (the original offsets the clock by the vehicle's pool slot)
+    int32_t x = roof_[0], y = roof_[1], z = roof_[2];
+    int colour = 0x7FFF, size = 0x1000, side = 1;   // side: -1 left, 1 right, 0 middle
+    switch (infoId) {
+    case 6: if (t & 8) colour = 0x1F; else side = -1; break;
+    case 0xD: side = 0; colour = 0x3FF; break;
+    case 8: if (t & 8) colour = 0x1F; else { colour = 0x618C; side = -1; } break;
+    case 4: case 0x12:
+        if (t & 1) {   // odd frames: the headlamps, a little further forward
+            x = info_[3]; y = info_[4] + 0x666; z = info_[5];
+            side = (t & 3) == 1 ? -1 : 1;
+        } else {
+            switch (t % 20) {
+            case 2: case 6: colour = 0x7C00; size = 0x2000; side = -1; break;
+            case 10: case 14: case 18: side = -1; break;
+            case 12: case 16: colour = 0x1F; size = 0x2000; break;
+            default: break;
+            }
+        }
+        break;
+    default:
+        size = infoId == 0x22 ? 0x1000 : 0x2000;
+        if (t & 8) colour = infoId == 0x22 ? 0x1F : 0x3E0;
+        else { colour = infoId == 0x22 ? 0x7C00 : 0x7C1F; side = -1; }
+        break;
+    }
+    const int32_t lx = side < 0 ? -0x666 - x : side > 0 ? x + 0x666 : 0;
+    int32_t l[3] = {lx, y, z + 0x333}, w[3];
+    localToWorld(l, w);
+    const float p[3] = {w[0] / 4096.f, w[1] / 4096.f, w[2] / 4096.f};
+    const uint32_t abgr = 0xFF000000u | (uint32_t)((colour & 0x1F) << 3) | (uint32_t)((colour >> 5 & 0x1F) << 3) << 8 |
+                          (uint32_t)((colour >> 10 & 0x1F) << 3) << 16;
+    DrawSheetSprite(0xE, abgr, p, cam.right, cam.up, size / 4096.f, size / 4096.f);
 }

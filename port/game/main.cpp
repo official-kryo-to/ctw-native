@@ -6,6 +6,7 @@
 // --data defaults to the "data" folder next to the exe (or "data" in the current folder while developing), --mods
 // to the "mods" folder next to the exe.
 #include "game.h"
+#include "intro.h"
 #include "hud.h"
 #include "plugins.h"
 #include "os/os.h"
@@ -61,6 +62,7 @@ int main(int argc, char** argv) {
     int forceWanted = -1;
     int dieAt = -1;   // --die N: the player dies on frame N (testing the death sequence)
     int startMoney = -1;   // --money N: start with this much money (testing the HUD's cash)
+    bool playMovie = false;   // --play-movie: shot mode plays the intro movie first, as a new game does
     const char* missionName = nullptr;   // --mission NAME: start this mission (kena01) at the start
     const char* sequenceName = nullptr;   // --seq NAME: play this cutscene sequence (CSS_*.seq) at the start
     const char* giveWeapons = nullptr;
@@ -68,6 +70,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--collision")) { TheGame().showDebug = true; continue; }
         if (!strcmp(argv[i], "--trace")) { trace = true; continue; }
+        if (!strcmp(argv[i], "--play-movie")) { playMovie = true; continue; }
         const char* option = argv[i];
         int values = 1;
         if (!strcmp(option, "--walk") || !strcmp(option, "--drive") || !strcmp(option, "--pos")) values = 2;
@@ -223,6 +226,7 @@ int main(int argc, char** argv) {
         int32_t at[3] = {(int32_t)(c.x * 4096), (int32_t)(c.y * 4096), 0};
         game.spawnCar(c.id, at, (int16_t)(c.h * 65536 / 360));
     }
+    if (shot && playMovie && !IntroMovie::play(data)) game.quitRequested = true;
     if (shot) {   // automated test: run N game frames, optionally press keys, save a screenshot
         for (int f = 0; f < frames; ++f) {
             if (fireFrom >= 0) game.scriptedFire = f >= fireFrom;

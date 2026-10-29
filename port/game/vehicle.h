@@ -306,6 +306,8 @@ private:
     int32_t seatOff_[4][3] = {};                   // info +0xDC
     uint16_t infoFlags8e_ = 0;                     // info +0x8E
     int32_t info_[6] = {};                         // info +0xC4 (rear lamps x, y, z), +0xD0 (headlamps x, y, z)
+    int32_t roof_[3] = {};                         // info +0xB8: the roof light
+    void renderRoofLights(const struct WorldCamera& cam, uint32_t frame) const;
     uint8_t doorOpenBits_ = 0;
     int numSeats_ = 1;                             // info +0x10C
     void updateDoors();

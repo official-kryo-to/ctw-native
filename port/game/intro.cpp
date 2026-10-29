@@ -34,7 +34,21 @@ void discardInput() {
     Host_PopMouseDelta(&dx, &dy);
 }
 
+void drawPicture(unsigned texture, bool picture);
+
+// The movie's drawing keeps the game's GL state as it found it: GL_REPLACE texturing left behind made every
+// vertex-coloured thing after the intro (people's palette colours, coloured text, the world's lighting) white.
 void draw(unsigned texture, bool picture) {
+    glPushAttrib(GL_ALL_ATTRIB_BITS);
+    glMatrixMode(GL_PROJECTION); glPushMatrix();
+    glMatrixMode(GL_MODELVIEW); glPushMatrix();
+    drawPicture(texture, picture);
+    glMatrixMode(GL_PROJECTION); glPopMatrix();
+    glMatrixMode(GL_MODELVIEW); glPopMatrix();
+    glPopAttrib();
+}
+
+void drawPicture(unsigned texture, bool picture) {
     const int w = (int)OS_ScreenGetWidth(), h = (int)OS_ScreenGetHeight();
     glViewport(0, 0, w, h);
     glDisable(GL_SCISSOR_TEST); glDisable(GL_DEPTH_TEST); glDisable(GL_BLEND); glDisable(GL_CULL_FACE);
@@ -54,6 +68,7 @@ void draw(unsigned texture, bool picture) {
     glTexCoord2f(0, 1); glVertex2f(0, 1);
     glEnd();
     glDisable(GL_TEXTURE_2D);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 }
 }
 
