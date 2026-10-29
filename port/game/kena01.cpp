@@ -4,15 +4,16 @@
 // kena01::cKEN_A01, the first mission ("Arrival in Liberty"): the prologue on the plane, the landing, the ambush
 // at the port and the intro movie, then Huang on the jetty, a car, Uncle Kenny's restaurant and the apartment.
 //
-// Not ported yet, and passed over here: the plane's sound, the sinking car and its minigame (cCarInWater,
-// cSinkingCarApp), swimming to the jetty, hotwiring (cHotWiringApp), the
-// GPS route and the help texts' timing. At the port the people are puppets the scene moves (getting in and out of
-// cars without the door animations) and only the bodyguards' deaths are decided, as the story has them.
+// Not ported yet, and passed over here: the plane's sound, hotwiring (cHotWiringApp), the GPS route and the help
+// texts (cInWaterHelpText, cFindCarHelpText: HUDText's help queue is not ported). At the port and the pier the people
+// are puppets the scene moves (getting in and out of cars without the door animations, Ped::SetDive as a step out
+// and a walk) and only the bodyguards' deaths are decided, as the story has them.
 #include "mission.h"
 #include "game.h"
 #include "intro.h"
 #include "driving.h"
 #include "hud.h"
+#include "sound.h"
 #include "text/gxt.h"
 #include <cmath>
 
@@ -170,10 +171,10 @@ private:
     static int16_t angleTo(int64_t dx, int64_t dy) { return (int16_t)(atan2f((float)dx, (float)dy) * 10430.f); }
 
     // WorldImpl::CreateVehicle + SetPosition / SetHeading (degrees) / SetNoSkid
-    void makeCar(int which, int info, float x, float y, int headingDeg) {
+    void makeCar(int which, int info, float x, float y, int headingDeg, int palette = -1) {   // (+ Vehicle::SetColour)
         const int32_t at[3] = {fx(x), fx(y), 0};
         sceneCars_[which] = SceneCar{};
-        const int i = g_->spawnCar(info, at, (int16_t)deg(headingDeg));
+        const int i = g_->spawnCar(info, at, (int16_t)deg(headingDeg), palette);
         if (i < 0) return;
         g_->cars[i].keep = true;
         sceneCars_[which].uid = g_->cars[i].uid;
@@ -195,8 +196,9 @@ private:
             p->body.hidden = true;
         }
     }
-    // Vehicle::SetGoTo + SetSpeed
+    // Vehicle::SetGoTo + SetSpeed: the driver's goto task drives the car under physics
     void driveTo(int which, float x, float y, int speed) {
+        if (Vehicle* v = car(which)) v->setToPhysics(true);
         SceneCar& c = sceneCars_[which];
         c.driving = true;
         c.goal[0] = fx(x);
@@ -473,19 +475,149 @@ private:
         Hud_End();
     }
 
-    // DoneIntro .. GetToShoreComplete: the port starts Huang on the jetty he swims to (the shore blip at
-    // -307.74, -40.05) and plays LeaveWater, his words as he climbs out
+    // DoneIntro -> Callback_FadedOutInit -> Setup -> cCarInWater::Start(EscapeCar): the kidnappers' car (vehicle 0x15,
+    // colour 10) races along the pier from (-188.96, 17.46) at speed 25 for (-325.24, 20.69) with Huang in it; two of
+    // them jump out (5: to -308.88, 44.86; 6: to -302.79, -23.65) and it goes over the end into the water
+    // (CSS_Ken_A01_Splash: 7 RemoveVehicles, the splash at -341.03, 19.37 and its sound 0x313)
     void doneIntro() {
         g_->screenFade.toBlack(1);
-        g_->seqCamera.active = false;   // LeaveWater has no cameras: the game's camera on Huang
-        int32_t at[3] = {fx(-307.74f), fx(-40.05f), fx(2.f)};
-        std::copy(at, at + 3, g_->player.pos);
+        g_->seqCamera.active = false;
+        // Callback_FadedOutInit: Huang at the pier's end (-294.74, 31.44) facing 135 degrees, then Setup
+        placePlayer(-294.74f, 31.44f, 0.f);
         g_->player.placeOnGround(&g_->collision);
-        g_->player.setHeading(0);
-        g_->camera.inherit(g_->player.pos, 0, g_->camera.pitch());
-        g_->world.loadAllNow(at[0] / 4096.f, at[1] / 4096.f);
-        g_->screenFade.in(30);
-        play("CSS_KEN_A01_LeaveWater.seq", [this] { findACar(); }, false);
+        g_->player.setHeading((int16_t)deg(0x87));
+        g_->camera.reset(g_->player.pos, g_->player.heading());
+        setup();
+    }
+    // Setup (its first car): the car to steal, vehicle 5 at (-281.78, -64.5) facing 100 degrees in colour 4, hotwire
+    // class 1 (cCarToSteal::Start), then cCarInWater::Start(EscapeCar)
+    void setup() {
+        if (!car()) {
+            const int32_t at[3] = {fx(-281.78f), fx(-64.5f), 0};
+            const int i = g_->spawnCar(5, at, (int16_t)deg(0x64), 4);
+            if (i >= 0) { g_->cars[i].keep = true; carUid_ = g_->cars[i].uid; }
+        }
+        carInWater();
+    }
+
+    void carInWater() {   // cCarInWater::Begin, IntroSetup, IntroFinished
+        endScene();
+        sceneOn_ = true;
+        g_->cutscene = g_->scriptCutscene = true;
+        g_->player.hidden = true;   // (in the car)
+        g_->world.loadAllNow(-260.f, 18.f);
+        makeCar(kCarA, 0x15, -188.96f, 17.46f, 0x10E, 0xA);
+        makeActor(kAmbusherA1, 3, kCarA, 0, 50);
+        makeActor(kAmbusherA2, 3, kCarA, 1, 50);
+        makeActor(kAmbusherB2, 3, kCarA, 2, 50);
+        for (int a : {(int)kAmbusherA1, (int)kAmbusherA2, (int)kAmbusherB2})
+            if (Pedestrians::Ped* p = ped(a)) p->puppet.weapon = 0;   // (no GiveWeapon here)
+        if (Vehicle* c = car(kCarA)) c->engineOn = true;   // (its driver is in it)
+        driveTo(kCarA, -325.24f, 20.69f, 0x19);
+        wait(1, [this] { sceneStep(); });
+        // cGlobalFader::Init(IntroSetup, IntroFinished, .., 15) (FadeOutAndFadeIn): set up in the dark, 15 frames,
+        // IntroFinished (the sequence), 15 more, then the screen fades in over 15
+        wait(0xF, [this] {
+            splashSequence();
+            wait(0xF, [this] { g_->screenFade.in(0xF); });
+        });
+    }
+    void splashSequence() {   // IntroFinished: PlaySequence
+        Sequence* s = g_->startSequence("CSS_Ken_A01_Splash.seq");
+        if (!s) { wait(1, [this] { carInWaterEnd(); }); return; }
+        s->setCallback(Sequence::kEnded, [this] { wait(1, [this] { carInWaterEnd(); }); });   // SequenceEnd -> End
+        s->setCallback(Sequence::kSkipped, [this] {   // Skipped: to black, then 5 frames
+            g_->screenFade.toBlack(1, [this] { wait(5, [this] { displaySinkingCar(); }); });
+        });
+        s->setCallback(5, [this] { getOut(kAmbusherA2); walkTo(kAmbusherA2, -308.88f, 44.86f); });    // JumpOutOfVehicle
+        s->setCallback(6, [this] { getOut(kAmbusherB2); walkTo(kAmbusherB2, -302.79f, -23.65f); });   // JumpOutOfVehicle2
+        s->setCallback(7, [this] {   // RemoveVehicles: FXImpl::CreateExplosion(type 8) and SoundImpl::PlaySFX(0x313)
+            const int32_t at[3] = {fx(-341.03f), fx(19.37f), 0}, still[3] = {0, 0, 0};
+            g_->addWaterSplash(at, 8, still, -1);
+            if (Vehicle* c = car(kCarA)) TheSound().scriptSfx(c->pos, 0x313, 0x7F, 0x384);
+        });
+    }
+    void carInWaterEnd() {   // End: to black over 15 frames, then FadedOutAfterImpact
+        g_->screenFade.toBlack(15, [this] { displaySinkingCar(); });
+    }
+    void displaySinkingCar() {   // DisplaySinkingCar: DeleteCar, then 30 frames
+        endScene();
+        wait(0x1E, [this] { introEndFinished(); });
+    }
+    // IntroEndFinished: Huang at (-339.43, 27.48) on the water (z -7.5), facing 90 degrees, the cutscene over and the
+    // screen faded in; then EscapeCar -> EscapeCarPause a frame later
+    void introEndFinished() {
+        g_->stopSequence();
+        g_->seqCamera.active = false;   // (SetBehindPlayer: the game's camera, not the sequence's last one)
+        placePlayer(-339.43f, 27.48f, -7.5f);
+        g_->player.setHeading((int16_t)deg(0x5A));
+        g_->player.hidden = false;
+        g_->camera.reset(g_->player.pos, g_->player.heading());
+        g_->world.loadAllNow(-339.43f, 27.48f);
+        g_->cutscene = g_->scriptCutscene = false;
+        g_->screenFade.in(15);
+        wait(1, [this] { escapeCarPause(); });
+    }
+    // EscapeCarPause: the sinking car (ScriptPlayer::SetSinkingCarStart(PlayerSurfaces):
+    // the minigame task; on foot, style 0)
+    void escapeCarPause() {
+        g_->player.setHeading((int16_t)deg(0x69));
+        g_->camera.reset(g_->player.pos, g_->player.heading());
+        g_->cutscene = true;   // (StartCutscene: no HUD while the minigame runs)
+        // (SetPrimaryObjective(0x542) "Survive the kidnapping.": the mission brief, not on screen)
+        g_->startSinkingCar(0, [this](bool escaped) {
+            if (escaped) playerSurfaces();
+            else failed();
+        });
+    }
+    // PlayerSurfaces: the controls back, facing 135 degrees; 10 frames on PlayLeavingCarSequence -> EscapeCarComplete
+    void playerSurfaces() {
+        g_->cutscene = false;
+        g_->player.setHeading((int16_t)deg(0x87));
+        wait(0xA, [this] { escapeCarComplete(); });
+    }
+    // EscapeCarComplete: a splash (type 8) where Huang comes up, the screen fades in; 30 frames on GetToShore
+    void escapeCarComplete() {
+        const int32_t still[3] = {0, 0, 0};
+        g_->addWaterSplash(g_->player.pos, 8, still, -1);
+        g_->screenFade.in(15);
+        wait(0x1E, [this] { getToShore(); });
+    }
+    // GetToShore: the jetty's circle (-307.74, -40.05, radius 5) marked; "Get to shore." while in the water. Out of
+    // the water and in the circle (LeftWater / OutOfWaterInHalo), or in a vehicle: PlayLeftWaterSequence.
+    void getToShore() {
+        const int32_t shore[3] = {fx(-307.74f), fx(-40.05f), fx(-6.5f)};
+        g_->addBlip(shore, 0xFFE000FF, 4);
+        if (g_->player.inWater) g_->showObjective(text(0x53A));
+        when([this, shore] {
+            if (g_->playerCar >= 0) return true;
+            int32_t p[3];
+            g_->focus(p);
+            const int64_t dx = (int64_t)p[0] - shore[0], dy = (int64_t)p[1] - shore[1];
+            return !g_->player.inWater && dx * dx + dy * dy <= (int64_t)0x5000 * 0x5000;
+        }, [this] { playLeftWaterSequence(); });
+    }
+    // PlayLeftWaterSequence: the circle and its marker gone, CSS_KEN_A01_LeaveWater (his words as he climbs out);
+    // PlayedWaterSequence -> WaitBeforeGetToShoreComplete: 30 frames -> GetToShoreComplete
+    void playLeftWaterSequence() {
+        g_->removeBlip(4);
+        g_->objective.frames = 0;
+        g_->cutscene = g_->scriptCutscene = true;
+        play("CSS_KEN_A01_LeaveWater.seq", [this] { wait(0x1E, [this] { getToShoreComplete(); }); }, false);
+    }
+    // GetToShoreComplete: the brief's "Meet with your Uncle Kenny to explain what happened.", the police chase set up
+    // (FindACar does that), then FindACar
+    void getToShoreComplete() {
+        g_->cutscene = g_->scriptCutscene = false;
+        g_->seqCamera.active = false;
+        // (SetPrimaryObjective(0x543): the mission brief, not on screen)
+        findACar();
+    }
+    // PlayerDead -> Failed
+    void failed() {
+        g_->cutscene = g_->scriptCutscene = false;
+        g_->showObjective(g_->mainText(0x5C), 150);   // "MISSION FAILED"
+        finish();
     }
 
     // FindACar: cCarToSteal's car on the street behind the jetty, marked on the radar
@@ -579,15 +711,6 @@ private:
     void findACar() {
         g_->cutscene = g_->scriptCutscene = false;
         if (!chaseOn_ && !chase_[kChaseCar].uid) policeChaseInit();   // GetToShoreComplete: cPoliceChase::Init
-        if (!carUid_) {
-            const int32_t at[3] = {fx(-281.78f), fx(-64.5f), 0};
-            int info = 0;
-            for (const char* name : {"Sentinel", "Esperanto", "Pony", "Faction"})
-                for (size_t i = 0; i < g_->vehicleInfos.size(); ++i)
-                    if (!info && g_->vehicleInfos[i].name() == name) info = (int)i;
-            const int car = g_->spawnCar(info, at, 0);
-            if (car >= 0) { g_->cars[car].keep = true; carUid_ = g_->cars[car].uid; }
-        }
         if (const Vehicle* c = car()) g_->addBlip(c->pos, 0x4080FFFF, 1);
         g_->showObjective(text(0x53B));   // "Get a car."
         when([this] { return g_->playerCar >= 0; }, [this] { findACarComplete(); });
