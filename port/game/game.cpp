@@ -312,8 +312,8 @@ void Game::focus(int32_t o[3]) const {
 }
 
 void Game::viewCamera(WorldCamera& cam) const {
-    // a cutscene's camera wins over a mod's free camera (the third-person view)
-    const bool free = freeCam.on && !seqCamera.active;
+    // a cutscene's camera and a minigame's win over a mod's free camera (the third-person view)
+    const bool free = freeCam.on && !gameCameraForced();
     if (renderCamValid_ && !free) { cam = renderCam_; return; }   // interpolated while drawing
     if (free) cam = freeCam.cam;
     else if (seqCamera.active) {   // a cutscene's sequence camera
@@ -323,10 +323,18 @@ void Game::viewCamera(WorldCamera& cam) const {
         for (int i = 0; i < 3; ++i) cam.eye[i] = deathEye_[i] / 4096.f;
         cam.setYawPitch(-(int16_t)deathYaw_ * 360.f / 65536, (int16_t)deathPitch_ * 360.f / 65536);
     }
+    else if (minigameCam.active()) {   // cBaseCam: its own field of view; near 0x666, far 150
+        int32_t eye[3]; minigameCam.position(eye);
+        for (int i = 0; i < 3; ++i) cam.eye[i] = eye[i] / 4096.f;
+        cam.setYawPitch(-(int16_t)minigameCam.yaw() * 360.f / 65536, (int16_t)minigameCam.pitch() * 360.f / 65536);
+        cam.fovY = minigameCam.fov() * 720.f / 65536;
+        cam.zNear = 0x666 / 4096.f;
+        cam.zFar = 150.f;
+    }
     else if (playerCar >= 0) carCam.toWorldCamera(cam);
     else if (scope.active) scope.toWorldCamera(*this, cam);
     else camera.toWorldCamera(cam);
-    if (fovOverride > 0.f) cam.fovY = fovOverride;
+    if (fovOverride > 0.f && !minigameCam.active()) cam.fovY = fovOverride;
     if (renderDistance > 120.f || free)
         cam.zFar = std::max(cam.zFar, std::hypot(renderDistance * 1.414214f, cam.eye[2]) + 30.f);
 }
@@ -391,7 +399,8 @@ void Game::updateView() {   // the game camera (not a mod's free camera), as cBa
         yaw = seqCamera.yaw;
         pitch = seqCamera.pitch;
     } else gameCamera(eye, yaw, pitch);   // (cSniperCam's pitch is 0xC000)
-    view.set(eye, yaw, pitch, (int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());
+    const int16_t fov = !seqCamera.active && !player.dead && !arrested_ && minigameCam.active() ? minigameCam.fov() : 0x1555;
+    view.set(eye, yaw, pitch, (int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight(), fov);
     ExplosionTwirls::setViewAxis(view.m[6], view.m[7]);
 }
 
@@ -892,9 +901,10 @@ bool Game::tickTask(bool stickHeld, int16_t stickHeading) {
         player.placeOnGround(&collision);
         Plugins_EmitEvent(CTW_EVENT_PLAYER_EXITED_VEHICLE, c.uid, c.infoId);
         playerCar = -1;
-        int32_t previousView[3]; carCam.position(previousView);
+        int32_t previousView[3]; uint16_t viewYaw, viewPitch; uint32_t blocked;
+        leaveCarView(previousView, viewYaw, viewPitch, blocked);
         camera.reset(player.pos, player.heading());
-        camera.inherit(previousView, carCam.yaw(), carCam.pitch(), carCam.blockedFrames());
+        camera.inherit(previousView, viewYaw, viewPitch, blocked);
         task.op = CarTask::None;
         return false;
     }
@@ -907,7 +917,8 @@ bool Game::tickTask(bool stickHeld, int16_t stickHeading) {
 static int16_t padAngle(float x, float y) { return (int16_t)(atan2f(x, y) * 10430.f); }
 
 void Game::killInVehicle(Vehicle& car) {
-    carCam.position(deathEye_); deathYaw_ = carCam.yaw(); deathPitch_ = carCam.pitch();
+    uint32_t blocked;
+    leaveCarView(deathEye_, deathYaw_, deathPitch_, blocked);
     int32_t door[3]; car.doorSpawnPoint(0, door); car.localToWorld(door, player.pos);
     for (int& occupant : car.seatUser) if (occupant == -2) occupant = -1;
     player.hidden = player.attached = false;
@@ -948,16 +959,17 @@ void Game::processKnockOffs() {
         player.placeOnGround(&collision);
         Plugins_EmitEvent(CTW_EVENT_PLAYER_EXITED_VEHICLE, car.uid, car.infoId);
         playerCar = -1; task = CarTask{}; enterPressed = false;
-        int32_t previousView[3]; carCam.position(previousView);
+        int32_t previousView[3]; uint16_t viewYaw, viewPitch; uint32_t blocked;
+        leaveCarView(previousView, viewYaw, viewPitch, blocked);
         camera.reset(player.pos, player.heading());
-        camera.inherit(previousView, carCam.yaw(), carCam.pitch(), carCam.blockedFrames());
+        camera.inherit(previousView, viewYaw, viewPitch, blocked);
         radio.update(*this);
         // cPed::Damage type 21: the fall grunt, one point, state 6 and one drop of blood
         TheSound().playerEvent(0x82, 0x7F, 200);
         player.knockedOff(dir);
         addBlood(player.pos, 1);
         if (player.dead) {
-            camera.position(deathEye_); deathYaw_ = (uint16_t)camera.yaw; deathPitch_ = camera.pitch();
+            leaveFootView(deathEye_, deathYaw_, deathPitch_);
             deathFrames_ = 0; deathCameraSettled_ = false;
         }
     }
@@ -1185,6 +1197,7 @@ void Game::addPropExplosion(const int32_t at[3], int16_t scale) {
 unsigned Game::explosionParticleCount(const int32_t at[3]) const {
     int32_t eye[3];
     if (player.dead || arrested_) std::copy(deathEye_,deathEye_+3,eye);
+    else if (minigameCam.active()) minigameCam.position(eye);
     else if (playerCar >= 0) carCam.position(eye);
     else camera.position(eye);
     int64_t d2 = 0;
@@ -1246,7 +1259,7 @@ bool Game::giveWeapon(int type, int ammo, bool replace) {   // cPlayer::GiveWeap
 }
 
 uint16_t Game::cameraYaw() const {   // the active camera's yaw (cBaseCam +0xE8)
-    return playerCar >= 0 ? carCam.yaw() : camera.yaw;
+    return minigameCam.active() ? minigameCam.yaw() : playerCar >= 0 ? carCam.yaw() : camera.yaw;
 }
 
 void Game::finishShortFrame() {
@@ -1264,8 +1277,7 @@ void Game::updateDeath() {
     if (!deathStarted_) {   // a death no path set the camera up for (burning, a script): start from the view
         deathStarted_ = true;
         if (deathFrames_ != 0) {
-            camera.position(deathEye_);
-            deathYaw_ = (uint16_t)camera.yaw; deathPitch_ = camera.pitch();
+            leaveFootView(deathEye_, deathYaw_, deathPitch_);
             deathFrames_ = 0; deathCameraSettled_ = false;
         }
     }
@@ -1484,7 +1496,8 @@ void Game::tick() {
         }
         Vehicle& me = cars[playerCar];
         if (player.hidden) { player.pos[0] = me.pos[0]; player.pos[1] = me.pos[1]; player.pos[2] = me.pos[2]; }
-        carCam.update(me, &collision);
+        if (minigameCam.active()) { int32_t at[3]; playerFollowPoint(at); minigameCam.update(at, &collision); }
+        else carCam.update(me, &collision);
         updateView();
         updateSectors();
         updatePopulation();
@@ -1493,7 +1506,7 @@ void Game::tick() {
         Stats_PlayerProcess(*this);
         processTimeCycle();
         if (seqCamera.active) world.stream(seqCamera.eye[0] / 4096.f, seqCamera.eye[1] / 4096.f, 2);   // a cutscene
-        else if (!freeCam.on) world.stream(me.pos[0] / 4096.f, me.pos[1] / 4096.f, 2);
+        else if (!freeCam.on || minigameCam.active()) world.stream(me.pos[0] / 4096.f, me.pos[1] / 4096.f, 2);
         if (!multiplayerWorld.client()) carGens.update(*this);
         removeFarCars();
         collectSectors();
@@ -1572,8 +1585,7 @@ void Game::tick() {
     const bool wasDead = player.dead;
     peds.update(*this);
     if (!wasDead && player.dead) {
-        camera.position(deathEye_);
-        deathYaw_ = (uint16_t)camera.yaw; deathPitch_ = camera.pitch();
+        leaveFootView(deathEye_, deathYaw_, deathPitch_);
         deathFrames_ = 0; deathCameraSettled_ = false;
     }
     if (!player.hidden && !player.attached && (!busy || player.reacting())) {
@@ -1602,7 +1614,10 @@ void Game::tick() {
     else if (playerCar >= 0) {
         const Vehicle& c = cars[playerCar];
         std::copy(c.pos, c.pos + 3, player.pos);
-        carCam.update(c, &collision); // entry switched the active camera during tickTask
+        if (minigameCam.active()) { int32_t at[3]; playerFollowPoint(at); minigameCam.update(at, &collision); }
+        else carCam.update(c, &collision); // entry switched the active camera during tickTask
+    } else if (minigameCam.active()) {   // the minigame camera is the active one (cCamera::SwitchToCam)
+        int32_t at[3]; playerFollowPoint(at); minigameCam.update(at, &collision);
     } else camera.update(player.pos, player.heading(), player.vel, &collision);
     updateView();
     updateSectors();
@@ -1613,7 +1628,7 @@ void Game::tick() {
     float p[3];
     player.posf(p);
     if (seqCamera.active) world.stream(seqCamera.eye[0] / 4096.f, seqCamera.eye[1] / 4096.f, 2);   // a cutscene
-    else if (!freeCam.on) world.stream(p[0], p[1], 2);   // (the free camera streams around itself in render)
+    else if (!freeCam.on || minigameCam.active()) world.stream(p[0], p[1], 2);   // (the free camera streams around itself in render)
     if (!multiplayerWorld.client()) carGens.update(*this);
     removeFarCars();
     collectSectors();
@@ -1633,7 +1648,7 @@ void Game::render(int W, int H) {
     Plugins_BeginFrame(W, H);   // input, then mods that place their camera before the world is drawn
     WorldCamera cam;
     viewCamera(cam);
-    if (freeCam.on && !seqCamera.active) world.stream(cam.eye[0], cam.eye[1], 2);   // also while paused
+    if (freeCam.on && !gameCameraForced()) world.stream(cam.eye[0], cam.eye[1], 2);   // also while paused
     world.propLights.clear();
     world.lightPools = renderStyle.lightPools;
     renderProps(cam, false);   // their lights, drawn by the world renderer with its own
@@ -1858,6 +1873,9 @@ void Game::updateHotwire() {
             car->carGenerated = false;
             car->engineOn = true;
         } else if (car) car->immobiliserFired = true;
+        // cHotWiringApp::Shutdown: hotwired (FinishCode +0x751), a new cFollowCarCam2 tweened from the minigame
+        // camera (SwitchToCam, one frame); otherwise the minigame camera stays until the player is out
+        if (success) restoreCam();
         (void)quit;
         if (!success && playerCar >= 0 && cars[playerCar].uid == uid) startExit();   // cExitCarPlayer
         if (onHotwire) {
@@ -1865,7 +1883,60 @@ void Game::updateHotwire() {
             callback(success);
         }
     });
-    if (!started) { c.carGenerated = false; c.engineOn = true; }   // (a class not ported yet)
+    if (!started) { c.carGenerated = false; c.engineOn = true; return; }   // (a class not ported yet)
+    startMinigameCam(cls == 2 ? -0xA000 : 0xA000);   // Init_MediumMode -10 (qword_47F010), Easy and Hard +10
+}
+
+void Game::playerFollowPoint(int32_t out[3]) const {   // cPed::ActThroughVehicle: a ped sits at its seat
+    if (playerCar >= 0 && player.hidden) {
+        int32_t seat[3]; cars[playerCar].seatOffset(playerSeat, seat); cars[playerCar].localToWorld(seat, out);
+    } else std::copy(player.pos, player.pos + 3, out);
+}
+
+// cMinigameCam(gPlayers[0], the active camera's +0xB8 position, its +0x94 row (the right vector), scale, false),
+// then cCamera::SwitchToCam(.., 1, true, false): TweenFrom keeps the outgoing camera's angles and blocked count
+void Game::startMinigameCam(int32_t scale) {
+    int32_t eye[3], at[3];
+    uint16_t yaw, pitch;
+    uint32_t blocked;
+    if (minigameCam.active()) { minigameCam.position(eye); yaw = minigameCam.yaw(); pitch = minigameCam.pitch(); blocked = minigameCam.blockedFrames(); }
+    else if (playerCar >= 0) { carCam.position(eye); yaw = carCam.yaw(); pitch = carCam.pitch(); blocked = carCam.blockedFrames(); }
+    else { camera.position(eye); yaw = camera.yaw; pitch = camera.pitch(); blocked = camera.blockedFrames(); }
+    CameraView rows;
+    rows.set(eye, yaw, pitch, 1, 1);   // RecalculateMatrix: MakeRotationZ(yaw) x MakeRotationX(-0x4000 - pitch)
+    const int32_t right[3] = {rows.m[0], rows.m[1], rows.m[2]};
+    playerFollowPoint(at);
+    minigameCam.start(collision, eye, yaw, pitch, right, scale, at, false, blocked);
+}
+
+void Game::restoreCam() {
+    if (!minigameCam.active()) return;
+    int32_t eye[3]; minigameCam.position(eye);
+    if (playerCar >= 0) carCam.inherit(eye, minigameCam.yaw(), minigameCam.pitch(), minigameCam.blockedFrames());
+    else {
+        camera.reset(player.pos, player.heading());
+        camera.inherit(eye, minigameCam.yaw(), minigameCam.pitch(), minigameCam.blockedFrames());
+    }
+    minigameCam.stop();
+}
+
+void Game::leaveFootView(int32_t eye[3], uint16_t& yaw, uint16_t& pitch) {
+    if (minigameCam.active()) {
+        minigameCam.position(eye); yaw = minigameCam.yaw(); pitch = minigameCam.pitch();
+        minigameCam.stop();
+        return;
+    }
+    camera.position(eye); yaw = (uint16_t)camera.yaw; pitch = camera.pitch();
+}
+
+void Game::leaveCarView(int32_t eye[3], uint16_t& yaw, uint16_t& pitch, uint32_t& blockedFrames) {
+    if (minigameCam.active()) {
+        minigameCam.position(eye); yaw = minigameCam.yaw(); pitch = minigameCam.pitch();
+        blockedFrames = minigameCam.blockedFrames();
+        minigameCam.stop();
+        return;
+    }
+    carCam.position(eye); yaw = carCam.yaw(); pitch = carCam.pitch(); blockedFrames = carCam.blockedFrames();
 }
 
 // ---- HUD pause screen ---------------------------------------------------------------------------------------

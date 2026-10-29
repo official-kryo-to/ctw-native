@@ -56,7 +56,7 @@ void Game::snapshotPoses() {
     std::copy(player.pos, player.pos + 3, s.player);
     s.peds.clear();
     for (const Pedestrians::Ped& p : peds.peds) std::copy(p.body.pos, p.body.pos + 3, s.peds[p.uid].pos);
-    s.cameraValid = !freeCam.on || seqCamera.active;
+    s.cameraValid = !freeCam.on || gameCameraForced();
     if (s.cameraValid) viewCamera(s.camera);
     s.valid = true;
 }
@@ -129,7 +129,7 @@ void Game::applyInterpolation() {
         if (it != s.peds.end()) apply({Applied::Ped, p.uid}, it->second, false);
     }
     // the game camera between its view at the start of the tick and its current view
-    if (!s.cameraValid || (freeCam.on && !seqCamera.active)) return;
+    if (!s.cameraValid || (freeCam.on && !gameCameraForced())) return;
     WorldCamera now;
     viewCamera(now);
     const int32_t a[3] = {(int32_t)(s.camera.eye[0] * 4096), (int32_t)(s.camera.eye[1] * 4096), (int32_t)(s.camera.eye[2] * 4096)};

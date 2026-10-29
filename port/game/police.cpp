@@ -177,9 +177,7 @@ bool Game::beginArrest(uint32_t cop) {
     scope.active = false;
     deathFrames_ = 0;
     deathStarted_ = false;
-    camera.position(deathEye_);
-    deathYaw_ = (uint16_t)camera.yaw;
-    deathPitch_ = camera.pitch();
+    leaveFootView(deathEye_, deathYaw_, deathPitch_);
     deathCameraSettled_ = false;
     return true;
 }

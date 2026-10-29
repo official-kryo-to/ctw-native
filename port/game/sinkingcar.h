@@ -20,8 +20,11 @@
 // beats and the breathing quickens as it rises (timed in milliseconds of real time, as OS_TimeAccurate). A smashed
 // window fades out in two frames, a splash (explosion 8) goes off at the car, and 20 frames later the player is out.
 //
-// Not ported yet: cMinigameCam (the game's camera stays), the help text (HUDImpl::DisplayHelp(0x19C) goes through
-// HUDText's cHudTextQueue and cDynamicHudLayout, which the port does not have) and the app's opening transition.
+// The camera is cMinigameCam (minigamecam.h, started by Game::startSinkingCar). Process also scrolls the sea
+// background (+0x1D0) by |sin| - 0.3 of a phase rising 0x1C7 a frame; that background has no texture here, so
+// nothing shows it.
+// Not ported yet: the help text (HUDImpl::DisplayHelp(0x19C) goes through HUDText's cHudTextQueue and
+// cDynamicHudLayout, which the port does not have) and the app's opening transition.
 #pragma once
 #include "gfx/spriteset.h"
 #include <cstdint>

@@ -582,6 +582,7 @@ private:
     }
     // EscapeCarComplete: a splash (type 8) where Huang comes up, the screen fades in; 30 frames on GetToShore
     void escapeCarComplete() {
+        g_->restoreCam();   // EndCutscene(1, true): cCamera::RestoreCam over one frame
         const int32_t still[3] = {0, 0, 0};
         g_->addWaterSplash(g_->player.pos, 8, still, -1);
         g_->screenFade.in(15);

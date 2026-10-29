@@ -38,6 +38,7 @@
 #include "sinkingcar.h"
 #include "devmenu.h"
 #include "hotwiring.h"
+#include "minigamecam.h"
 #include "multiplayerworld.h"
 #include "mission.h"
 #include "world/worldrenderer.h"
@@ -242,6 +243,18 @@ public:
     // cHotWire's record: the vehicle types learnt and the successes a class (at most 15); a mission's
     // ScriptPlayer::WhenSucceedsHotwire / WhenFailsHotwire (onHotwire) and SuppressHotwireTimelimit
     HotWiring hotwiring;
+    // cMinigameCam: the active camera while a minigame has it (it replaces the driving camera)
+    MinigameCam minigameCam;
+    void startMinigameCam(int32_t scale);   // cHotWiringApp::Init_*Mode: along the view's right vector
+    // the view of the camera being switched away from in a car: the minigame camera's while it is the active one
+    // (cCamera::SwitchToCam deletes it), else the driving camera's
+    void leaveCarView(int32_t eye[3], uint16_t& yaw, uint16_t& pitch, uint32_t& blockedFrames);
+    bool gameCameraForced() const { return seqCamera.active || minigameCam.active(); }   // over a mod's free camera
+    // cCamera::SwitchToCam / RestoreCam over one frame: the player's own camera (driving or on foot) takes over the
+    // minigame camera's view (cHotWiringApp::Shutdown when hotwired; EndCutscene(1, true))
+    void restoreCam();
+    void leaveFootView(int32_t eye[3], uint16_t& yaw, uint16_t& pitch);   // the on-foot view a new camera starts from
+    void playerFollowPoint(int32_t out[3]) const;   // the player cPed's position (in a car: its seat)
     uint32_t hotwireLearnt[4] = {0, 0, 0, 0};
     uint8_t hotwireAttempts[4] = {0, 0, 0, 0};
     std::function<void(bool success)> onHotwire;

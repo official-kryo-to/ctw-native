@@ -89,6 +89,10 @@ void Game::gameCamera(int32_t eye[3], uint16_t& yaw, uint16_t& pitch) const {
         std::copy(deathEye_, deathEye_ + 3, eye);
         yaw = deathYaw_;
         pitch = deathPitch_;
+    } else if (minigameCam.active()) {
+        minigameCam.position(eye);
+        yaw = minigameCam.yaw();
+        pitch = minigameCam.pitch();
     } else if (playerCar >= 0) {
         carCam.position(eye);
         yaw = carCam.yaw();
@@ -127,13 +131,17 @@ bool Game::startSinkingCar(int style, std::function<void(bool)> done) {
         const int32_t still[3] = {0, 0, 0};
         addWaterSplash(at, 8, still, -1);
     };
-    return sinkingCar.start(dataDir, style, [this, done](bool escaped) {
+    const bool started = sinkingCar.start(dataDir, style, [this, done](bool escaped) {
         if (!escaped) {   // state 5: SetHealth(0), cStatsManager::IncFishesFed
             player.takeDamage(1000, true);
             stats.incFishesFed();
         }
         if (done) done(escaped);
     });
+    // cSinkingCarApp::ProcessIntro (or Process), once its backgrounds are loaded: cMinigameCam 10 units along the
+    // view's left (qword_47F010), the app's own camera until a script restores the player's (EndCutscene)
+    if (started) startMinigameCam(-0xA000);
+    return started;
 }
 
 // ---- missions (mission.h) ----

@@ -22,8 +22,9 @@
 // The exit button (SS_AlwaysLoaded 93, at (704, 488)) gives up. A timer bar (MiniGameTimerBar) runs once the player
 // has hotwired a car of the class before; when it runs out the alarm goes and the attempt fails.
 //
-// Not ported yet: medium and hard mode (classes 2 and 3), the timer bar, cMinigameCam, the help text (HUDText's
-// queue) and the app's opening transition.
+// The camera is cMinigameCam (minigamecam.h, started by Game::updateHotwire).
+// Not ported yet: medium and hard mode (classes 2 and 3), the timer bar, the help text (HUDText's queue) and the
+// app's opening transition.
 #pragma once
 #include "stroke.h"
 #include "gfx/spriteset.h"

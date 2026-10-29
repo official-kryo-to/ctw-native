@@ -346,6 +346,40 @@ struct SoundTestAccess {
 };
 
 struct CollisionTestAccess {
+    // cMinigameCam: the slide along the view's right vector, cut short by a wall; the sine curve and the field of view
+    static void minigameCamTests() {
+        Collision col;
+        col.world_.assign(40000,0);
+        auto cell = std::make_unique<Collision::Cell>(); cell->loaded = true;
+        const int32_t x = -2475*4096, y = -1475*4096;
+        cell->boxes.push_back({x,y,6*4096,4096,4*4096,2048,0,0});
+        col.cells_[2020] = std::move(cell);
+        const int32_t right[3] = {4096,0,0};
+        {
+            const int32_t eye[3] = {x-20*4096,y,28*4096}, follow[3] = {x-20*4096,y,0};
+            MinigameCam cam;
+            cam.start(col,eye,0,0xD4E4,right,0xA000,follow,false,0);
+            check(cam.target()[0] == x-10*4096 && cam.target()[1] == y && cam.target()[2] == 28*4096,
+                  "an open slide ends 10 units along the right vector");
+            int32_t at[3];
+            cam.update(follow,&col); cam.position(at);
+            check(at[0] == eye[0] && cam.fov() < 0x1555, "the first frame is still at the start, the lens already narrowing");
+            for (int i = 1; i < 25; ++i) cam.update(follow,&col);
+            check(cam.fov() == 0xE39, "after 25 frames the field of view is 0xE39 (20 degrees half-angle)");
+            cam.update(follow,&col); cam.update(follow,&col); cam.position(at);
+            const int32_t stopped = at[0];
+            cam.update(follow,&col); cam.position(at);
+            check(at[0] == stopped && stopped < x-10*4096 && stopped > x-10*4096-0x200,
+                  "it stops after frame 26, just short of the end (sin of 26/25 of 90 degrees)");
+        }
+        {
+            const int32_t eye[3] = {x-6*4096,y,6*4096}, follow[3] = {x-6*4096,y,0};
+            MinigameCam cam;
+            cam.start(col,eye,0,0xD4E4,right,0xA000,follow,false,0);
+            check(std::abs(cam.target()[0]-(x-4096-0x14CC)) < 0x100 && cam.target()[2] == 6*4096,
+                  "a wall stops the slide 1.3 units back from the contact");
+        }
+    }
     static void cameraTests() {
         Collision col;
         col.world_.assign(40000,0);
@@ -1605,7 +1639,7 @@ int main() {
     for (int i = 0; i < 50 && Audio_SfxPlaying(voice); ++i) SDL_Delay(20);
     check(!Audio_SfxPlaying(voice), "resumed sound effect finishes normally");
     playerFrameIntegration(); vehicleEntry();
-    PlayerTestAccess::fightIdle(); SoundTestAccess::run(); CollisionTestAccess::run(); CollisionTestAccess::cameraTests(); PropTestAccess::run(); PropDynamicsTestAccess::run();
+    PlayerTestAccess::fightIdle(); SoundTestAccess::run(); CollisionTestAccess::run(); CollisionTestAccess::cameraTests(); CollisionTestAccess::minigameCamTests(); PropTestAccess::run(); PropDynamicsTestAccess::run();
     slats(); garbage(); VehicleTestAccess::flaps(); VehicleTestAccess::burnouts(); VehicleTestAccess::knockOff(); VehicleTestAccess::debris(); WaterTestAccess::run(); randomStreams(); explosionsAndShake(); fireAndCamera(); RadioTestAccess::run();
     Audio_Shutdown();
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;

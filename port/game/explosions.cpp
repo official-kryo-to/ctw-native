@@ -149,7 +149,7 @@ void Game::affectBlast(const ExplosionBlast& blast) {
         player.explosionHit(damage, direction);
         task = CarTask{}; enterPressed = false;
         if (player.dead) {
-            camera.position(deathEye_); deathYaw_ = (uint16_t)camera.yaw; deathPitch_ = camera.pitch();
+            leaveFootView(deathEye_, deathYaw_, deathPitch_);
             deathFrames_ = 0; deathCameraSettled_ = false;
         }
     }

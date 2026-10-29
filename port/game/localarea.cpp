@@ -105,7 +105,7 @@ void FrameScheduler::setTiming(Schedule& s, int period) {
 
 // ---- CameraView -----------------------------------------------------------------------------------------------------
 
-void CameraView::set(const int32_t eye[3], uint16_t yaw, uint16_t pitch, int width, int height) {
+void CameraView::set(const int32_t eye[3], uint16_t yaw, uint16_t pitch, int width, int height, int16_t fov) {
     for (int k = 0; k < 3; ++k) pos[k] = eye[k];
     this->yaw = yaw; this->pitch = pitch; this->width = width; this->height = height;
     // CMatrix43::MakeRotationZ(yaw), MakeRotationX(-0x4000 - pitch), MatrixMultiply(x, z)
@@ -118,8 +118,8 @@ void CameraView::set(const int32_t eye[3], uint16_t yaw, uint16_t pitch, int wid
         for (int c = 0; c < 3; ++c)
             m[r * 3 + c] = (int16_t)(((A[r * 3] * B[c]) >> 12) + ((A[r * 3 + 1] * B[3 + c]) >> 12) +
                                      ((A[r * 3 + 2] * B[6 + c]) >> 12));
-    // the frustum (RecalculateMatrix with the default field of view 5461 and the screen's aspect ratio)
-    const int16_t cosFov = (int16_t)fastsin(5461 + 0x4000);
+    // the frustum (RecalculateMatrix: +0xC = fastsin(fov + 0x4000), and the screen's aspect ratio)
+    const int16_t cosFov = (int16_t)fastsin(fov + 0x4000);
     invCos = (int16_t)(0x1000000 / cosFov);
     const uint32_t c2 = (uint32_t)(cosFov * cosFov) >> 12;
     const int64_t tan2 = ((((int64_t)((uint64_t)(4096 - c2) << 32) / (int64_t)c2) << 12) >> 20) & ~0xFFFLL;

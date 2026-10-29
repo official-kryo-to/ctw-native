@@ -115,13 +115,17 @@ void DevMenu::build(Game& g) {
         action("Start hotwiring (easy)", [this, &g] {
             open_ = false;
             g.hotwiring.playSfx = [](int sample, int volume) { TheSound().playHud(sample, volume); };
-            status_ = g.hotwiring.start(g.dataDir, 1, false, [this](bool success, bool quit) {
+            const bool started = g.hotwiring.start(g.dataDir, 1, false, [this, &g](bool success, bool quit) {
                 status_ = success ? "Hotwired." : quit ? "Hotwiring given up." : "Hotwiring failed.";
-            }) ? "Hotwiring started." : "Hotwiring could not load.";
+                g.restoreCam();   // (no car to get out of here)
+            });
+            if (started) g.startMinigameCam(0xA000);
+            status_ = started ? "Hotwiring started." : "Hotwiring could not load.";
         });
         action("Stop the minigame", [this, &g] {
             g.sinkingCar.stop();
             g.hotwiring.stop();
+            g.restoreCam();
             g.screenFade.in(1);
             status_ = "Stopped.";
         });

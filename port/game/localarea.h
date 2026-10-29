@@ -48,7 +48,8 @@ struct CameraView {
     int16_t tanH = 0, tanV = 0, invCos = 0;               // cBaseCam +0xC4, +0xC8, +0xC6 / +0xCA
     uint16_t yaw = 0, pitch = 0;                          // what set() was given (multiplayer sends it on)
     int width = 0, height = 0;
-    void set(const int32_t eye[3], uint16_t yaw, uint16_t pitch, int screenWidth, int screenHeight);
+    // fov: cBaseCam::SetFov's vertical half-angle (the default 0x1555, 30 degrees)
+    void set(const int32_t eye[3], uint16_t yaw, uint16_t pitch, int screenWidth, int screenHeight, int16_t fov = 0x1555);
     bool canSee(const int32_t p[3], int32_t radius) const;   // cBaseCam::CanSee
 };
 
