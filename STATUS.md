@@ -18,8 +18,8 @@ compatibility with the original.
 - **The first mission (KEN_A01, "Arrival in Liberty"):** the prologue on the plane, the landing, the port, the intro
   movie, Huang on the jetty, getting a car, Uncle Kenny's restaurant and the conversation there, and the apartment
   and its tour, with the mission's objectives and radar blips, and the plane over the sea and landing with its
-  shadow, and the clouds, contrails and wingtip vapour of the prologue's sky. the ambush at the port (the escort, the ambushers' cars and the shooting) and the talk in the car over the intro movie. Not yet: the sinking car and its minigame,
-  swimming to the jetty, the police on the shore, hotwiring and the GPS route.
+  shadow, and the clouds, contrails and wingtip vapour of the prologue's sky. the ambush at the port (the escort, the ambushers' cars and the shooting) and the talk in the car over the intro movie, and the police chase past Huang on the way to Kenny's. Not yet: the sinking car and its minigame,
+  swimming to the jetty, hotwiring and the GPS route.
 - **The city:** streets and buildings with their textures, water, animated signs, weather, day and night,
   street furniture, street lights, steam vents and fountains.
 - **On foot:** the player character with movement, sprinting and collision. The follow camera counts consecutive

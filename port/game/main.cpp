@@ -64,6 +64,8 @@ int main(int argc, char** argv) {
     int startMoney = -1;   // --money N: start with this much money (testing the HUD's cash)
     // --play-movie: shot mode plays the intro movie as a new game does (first, or where a mission plays it)
     bool playMovie = false;
+    int teleportFrame = -1;   // --teleport F:X:Y
+    float teleportX = 0, teleportY = 0;
     const char* missionName = nullptr;   // --mission NAME: start this mission (kena01) at the start
     const char* sequenceName = nullptr;   // --seq NAME: play this cutscene sequence (CSS_*.seq) at the start
     const char* giveWeapons = nullptr;
@@ -80,7 +82,7 @@ int main(int argc, char** argv) {
         else if (strcmp(option, "--data") && strcmp(option, "--mods") && strcmp(option, "--shot") &&
                  strcmp(option, "--frames") && strcmp(option, "--keys") && strcmp(option, "--export-textures") && strcmp(option, "--loading-shot") && strcmp(option, "--movie-shot") && strcmp(option, "--ui") && strcmp(option, "--state") &&
                  strcmp(option, "--enter") && strcmp(option, "--handbrake") && strcmp(option, "--burnout") && strcmp(option, "--hour") &&
-                 strcmp(option, "--weather") && strcmp(option, "--weapon") && strcmp(option, "--fire") && strcmp(option, "--throw") && strcmp(option, "--wanted") && strcmp(option, "--die") && strcmp(option, "--money") && strcmp(option, "--seq") && strcmp(option, "--mission") &&
+                 strcmp(option, "--weather") && strcmp(option, "--weapon") && strcmp(option, "--fire") && strcmp(option, "--throw") && strcmp(option, "--wanted") && strcmp(option, "--die") && strcmp(option, "--money") && strcmp(option, "--seq") && strcmp(option, "--mission") && strcmp(option, "--teleport") &&
                  strcmp(option, "--shot-every")) {
             fprintf(stderr, "Unknown option: %s\n", option);
             return 4;
@@ -131,6 +133,8 @@ int main(int argc, char** argv) {
         if (!strcmp(argv[i], "--money")) startMoney = atoi(argv[i + 1]);
         if (!strcmp(argv[i], "--seq")) sequenceName = argv[i + 1];
         if (!strcmp(argv[i], "--mission")) missionName = argv[i + 1];
+        if (!strcmp(argv[i], "--teleport"))   // shot mode: put the player (or his car) at X Y on frame F
+            sscanf(argv[i + 1], "%d:%f:%f", &teleportFrame, &teleportX, &teleportY);
         if (!strcmp(argv[i], "--weapon")) giveWeapons = argv[i + 1];   // testing: give these weapon types (comma-separated)
         if (!strcmp(argv[i], "--throw")) {   // testing: hold the throw button over frames A:B
             if (sscanf(argv[i + 1], "%d:%d", &throwFrom, &throwTo) != 2) throwTo = throwFrom + 1;
@@ -236,6 +240,12 @@ int main(int argc, char** argv) {
             if (fireFrom >= 0) game.scriptedFire = f >= fireFrom;
             if (throwFrom >= 0) game.scriptedThrow = f >= throwFrom && f < throwTo;
             if (f == dieAt) game.player.takeDamage(1000, true);
+            if (f == teleportFrame) {
+                const int32_t at[3] = {(int32_t)(teleportX * 4096), (int32_t)(teleportY * 4096), 0};
+                std::copy(at, at + 3, game.player.pos);
+                game.player.placeOnGround(&game.collision);
+                game.world.loadAllNow(teleportX, teleportY);
+            }
             game.tick();
             if (shotEvery > 0 && f % shotEvery == 0) {
                 game.render((int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());

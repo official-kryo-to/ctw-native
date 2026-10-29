@@ -5,7 +5,7 @@
 // at the port and the intro movie, then Huang on the jetty, a car, Uncle Kenny's restaurant and the apartment.
 //
 // Not ported yet, and passed over here: the plane's sound, the sinking car and its minigame (cCarInWater,
-// cSinkingCarApp), swimming to the jetty, the police on the shore (cPoliceChase), hotwiring (cHotWiringApp), the
+// cSinkingCarApp), swimming to the jetty, hotwiring (cHotWiringApp), the
 // GPS route and the help texts' timing. At the port the people are puppets the scene moves (getting in and out of
 // cars without the door animations) and only the bodyguards' deaths are decided, as the story has them.
 #include "mission.h"
@@ -489,8 +489,96 @@ private:
     }
 
     // FindACar: cCarToSteal's car on the street behind the jetty, marked on the radar
+    // ---- cPoliceChase: on the way to Kenny's, a getaway car (83, a criminal at the wheel) and two police cars (18)
+    // race south past the player and turn east, then go their own way ----
+    enum { kChaseCar, kCop1, kCop2, kChaseCars };
+    SceneCar chase_[kChaseCars];
+    bool chaseOn_ = false;
+    int chaseFrames_ = 0, chaseStage_ = 0;
+
+    Vehicle* chaseCar(int which) {
+        if (!chase_[which].uid) return nullptr;
+        for (Vehicle& c : g_->cars) if (c.uid == chase_[which].uid) return &c;
+        return nullptr;
+    }
+    // cPoliceChase::Init / WaitForTrigger: the player fully inside the area east of the jetty
+    void policeChaseInit() {
+        when([this] {
+            int32_t p[3];
+            g_->focus(p);
+            return p[0] > fx(-120.16f) && p[0] < fx(-6.32f) && p[1] > fx(-129.605f) && p[1] < fx(-14.455f);
+        }, [this] { policeChaseCreate(); });
+    }
+    void policeChaseCreate() {   // CreateStuff / CreateACar: from the positions table, heading south, at full speed
+        static const float at[kChaseCars][2] = {{-72.73f, -96.95f}, {-67.76f, -78.04f}, {-72.51f, -36.69f}};
+        static const int info[kChaseCars] = {0x53, 0x12, 0x12};
+        for (int i = 0; i < kChaseCars; ++i) {
+            const int32_t p[3] = {fx(at[i][0]), fx(at[i][1]), 0};
+            chase_[i] = SceneCar{};
+            const int j = g_->spawnCar(info[i], p, (int16_t)deg(0xB4));
+            if (j < 0) continue;
+            Vehicle& c = g_->cars[j];
+            c.keep = true;
+            c.engineOn = true;
+            if (i != kChaseCar && c.hasSiren()) c.siren = true;
+            chase_[i].uid = c.uid;
+            chase_[i].driving = true;
+            chase_[i].goal[0] = fx(-70.69f);
+            chase_[i].goal[1] = fx(-278.39f);
+            chase_[i].speed = 0x78;
+        }
+        chaseOn_ = true;
+        chaseFrames_ = 0;
+        chaseStage_ = 0;
+        wait(1, [this] { policeChaseStep(); });
+    }
+    void policeChaseStep() {
+        if (!chaseOn_) return;
+        ++chaseFrames_;
+        Vehicle* lead = chaseCar(kChaseCar);
+        // Turn: once the getaway car reaches the corner, everyone heads east
+        if (chaseStage_ == 0 && lead && lead->pos[1] < fx(-190.f)) {
+            chaseStage_ = 1;
+            for (SceneCar& c : chase_) { c.goal[0] = fx(786.27f); c.goal[1] = fx(-208.91f); }
+        }
+        int32_t me[3];
+        g_->focus(me);
+        bool anyNear = false;
+        for (int i = 0; i < kChaseCars; ++i) {
+            Vehicle* c = chaseCar(i);
+            if (!c) continue;
+            const int64_t dx = (int64_t)c->pos[0] - me[0], dy = (int64_t)c->pos[1] - me[1];
+            anyNear |= dx * dx + dy * dy < (int64_t)0x96000 * 0x96000;   // 150 units
+            // the police follow the getaway car itself, the getaway car its route
+            const int32_t* goal = chase_[i].goal;
+            if (i != kChaseCar && lead) goal = lead->pos;
+            g_->scriptCarControls[c->uid] = AIDriving::towards(*c, g_->traffic.drivingProps(), goal, chase_[i].speed << 12);
+        }
+        // CleanUp: after a minute, or once they are far away, they are gone
+        if (!anyNear || chaseFrames_ > 30 * 60) { policeChaseEnd(); return; }
+        wait(1, [this] { policeChaseStep(); });
+    }
+    void policeChaseEnd() {
+        chaseOn_ = false;
+        for (int i = 0; i < kChaseCars; ++i) {
+            if (!chase_[i].uid) continue;
+            g_->scriptCarControls.erase(chase_[i].uid);
+            if (Vehicle* c = chaseCar(i)) {
+                const int32_t* p = c->pos;
+                int32_t me[3];
+                g_->focus(me);
+                const int64_t dx = (int64_t)p[0] - me[0], dy = (int64_t)p[1] - me[1];
+                if (dx * dx + dy * dy > (int64_t)0x50000 * 0x50000 || !g_->view.canSee(p, 0x5000))
+                    g_->removeCar((int)(c - g_->cars.data()));
+                else c->keep = false;   // (left to be removed when out of sight)
+            }
+            chase_[i] = SceneCar{};
+        }
+    }
+
     void findACar() {
         g_->cutscene = g_->scriptCutscene = false;
+        if (!chaseOn_ && !chase_[kChaseCar].uid) policeChaseInit();   // GetToShoreComplete: cPoliceChase::Init
         if (!carUid_) {
             const int32_t at[3] = {fx(-281.78f), fx(-64.5f), 0};
             int info = 0;
