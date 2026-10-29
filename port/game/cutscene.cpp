@@ -167,7 +167,9 @@ void Game::renderMissionHud(int W, int H) {
             std::string ascii;
             for (char16_t c : line) if (c < 0x80) ascii += (char)c;
             const float w = Hud_TextWidth(ascii, scale);
-            Hud_Text16((W - w) * 0.5f + 2.f * k, y + i * Hud_LineHeight(scale) + 2.f * k, scale, 0x000000C0u, line);
+            std::u16string shadow;   // the shadow stays black: the line without its colour tags
+            for (char16_t c : line) if (c < 0xFE00) shadow += c;
+            Hud_Text16((W - w) * 0.5f + 2.f * k, y + i * Hud_LineHeight(scale) + 2.f * k, scale, 0x000000C0u, shadow);
             Hud_Text16((W - w) * 0.5f, y + i * Hud_LineHeight(scale), scale, 0xFFFFFFFFu, line);
             from = to + 1;
         }
