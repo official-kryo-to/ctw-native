@@ -278,6 +278,14 @@ const CtwHostApi& Plugins_HostApi() {
         g_host.set_pause_button_visible = [](int id, int visible) {
             if (id >= 1 && id <= (int)g_pauseButtons.size()) g_pauseButtons[(size_t)id - 1].visible = visible != 0;
         };
+        g_host.set_radar_blip = [](int id, const float* xyz, uint32_t rgba) -> int {
+            if (id < 1 || id > 0xFFFF || !xyz || !std::isfinite(xyz[0]) || !std::isfinite(xyz[1]) || !std::isfinite(xyz[2]))
+                return 0;
+            const int32_t at[3] = {(int32_t)(xyz[0] * 4096.f), (int32_t)(xyz[1] * 4096.f), (int32_t)(xyz[2] * 4096.f)};
+            TheGame().addBlip(at, rgba, Game::kPluginBlips + id);
+            return 1;
+        };
+        g_host.remove_radar_blip = [](int id) { if (id >= 1 && id <= 0xFFFF) TheGame().removeBlip(Game::kPluginBlips + id); };
         g_host.on_frame_begin = [](CtwCallback fn, void* u) { if (fn) g_frame.push_back({fn, u}); };
         g_host.load_character_model = [](const char* dff, const char* ifp, const char* textures) -> CtwCharacterModel {
             if (!dff || !ifp || !textures || g_characterModels.size() >= 128 || !g_nextCharacter) return 0;
@@ -400,6 +408,8 @@ void Plugins_Shutdown() {
     g_gameInput = true; g_captureRequested = false; Host_SetRelativeMouse(false);
     Game& g = TheGame();   // nothing a plugin changed about the camera outlives it
     g.freeCam.on = false; g.controlYaw.on = false; g.fovOverride = 0.f; g.renderStyle = {};
+    g.blips.erase(std::remove_if(g.blips.begin(), g.blips.end(), [](const RadarBlip& b) { return b.id >= Game::kPluginBlips; }),
+                  g.blips.end());
     if (g_log) fclose(g_log);
     g_log = nullptr;
 }

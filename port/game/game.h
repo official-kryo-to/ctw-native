@@ -221,6 +221,7 @@ public:
     ScreenFade screenFade;
     Objective objective;
     std::vector<RadarBlip> blips;
+    static constexpr int kPluginBlips = 0x40000000;   // ids from here on are the plugins' (set_radar_blip)
     void showObjective(const std::u16string& text, int frames = 0xD2);   // HUDImpl::DisplayObjective(.., 210)
     void addBlip(const int32_t pos[3], uint32_t rgba, int id);
     void removeBlip(int id);

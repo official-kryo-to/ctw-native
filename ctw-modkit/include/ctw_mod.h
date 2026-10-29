@@ -254,6 +254,10 @@ typedef struct CtwApi {
     /* A button on the game's own pause screen (Esc), shown while your mod is on: pressing it resumes the game and
        calls fn. Use it for things that belong to the game rather than to cheats, such as a multiplayer menu. */
     void (*add_pause_button)(CtwMod* mod, const char* label, CtwCallback fn, void* user);
+    /* A dot on the radar in colour 0xRRGGBBAA (other players, places), held at the radar's edge when far away; set
+       it again to move it. Your mod's dots go when it is switched off. Ids are your own (1..65535). */
+    void (*set_radar_blip)(CtwMod* mod, int id, const float xyz[3], uint32_t rgba);
+    void (*remove_radar_blip)(CtwMod* mod, int id);
 } CtwApi;
 
 /*

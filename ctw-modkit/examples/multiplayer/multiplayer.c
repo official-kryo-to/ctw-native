@@ -213,8 +213,16 @@ static void send_chat(int slot, const char* text) {   /* says it, relayed by the
 }
 
 /* ---- remote players in the game --------------------------------------------------------------------------------- */
+/* each player's colour: their dot on the radar and the swatch on their name tag */
+static uint32_t player_colour(int slot) {
+    static const uint32_t colours[MP_MAX_PLAYERS] = {0xF2C230FFu, 0x4FB3FFFFu, 0xFF5A5AFFu, 0x5BD48AFFu,
+                                                     0xC77DFFFFu, 0xFF9A3CFFu, 0x3CE0E0FFu, 0xFF7FD0FFu};
+    return colours[slot % MP_MAX_PLAYERS];
+}
+
 static void forget_player(int slot) {
     Player* p = &players[slot];
+    if (CTW_MOD_HAS(api, remove_radar_blip)) api->remove_radar_blip(self, slot + 1);
     if (p->puppet) api->remove_puppet(p->puppet);   /* (frees the driver's seat) */
     if (p->car) api->remove_vehicle(p->car);
     memset(p, 0, sizeof *p);
@@ -277,6 +285,8 @@ static void update_remote(int slot) {
     ps.vehicle = p->car && !p->car_leaving ? p->car : 0;
     ps.weapon = s->weapon;
     api->set_puppet_state(p->puppet, &ps);
+    if (CTW_MOD_HAS(api, set_radar_blip))   /* where they are, on the radar */
+        api->set_radar_blip(self, slot + 1, ps.vehicle ? s->vpos : ps.position, player_colour(slot));
 }
 
 static void report_hits(void) {   /* what the player did to the others' characters goes to their games */
@@ -811,6 +821,7 @@ static void draw_names(void) {
         if (!api->world_to_screen(head, xy)) continue;
         const float w = api->text_width(1.f, p->name), lh = api->line_height(1.f);
         api->draw_rect(xy[0] - w * 0.5f - 6.f, xy[1] - lh - 8.f, w + 12.f, lh + 10.f, 0x00000090u);
+        api->draw_rect(xy[0] - w * 0.5f - 6.f, xy[1] - lh - 8.f, 3.f, lh + 10.f, player_colour(s));   /* = radar dot */
         api->draw_text(xy[0] - w * 0.5f, xy[1] - lh - 4.f, 1.f, p->state.flags & MP_DEAD ? CTW_UI_DIM : CTW_UI_TEXT, p->name);
         const float bar = w + 12.f, health = p->state.health / 127.f;
         api->draw_rect(xy[0] - bar * 0.5f, xy[1] + 2.f, bar, 4.f, 0x000000A0u);

@@ -205,6 +205,29 @@ void api_add_pause_button(CtwMod* m, const char* label, CtwCallback fn, void* us
     }, hook.get());
     if (hook->id) g_pauseButtons.push_back(std::move(hook));
 }
+// a mod's radar dots: one host id per (mod, id), taken off while the mod is not running
+struct RadarBlip { CtwMod* mod; int id, hostId; };
+std::vector<RadarBlip> g_radarBlips;
+int g_nextRadarBlip = 1;
+void api_set_radar_blip(CtwMod* m, int id, const float* xyz, uint32_t rgba) {
+    if (!m || !xyz || !running(*m)) return;
+    RadarBlip* b = nullptr;
+    for (auto& x : g_radarBlips) if (x.mod == m && x.id == id) b = &x;
+    if (!b) {
+        if (g_nextRadarBlip > 0xFFFF) return;
+        g_radarBlips.push_back({m, id, g_nextRadarBlip++});
+        b = &g_radarBlips.back();
+    }
+    H->set_radar_blip(b->hostId, xyz, rgba);
+}
+void api_remove_radar_blip(CtwMod* m, int id) {
+    for (size_t i = 0; i < g_radarBlips.size(); ++i)
+        if (g_radarBlips[i].mod == m && g_radarBlips[i].id == id) {
+            H->remove_radar_blip(g_radarBlips[i].hostId);
+            g_radarBlips.erase(g_radarBlips.begin() + (long)i);
+            return;
+        }
+}
 void api_on_hud(CtwMod* m, CtwCallback fn, void* user) { if (fn) g_hudHooks.push_back({m, fn, user}); }
 void api_on_frame(CtwMod* m, CtwCallback fn, void* user) { if (m && fn) g_frameHooks.push_back({m, fn, user}); }
 void api_on_character(CtwMod* m,CtwCharacterCallback fn,void* user) {if(m && fn)g_characterHooks.push_back({m,fn,user});}
@@ -663,6 +686,11 @@ void drawMenu() {
 void onHud(void*) {
     if (!g_textureJobs.empty()) applyTextureJobs(3.0);   // about 3 ms of texture work per frame
     for (const auto& b : g_pauseButtons) H->set_pause_button_visible(b->id, running(*b->mod));
+    for (size_t i = 0; i < g_radarBlips.size();)   // a mod switched off takes its dots with it
+        if (!running(*g_radarBlips[i].mod)) {
+            if (CTW_HOST_HAS(H, remove_radar_blip)) H->remove_radar_blip(g_radarBlips[i].hostId);
+            g_radarBlips.erase(g_radarBlips.begin() + (long)i);
+        } else ++i;
     const auto hooks = g_hudHooks;
     for (const auto& h : hooks)
         if (running(*h.mod)) h.fn(h.user);
@@ -736,6 +764,8 @@ extern "C" CTW_PLUGIN_EXPORT int ctw_plugin_init(const CtwHostApi* host) {
     g_api.get_vehicle_pose = gameplay && CTW_HOST_HAS(H,get_vehicle_pose) ? H->get_vehicle_pose : nullptr;
     g_api.set_vehicle_pose = gameplay && CTW_HOST_HAS(H,set_vehicle_pose) ? H->set_vehicle_pose : nullptr;
     g_api.add_pause_button = CTW_HOST_HAS(H,add_pause_button) && CTW_HOST_HAS(H,set_pause_button_visible) ? api_add_pause_button : nullptr;
+    g_api.set_radar_blip = CTW_HOST_HAS(H,set_radar_blip) && CTW_HOST_HAS(H,remove_radar_blip) ? api_set_radar_blip : nullptr;
+    g_api.remove_radar_blip = CTW_HOST_HAS(H,set_radar_blip) && CTW_HOST_HAS(H,remove_radar_blip) ? api_remove_radar_blip : nullptr;
 #undef FORWARD_V4
 #undef FORWARD_V5
     g_api.on_game_event = gameplay && H->on_game_event ? api_on_event : nullptr;

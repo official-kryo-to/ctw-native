@@ -226,6 +226,10 @@ typedef struct CtwHostApi {
        Returns its id (0: none); set_pause_button_visible shows or hides it. */
     int (*add_pause_button)(const char* label, CtwCallback fn, void* user);
     void (*set_pause_button_visible)(int id, int visible);
+    /* A dot on the radar (another player, say) in colour 0xRRGGBBAA, held at the radar's edge when far away. Setting
+       an id again moves it; remove_radar_blip takes it off. Ids are the plugin's own (1..65535). */
+    int (*set_radar_blip)(int id, const float xyz[3], uint32_t rgba);
+    void (*remove_radar_blip)(int id);
 } CtwHostApi;
 
 /* Exported by a plugin DLL. Return 0 from ctw_plugin_init to stay loaded. */

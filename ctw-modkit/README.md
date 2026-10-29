@@ -178,7 +178,7 @@ colours `0xRRGGBBAA`, screen coordinates pixels from the top left.
 | Character models (v7/v8/v9) | `load_character_model`, `release_character_model`, `draw_character_model`, `on_character_render`: skinned mobile DFF/ANPK/PVR resources and interpolated player/pedestrian poses; v8 adds dimensions, elapsed clips and fallen-body grounding; v9 adds native attachment frames, vehicle identity, continuous reaction/recovery clocks and `draw_character_model_attached` for animated-joint anchors |
 | Camera shake (v6) | `get_camera_shake`: interpolated world-space explosion offset for a custom camera |
 | Prop physics (v12) | `set_prop_physics`, `get_prop_physics`: hit street furniture comes loose and tumbles instead of the original's fixed tilt |
-| Multiplayer (v13) | Puppets, characters your mod moves (`spawn_puppet`, `set_puppet_state` with `CtwPuppetState`: position, heading, velocity, walk/run/sprint, dead, the vehicle it drives, the weapon it holds and whether its gun fires (harmlessly: sound, flash and trace); `remove_puppet`). The game never hurts a puppet: `take_puppet_damage` returns what the player did to it. Also `world_to_screen`, `get_player_vitals` (health, armour, movement, fire held), `damage_player` and `get/set_vehicle_pose` (position, quaternion, velocity) |
+| Multiplayer (v13) | Puppets, characters your mod moves (`spawn_puppet`, `set_puppet_state` with `CtwPuppetState`: position, heading, velocity, walk/run/sprint, dead, the vehicle it drives, the weapon it holds and whether its gun fires (harmlessly: sound, flash and trace); `remove_puppet`). The game never hurts a puppet: `take_puppet_damage` returns what the player did to it. Also `world_to_screen`, `get_player_vitals` (health, armour, movement, fire held), `damage_player`, `get/set_vehicle_pose` (position, quaternion, velocity), `add_pause_button` (a button on the game's own pause screen) and `set_radar_blip` / `remove_radar_blip` (a coloured dot on the radar) |
 | Look (v5) | `set_render_style` (`CtwRenderStyle`: street light and headlight pools at night, tint, sepia, saturation, contrast, brightness, vignette; `NULL` = the game's own) |
 
 Keys are SDL scancodes (<https://wiki.libsdl.org/SDL2/SDL_Scancode>). Read the mouse and typed text inside
@@ -273,7 +273,8 @@ game's own pause screen (Esc; or press **F9**), which opens a window with four t
 - **Host**: name the game and host it; it is on the network at once and, with CTW Online, online too (listed
   publicly, or private and joined by its code).
 
-Everyone sees the others walk, drive, ride and shoot with their names and health over them; hits on another player
+Everyone sees the others walk, drive, ride and shoot with their names and health over them, and each player as a
+dot of their own colour on the radar (the swatch on their name tag); hits on another player
 are taken by that player's own game (with "was killed by" in the chat), **T** opens the chat and joiners take the
 host's time of day and weather. Traffic, pedestrians, the police and pickups stay each player's own.
 
@@ -284,7 +285,7 @@ unused PDA button), so this mod is free roam together.
 A shortcut can start straight into a game: set `CTW_MULTIPLAYER` to `host`, `join <address>` or `online <code>`
 (and optionally `CTW_MULTIPLAYER_NAME`, or `CTW_ONLINE_URL` for another CTW Online) before starting the game.
 Messages are described in `examples/multiplayer/protocol.h`. A mod can add its own pause-screen buttons with
-`add_pause_button` (v13).
+`add_pause_button` and radar dots with `set_radar_blip` (v13).
 
 ## 6. Windows and menus with ctw_ui.h
 
