@@ -1227,6 +1227,7 @@ void Game::tick() {
     screenFade.tick();
     if (objective.frames > 0) --objective.frames;
     gameplayHud.process(*this);   // (this frame's HUD state, as the game left it last frame)
+    for (auto& c : contrails) c->process(frame);
     if (mission) {
         mission->tick(*this);
         if (mission && mission->finished()) mission.reset();
@@ -1536,6 +1537,7 @@ void Game::render(int W, int H) {
         const uint32_t ambient = world.timeCycle().ok() ? world.timeCycle().colour(13) : 0x808080u;
         for (auto& kv : fountains)
             for (auto& f : kv.second) f->render(cam, ambient);
+        for (const auto& c : contrails) c->render(cam);
     }
     TheParticles().render(cam);
     traces.render();

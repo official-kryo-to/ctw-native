@@ -228,6 +228,8 @@ public:
     // WorldImpl::CreateDynamicProp for scripts: a prop model (ePropModel = the prop definition) placed by the
     // mission, turned by SimpleMover::SetHeading / SetPitch (65536 = a full turn), drawn with the world
     struct ScriptProp { int id, prop; int32_t pos[3]; uint16_t heading; int16_t pitch; };
+    std::vector<std::unique_ptr<Contrail>> contrails;   // FXImpl::CreateContrail for scripts
+    static constexpr int kScriptFountains = -1;         // fountains' key for FXImpl::CreateFountain from scripts
     std::vector<ScriptProp> scriptProps;
     ScriptProp* scriptProp(int id);
     void removeScriptProp(int id);

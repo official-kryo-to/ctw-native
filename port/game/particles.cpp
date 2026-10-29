@@ -1072,3 +1072,98 @@ void DrawSheetSprite(int sprite, uint32_t c, const float p[3], const float ax[3]
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
 }
+
+// ---- the first mission's sky: clouds and contrails ----
+
+namespace {
+constexpr int16_t kCloudSpread = 0x1800, kCloudScale = 0x2000, kCloudTop = 0x99A;   // word_105F6CC / 6D0 / 6D4
+int16_t sCurrZOffset = kCloudTop;   // cParticleEmitterClouds' next cloud height (cParticleEmitterClouds::Reset: 0)
+int csin(int a) { return (int)(std::sin((float)a * 9.587378e-05f) * 4096.f); }
+}
+
+CloudsEmitter::CloudsEmitter(const int32_t pos[3], const int16_t v[3]) : Emitter(pos, 20, 0x25000, 21, true) {
+    for (size_t i = 0; i < parts_.size(); ++i) addParticle(v, true);
+}
+
+void CloudsEmitter::addParticle(const int16_t v[3], bool scatter) {
+    if (!init_) {   // the standard data: white, alpha 20, no spin or growth, 0x1000 life
+        tmpl_ = Particle{};
+        tmpl_.active = 1;
+        tmpl_.alpha = 0x14;
+        tmpl_.colour = 0x7FFF;
+        tmpl_.life = 0x1000;
+        init_ = true;
+    }
+    tmpl_.size = (int16_t)(randNC(0x667) + 0xCCC);
+    int32_t x, y;
+    const int spread = (kCloudSpread * kCloudScale) >> 12;
+    if (scatter) {
+        x = (int32_t)randNC(spread * 2) - spread;
+        y = (int32_t)randNC(spread * 2) - spread;
+    } else {   // upstream of the drift, across a band
+        float n[3] = {(float)-v[0], (float)-v[1], (float)-v[2]};
+        const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        const int32_t nx = len > 0 ? (int32_t)(n[0] / len * 4096.f) : 0, ny = len > 0 ? (int32_t)(n[1] / len * 4096.f) : 0;
+        const int32_t r = (int16_t)((int32_t)randNC(kCloudScale - 0x1800) + 0x1800) * kCloudSpread;
+        x = (int32_t)(((int64_t)nx * r) >> 24);
+        y = (int32_t)(((int64_t)ny * r) >> 24);
+        const int32_t side = (int32_t)randNC(kCloudSpread) - kCloudSpread / 2;
+        x += (side * (int16_t)-ny) >> 12;
+        y += (side * (int16_t)nx) >> 12;
+    }
+    tmpl_.p[0] = (int16_t)x;
+    tmpl_.p[1] = (int16_t)y;
+    tmpl_.p[2] = sCurrZOffset;
+    sCurrZOffset = sCurrZOffset < 1 ? kCloudTop : (int16_t)(sCurrZOffset - 0xCC);
+    for (int k = 0; k < 3; ++k) tmpl_.v[k] = (int16_t)((uint32_t)(inv_ * v[k]) >> 12);
+    tmpl_.angle = (uint16_t)((randNC(0x8000000) + 0xC000000) >> 12);
+    addFromData(tmpl_);
+}
+
+void CloudsEmitter::updateParticle(Particle& p) {   // cParticleEmitterClouds::UpdateParticle
+    Emitter::updateParticle(p);
+    const int lim = (kCloudSpread * kCloudScale) >> 12;
+    for (int k = 0; k < 3; ++k)
+        if (p.p[k] > lim || p.p[k] < -lim) { p.life = 0; return; }
+}
+
+void WakeEmitter::addParticle(const int16_t v[2]) {
+    if (!init_) {   // SetStandardDataLifeTime(0x96), white, 1.8 wide growing 0.02, alpha 30
+        tmpl_ = Particle{};
+        tmpl_.active = 1;
+        tmpl_.life = 0x96;
+        tmpl_.colour = 0x7FFF;
+        tmpl_.size = (int16_t)((uint32_t)(inv_ * 0x1CCC) >> 12);
+        tmpl_.grow = (int16_t)((uint32_t)(inv_ * 0x51) >> 12);
+        tmpl_.alpha = 0x1E;
+        tmpl_.v[0] = (int16_t)((uint32_t)(inv_ * v[0]) >> 12);
+        tmpl_.v[1] = (int16_t)((uint32_t)(inv_ * v[1]) >> 12);
+        init_ = true;
+    }
+    tmpl_.p[0] = (int16_t)(randNC(0xA2) - 0x51);
+    tmpl_.p[2] = 0x199;
+    tmpl_.angle = (uint16_t)(randNC(0xE38000) + 0x4000);
+    addFromData(tmpl_);
+}
+
+Contrail::Contrail(const int32_t pos[3], const int32_t dir[3]) {
+    std::copy(pos, pos + 3, pos_);
+    heading_ = (int16_t)-(int)(std::atan2((float)-dir[0], (float)dir[1]) * 32768.f / 3.14159265f);
+    wake_ = TheParticles().add<WakeEmitter>(pos_);
+}
+
+Contrail::~Contrail() {
+    if (wake_ && TheParticles().contains(wake_)) TheParticles().remove(wake_);
+}
+
+void Contrail::process(uint32_t frame) {
+    if (!wake_ || !TheParticles().contains(wake_)) wake_ = TheParticles().add<WakeEmitter>(pos_);
+    if (frame & 3) return;
+    const int16_t v[2] = {(int16_t)(csin(heading_) / 2), (int16_t)(csin(heading_ + 0x4000) / 2)};
+    wake_->addParticle(v);
+}
+
+void Contrail::render(const WorldCamera& cam) const {
+    const float p[3] = {pos_[0] / 4096.f, pos_[1] / 4096.f, pos_[2] / 4096.f};
+    DrawSheetSprite(0xE, 0xFFF8C8C8u, p, cam.right, cam.up, 6.f, 1.f, true);
+}

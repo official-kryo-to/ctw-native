@@ -4,7 +4,7 @@
 // kena01::cKEN_A01, the first mission ("Arrival in Liberty"): the prologue on the plane, the landing, the ambush
 // at the port and the intro movie, then Huang on the jetty, a car, Uncle Kenny's restaurant and the apartment.
 //
-// Not ported yet, and passed over here: the clouds, contrails and fountains of cPreIntro, the plane's sound, the
+// Not ported yet, and passed over here: the plane's sound, the
 // bodyguards and ambushers that NewIntro2's callbacks move (cKenA01Intro), the credits drive (cIntroDrive's
 // DriveAround_01), the sinking car and its minigame (cCarInWater, cSinkingCarApp), swimming to the jetty, the
 // police on the shore (cPoliceChase), hotwiring (cHotWiringApp), the GPS route and the help texts' timing.
@@ -31,6 +31,7 @@ private:
     uint32_t carUid_ = 0;
     int planeFrame_ = 0, planePitch_ = 0;   // cPlaneLand +0x330, +0x328
     bool planeDone_ = false;                // +0x334
+    Emitter* clouds_ = nullptr;
 
     void placePlayer(float x, float y, float z) {   // Ped::SetPosition
         const int32_t at[3] = {fx(x), fx(y), fx(z)};
@@ -64,8 +65,32 @@ private:
         setTime(0xC000);
         placePlayer(1762.45f, -66.53f, 2.f);
         g_->scriptProps.push_back({kPlane, 8, {fx(1411.72f), fx(692.70f), fx(10.f)}, 0, 0});
-        play("CSS_KEN_A01_NewIntro1.seq", [this] { g_->removeScriptProp(kPlane); doLandingIntro(); });
+        // the sky the plane flies through: the clouds below drifting south, a contrail behind each engine and a
+        // vapour stream off each wingtip (FXImpl::CreateClouds / CreateContrail / CreateFountain)
+        const int16_t drift[3] = {0, -0x800, 0};
+        const int32_t cloudAt[3] = {fx(1411.72f), fx(692.70f), fx(10.f)};
+        clouds_ = TheParticles().add<CloudsEmitter>(cloudAt, drift);
+        const int32_t south[3] = {0, -0x1000, 0};
+        for (float x : {1413.22f, 1410.22f}) {
+            const int32_t at[3] = {fx(x), fx(682.70f), fx(13.5f)};
+            g_->contrails.push_back(std::make_unique<Contrail>(at, south));
+        }
+        const int16_t jet[3] = {0, -0x4000, 0};
+        for (float x : {1421.32f, 1402.12f}) {
+            const int32_t at[3] = {fx(x), fx(688.70f), fx(12.f)};
+            g_->fountains[Game::kScriptFountains].push_back(std::make_unique<Fountain>(at, jet));
+        }
+        play("CSS_KEN_A01_NewIntro1.seq", [this] { endPlaneIntro(); doLandingIntro(); });
         g_->screenFade.in(30);
+    }
+
+    // cPreIntro::End: the plane and its sky go
+    void endPlaneIntro() {
+        g_->removeScriptProp(kPlane);
+        if (clouds_ && TheParticles().contains(clouds_)) TheParticles().remove(clouds_);
+        clouds_ = nullptr;
+        g_->contrails.clear();
+        g_->fountains.erase(Game::kScriptFountains);
     }
 
     // DoLandingIntro / cPlaneLand::IntroSetup: the plane high over the bay heading south-west with its shadow on
@@ -114,6 +139,8 @@ private:
 
     // StartIntro, NextPartStartIntro and cIntroDrive::StartMovie: the intro movie, then DoneIntro
     void startIntro() {
+        endPlaneIntro();   // (skipped straight here)
+        g_->removeScriptProp(kShadow);
         g_->stopSequence();
         g_->cutscene = g_->scriptCutscene = true;
         wait(0xF, [this] {

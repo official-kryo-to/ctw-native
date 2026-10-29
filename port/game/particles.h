@@ -315,6 +315,46 @@ private:
     bool init_ = false;
 };
 
+// cParticleEmitterClouds (cClouds, FXImpl::CreateClouds): 20 white clouds, 0.8..1.2 wide at alpha 20, sprite 21,
+// scattered over +-3 ranges (range 37 units) at heights stepping down from 0.6 ranges by 0.05 (sCurrZOffset), all
+// drifting with the given velocity; one that drifts more than 3 ranges from the centre dies (the prologue's sky
+// under the plane)
+class CloudsEmitter : public Emitter {
+public:
+    CloudsEmitter(const int32_t pos[3], const int16_t velocity412[3]);
+protected:
+    void updateParticle(Particle& p) override;
+private:
+    void addParticle(const int16_t velocity412[3], bool scatter);   // AddParticle(v, flag)
+    Particle tmpl_{};
+    bool init_ = false;
+};
+
+// cBoatWakeEmitter (the fixed-position form a cContrail makes): 30 particles of sprite 21, range 15, 1.8 wide and
+// growing 0.02 a frame at alpha 30 for 150 life steps, each moving at the velocity it was added with
+class WakeEmitter : public Emitter {
+public:
+    explicit WakeEmitter(const int32_t pos[3]) : Emitter(pos, 30, 0xF000, 21, true) {}
+    void addParticle(const int16_t velocity412[2]);   // AddParticle(tv2d)
+private:
+    Particle tmpl_{};
+    bool init_ = false;
+};
+
+// cContrail (FXImpl::CreateContrail): a blue-white glow 6 x 1 drawn additively at the engine, and a wake
+// emitter fed every fourth frame with half a unit a frame along the contrail's direction
+class Contrail {
+public:
+    Contrail(const int32_t pos[3], const int32_t dir[3]);
+    ~Contrail();
+    void process(uint32_t frame);   // cContrail::Process
+    void render(const WorldCamera& cam) const;   // cContrail::ManagedRender
+private:
+    int32_t pos_[3];
+    int16_t heading_;
+    WakeEmitter* wake_ = nullptr;
+};
+
 class Particles {
 public:
     template <class T, class... A> T* add(A&&... a) {
