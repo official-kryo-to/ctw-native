@@ -24,6 +24,9 @@ public:
     void begin(const Sequence& seq, const TimeCycle& tc);   // cTwoDSequenceApp::Init / SoftReset for a sequence
     void process(Sequence& seq);                           // cTwoDSequenceApp::Process, once per 30 Hz frame
     void render(int width, int height) const;              // cTwoDSequenceApp::Render and the subtitle sprite
+    // cSequence::Stop: the app is no longer processed, but it stays loaded and goes on rendering what it showed (its
+    // black backdrop, and the city hidden if it was); end() is cSequence::UnLoad (cTwoDSequenceApp::DeInit)
+    void stop();
     void end();
     bool hidesWorld() const { return hidesWorld_; }        // cRenderWorld::DisableRendering while a panel is up
     bool active() const { return active_; }
@@ -35,6 +38,7 @@ private:
     void drawSprite(const Quad& q) const;
     void scissor(int layer) const;
     void buildText(int string);
+    void printFrame();
 
     std::vector<Image> bgImages_, spriteImages_;
     std::string dataDir_, table_;
@@ -51,5 +55,6 @@ private:
     // the subtitle (a printing text sprite, Gfx2d::cPrintingText)
     std::u16string text_;
     bool textShown_ = false;
-    int printed_ = 0, printDelay_ = 0;
+    int printed_ = 0;                                       // cPrintingText +0
+    uint8_t printDelay_ = 0, printSpeed_ = 0;               // +9, +0xA
 };

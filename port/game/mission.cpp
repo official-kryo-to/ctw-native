@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
+#include <algorithm>
 #include "mission.h"
 #include "text/gxt.h"
 #include <cctype>
@@ -56,24 +57,34 @@ std::u16string Mission::text(int id) const {
 
 void ScreenFade::toBlack(int frames, std::function<void()> done) {
     done_ = std::move(done);
-    if (frames <= 0) { alpha = 1.f; step_ = 0.f; }
-    else step_ = 1.f / frames;
-    if (step_ == 0.f && done_) { auto fn = std::move(done_); done_ = nullptr; fn(); }
+    target_ = 0x10;
+    const int32_t rest = 0x10000 - level_, step = rest / std::max(frames, 1);
+    step_ = step ? step : rest;
+    if (frames <= 0) { level_ = 0x10000; step_ = 0; }   // (the port's instant cut)
+    alpha = level_ / 65536.f;
+    if (step_ == 0 && done_) { auto fn = std::move(done_); done_ = nullptr; fn(); }
 }
 
 void ScreenFade::in(int frames, std::function<void()> done) {
     done_ = std::move(done);
-    if (frames <= 0) { alpha = 0.f; step_ = 0.f; }
-    else step_ = -1.f / frames;
-    if (step_ == 0.f && done_) { auto fn = std::move(done_); done_ = nullptr; fn(); }
+    target_ = 0;
+    const int32_t step = -level_ / std::max(frames, 1);
+    step_ = step ? step : -level_;
+    if (frames <= 0) { level_ = 0; step_ = 0; }
+    alpha = level_ / 65536.f;
+    if (step_ == 0 && done_) { auto fn = std::move(done_); done_ = nullptr; fn(); }
 }
 
 void ScreenFade::tick() {
-    if (step_ == 0.f) return;
-    alpha += step_;
-    if (alpha <= 0.f || alpha >= 1.f) {
-        alpha = alpha <= 0.f ? 0.f : 1.f;
-        step_ = 0.f;
-        if (done_) { auto fn = std::move(done_); done_ = nullptr; fn(); }
+    if (step_ == 0) return;
+    level_ += step_;
+    const int32_t end = target_ << 12;
+    const bool over = step_ > 0 ? ((level_ >> 12) >= target_ || end - step_ < level_)
+                                : ((level_ >> 12) <= target_ || level_ < end + step_);
+    if (over) {
+        level_ = end;
+        step_ = 0;
     }
+    alpha = level_ / 65536.f;
+    if (over && done_) { auto fn = std::move(done_); done_ = nullptr; fn(); }
 }

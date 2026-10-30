@@ -40,15 +40,19 @@ private:
     unsigned generation_ = 0;   // bumps when everything is cancelled, so a running callback's queue is dropped
 };
 
-// cScreenFade (CameraImpl::FadeToBlack / FadeIn): black over the picture, with a callback when it is done
+// cScreenFade (CameraImpl::FadeToBlack / FadeIn): black over the picture, with a callback when it is done. The
+// level is 0 (clear) .. 0x10000 (black). FadeOut steps (0x10000 - level) / frames a frame, FadeIn -level / frames
+// (all of it when that rounds to 0); Process adds the step and stops at the end, or a step early when the next
+// would pass it (a fade-in once the level is below 0x1000).
 struct ScreenFade {
-    float alpha = 0.f;   // 0 clear .. 1 black
-    void toBlack(int frames, std::function<void()> done = nullptr);
-    void in(int frames, std::function<void()> done = nullptr);
-    void tick();
-    bool fading() const { return step_ != 0.f; }
+    float alpha = 0.f;   // level / 0x10000, for drawing
+    void toBlack(int frames, std::function<void()> done = nullptr);   // cScreenFade::FadeOut
+    void in(int frames, std::function<void()> done = nullptr);        // cScreenFade::FadeIn
+    void tick();                                                      // cScreenFade::Process
+    bool fading() const { return step_ != 0; }
+    int32_t level() const { return level_; }
 private:
-    float step_ = 0.f;
+    int32_t level_ = 0, step_ = 0, target_ = 0;   // +8, +0xC, +0x16 (16 or 0)
     std::function<void()> done_;
 };
 

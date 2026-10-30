@@ -35,6 +35,7 @@ Sequence* Game::startSequence(const std::string& name, bool loop) {
     seq->fastForward = [this] { seqCamera.tick(); };
     sequence = std::move(seq);
     cutscene = true;   // cSequence::Play: MakeSafeForCutscene, EnableControls(false), StartCutscene
+    comic.end();   // (loading a sequence unloads the last one: cSequence::UnLoad)
     if (sequence->hasOverlay()) comic.begin(*sequence, world.timeCycle());
     sequence->play(loop);
     seqTap_ = seqSkip_ = false;
@@ -46,8 +47,10 @@ void Game::retireSequence() {   // cSequence::Stop's end: EndCutscene, the playe
     retiredSequences_.push_back(std::move(sequence));
     cutscene = scriptCutscene;
     if (!scriptCutscene) seqCamera.active = false;
-    comic.end();
+    comic.stop();
 }
+
+void Game::unloadSequence() { comic.end(); }   // cScriptSequenceBase::UnLoadSequence (or its process ending)
 
 void Game::stopSequence() {
     if (!sequence) return;
@@ -109,7 +112,6 @@ void Game::gameCamera(int32_t eye[3], uint16_t& yaw, uint16_t& pitch) const {
 }
 
 void Game::renderCutscene(int W, int H) {
-    if (!sequence) return;
     if (comic.hidesWorld()) {   // cRenderWorld::DisableRendering: nothing of the city around the panels
         Hud_Begin(W, H);
         Hud_Rect(0, 0, (float)W, (float)H, 0x000000FFu);

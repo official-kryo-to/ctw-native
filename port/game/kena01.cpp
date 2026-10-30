@@ -53,6 +53,22 @@ private:
         g_->world.timeCycle().evaluate();
     }
 
+    // CameraImpl::GetScreenBrightNess: 16 - the screen fade's level >> 12 (0 black, 16 clear)
+    int brightness() const { return 16 - (g_->screenFade.level() >> 12); }
+    // FadeOutAndFadeIn (cGlobalFader::Init): to black over 15 frames unless it is black already, then (Wait) setup,
+    // `frames` frames, finished (FadeBackIn), 15 frames, and in over 15 unless it is clear already
+    void fadeOutAndFadeIn(std::function<void()> setup, std::function<void()> finished, int frames) {
+        auto go = [this, setup, finished, frames] {
+            setup();
+            wait(frames, [this, finished] {
+                finished();
+                wait(0xF, [this] { if (brightness() <= 0xF) g_->screenFade.in(0xF); });
+            });
+        };
+        if (brightness() != 0) g_->screenFade.toBlack(0xF, go);
+        else go();
+    }
+
     // a sequence whose normal end goes on to `next` and whose skip-all (Escape, or holding) goes to the movie
     Sequence* play(const char* name, std::function<void()> next, bool skipAllToMovie = true) {
         Sequence* s = g_->startSequence(name);
@@ -84,7 +100,12 @@ private:
             const int32_t at[3] = {fx(x), fx(688.70f), fx(12.f)};
             g_->fountains[Game::kScriptFountains].push_back(std::make_unique<Fountain>(at, jet));
         }
-        play("CSS_KEN_A01_NewIntro1.seq", [this] { endPlaneIntro(); doLandingIntro(); });
+        // cPreIntro::SequenceEnd -> FadeBeforeEnd: to black over 15 frames unless it is already (IsScreenFaded), End
+        play("CSS_KEN_A01_NewIntro1.seq", [this] {
+            auto end = [this] { g_->unloadSequence(); endPlaneIntro(); doLandingIntro(); };   // (End: the next is loaded)
+            if (brightness() != 0) g_->screenFade.toBlack(0xF, end);
+            else end();
+        });
         g_->screenFade.in(30);
     }
 
@@ -99,19 +120,23 @@ private:
 
     // DoLandingIntro / cPlaneLand::IntroSetup: the plane high over the bay heading south-west with its shadow on
     // the water below; callback 0 starts it (StartPlane), then WaitAfterLanding's 30 frames
+    // (cPlaneLand::Begin: FadeOutAndFadeIn(IntroSetup, IntroFinished, 15))
     void doLandingIntro() {
-        g_->removeScriptProp(kPlane);
-        g_->scriptProps.push_back({kPlane, 8, {fx(2085.08f), fx(-71.64f), fx(80.f)}, (uint16_t)deg(0xE1), 0});
-        g_->scriptProps.push_back({kShadow, 0x8D, {fx(2085.08f), fx(-71.64f), fx(2.f)}, (uint16_t)deg(0xE1), 0});
-        placePlayer(1752.17f, 21.06f, 0.f);
-        planeFrame_ = planePitch_ = 0;
-        planeDone_ = false;
-        Sequence* s = play("CSS_KEN_A01_PlaneLand.seq", [this] {
+        fadeOutAndFadeIn([this] {   // IntroSetup
             g_->removeScriptProp(kPlane);
-            g_->removeScriptProp(kShadow);
-            wait(0x1E, [this] { doPortIntro(); });
-        });
-        if (s) s->setCallback(0, [this] { wait(1, [this] { movePlane(); }); });   // StartPlane
+            g_->scriptProps.push_back({kPlane, 8, {fx(2085.08f), fx(-71.64f), fx(80.f)}, (uint16_t)deg(0xE1), 0});
+            g_->scriptProps.push_back({kShadow, 0x8D, {fx(2085.08f), fx(-71.64f), fx(2.f)}, (uint16_t)deg(0xE1), 0});
+            placePlayer(1752.17f, 21.06f, 0.f);
+            planeFrame_ = planePitch_ = 0;
+            planeDone_ = false;
+        }, [this] {   // IntroFinished: PlaySequence
+            Sequence* s = play("CSS_KEN_A01_PlaneLand.seq", [this] {
+                g_->removeScriptProp(kPlane);
+                g_->removeScriptProp(kShadow);
+                wait(0x1E, [this] { doPortIntro(); });
+            });
+            if (s) s->setCallback(0, [this] { wait(1, [this] { movePlane(); }); });   // StartPlane
+        }, 0xF);
     }
 
     // cPlaneLand::MovePlane, every frame: down the glide path, the shadow under it, the nose lifting for the last
@@ -479,8 +504,12 @@ private:
     // colour 10) races along the pier from (-188.96, 17.46) at speed 25 for (-325.24, 20.69) with Huang in it; two of
     // them jump out (5: to -308.88, 44.86; 6: to -302.79, -23.65) and it goes over the end into the water
     // (CSS_Ken_A01_Splash: 7 RemoveVehicles, the splash at -341.03, 19.37 and its sound 0x313)
+    // DoneIntroMakeSureFaded: to black over 15 frames unless it is already (IsScreenFaded), then DoneIntro
     void doneIntro() {
-        g_->screenFade.toBlack(1);
+        if (brightness() != 0) g_->screenFade.toBlack(0xF, [this] { doneIntroFaded(); });
+        else doneIntroFaded();
+    }
+    void doneIntroFaded() {
         g_->seqCamera.active = false;
         // Callback_FadedOutInit: Huang at the pier's end (-294.74, 31.44) facing 135 degrees, then Setup
         placePlayer(-294.74f, 31.44f, 0.f);
@@ -501,10 +530,11 @@ private:
                 carUid_ = g_->cars[i].uid;
             }
         }
-        carInWater();
+        // cCarInWater::Begin: FadeOutAndFadeIn(IntroSetup, IntroFinished, 15)
+        fadeOutAndFadeIn([this] { carInWater(); }, [this] { splashSequence(); }, 0xF);
     }
 
-    void carInWater() {   // cCarInWater::Begin, IntroSetup, IntroFinished
+    void carInWater() {   // cCarInWater::IntroSetup
         endScene();
         sceneOn_ = true;
         g_->cutscene = g_->scriptCutscene = true;
@@ -519,12 +549,6 @@ private:
         if (Vehicle* c = car(kCarA)) c->engineOn = true;   // (its driver is in it)
         driveTo(kCarA, -325.24f, 20.69f, 0x19);
         wait(1, [this] { sceneStep(); });
-        // cGlobalFader::Init(IntroSetup, IntroFinished, .., 15) (FadeOutAndFadeIn): set up in the dark, 15 frames,
-        // IntroFinished (the sequence), 15 more, then the screen fades in over 15
-        wait(0xF, [this] {
-            splashSequence();
-            wait(0xF, [this] { g_->screenFade.in(0xF); });
-        });
     }
     void splashSequence() {   // IntroFinished: PlaySequence
         Sequence* s = g_->startSequence("CSS_Ken_A01_Splash.seq");

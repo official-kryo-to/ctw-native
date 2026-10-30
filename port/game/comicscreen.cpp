@@ -83,26 +83,67 @@ void ComicScreen::begin(const Sequence& seq, const TimeCycle& tc) {
     }
 }
 
+void ComicScreen::stop() {}   // (the app is not processed any more, but it still renders as it was)
+
 void ComicScreen::end() {
     active_ = false;
     hidesWorld_ = false;
     textShown_ = false;
 }
 
+// cTwoDSequenceApp::Process builds the printing text: a speaker's line (it starts with a name colour, 0xFF03..0xFF0C)
+// is kept whole, with speed 1 (0xFEF1) and an 8-frame pause (0xFEF9) put in before the colour reset (0xFF00) that
+// ends the name, so the name shows at once; anything else starts with speed 1 and loses the line before its first
+// newline. (A cPrintingText starts at speed 0: all at once.)
 void ComicScreen::buildText(int string) {
     text_.clear();
-    printed_ = printDelay_ = 0;
+    printed_ = printDelay_ = printSpeed_ = 0;
     if (string < 0 || (size_t)string >= strings_.size()) return;
     const std::u16string& s = strings_[string];
-    // a speaker's line (it starts with a name colour, 0xFF03..0xFF0C) is kept whole; anything else loses the line
-    // before its first newline
     const char16_t c0 = s.empty() ? 0 : s[0];
-    size_t from = 0;
-    if (!(c0 >= 0xFF03 && c0 <= 0xFF0C)) {
-        const size_t nl = s.find(u'\n');
-        if (nl != std::u16string::npos) from = nl + 1;
+    if (c0 >= 0xFF03 && c0 <= 0xFF0C) {
+        bool tagged = false;
+        for (size_t i = 0; i < s.size() && s[i]; ++i) {
+            if (s[i] == 0xFF00 && !tagged) { text_ += (char16_t)0xFEF1; text_ += (char16_t)0xFEF9; }
+            if (s[i] >= 0xFEF0 && s[i] <= 0xFF00) tagged = true;
+            text_ += s[i];
+        }
+        return;
     }
+    text_ += (char16_t)0xFEF1;
+    size_t from = 0;
+    const size_t nl = s.find(u'\n');
+    if (nl != std::u16string::npos) from = nl + 1;
     for (size_t i = from; i < s.size() && s[i]; ++i) text_ += s[i];
+}
+
+// Gfx2d::cPrintingText::Update: after a pause (+9) it takes characters up to the next printable one after the first
+// (+0 the position). Spaces, line ends and colour codes go with the next character. At speed (+0xA) 0 a frame takes
+// everything; otherwise a printable character costs speed frames, and ! - . : ? before a space or the end five
+// times that. 0xFEF0..0xFEF7 set the speed, 0xFEF8 + n pauses 8n frames.
+void ComicScreen::printFrame() {
+    if (printDelay_ > 0) { --printDelay_; return; }
+    bool one = false;
+    for (;;) {
+        const char16_t c = printed_ < (int)text_.size() ? text_[printed_] : 0;
+        if (!c) return;
+        if (c >= 0x21 && c <= 0xFEEF) {   // printable
+            if (one) return;
+            if (printSpeed_) {
+                printDelay_ = (uint8_t)(printSpeed_ - 1);
+                const char16_t next = printed_ + 1 < (int)text_.size() ? text_[printed_ + 1] : 0;
+                if (next <= 0x20 && (c == u'!' || c == u'-' || c == u'.' || c == u':' || c == u'?'))
+                    printDelay_ = (uint8_t)(printSpeed_ - 1 + printSpeed_ * 4);
+                one = true;
+            }
+        }
+        if ((c & 0xFFF0) == 0xFEF0) {
+            if (c >= 0xFEF8) printDelay_ = (uint8_t)(c * 8 + 0x40);
+            else printSpeed_ = (uint8_t)(c + 0x10);
+            one = true;
+        }
+        ++printed_;
+    }
 }
 
 void ComicScreen::process(Sequence& seq) {
@@ -121,15 +162,9 @@ void ComicScreen::process(Sequence& seq) {
             t.flags ^= 4;
         }
     }
-    // Gfx2d::cPrintingText: a character a frame, a pause after punctuation
+    // Gfx2d::cPrintingText::Update, once a frame
     if (seq.skipTextPrinting) { printed_ = (int)text_.size(); seq.skipTextPrinting = false; }
-    if (textShown_ && printed_ < (int)text_.size()) {
-        if (printDelay_ > 0) --printDelay_;
-        else {
-            const char16_t c = text_[printed_++];
-            if (c == u'.' || c == u',' || c == u'!' || c == u'?') printDelay_ = 4;
-        }
-    }
+    if (textShown_ && printed_ < (int)text_.size()) printFrame();
     seq.textPrinting = textShown_ && printed_ < (int)text_.size();
     // the backgrounds
     for (Sequence::BgTrack& t : seq.bgs) {

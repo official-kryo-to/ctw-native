@@ -226,6 +226,7 @@ public:
     Sequence* startSequence(const std::string& name, bool loop = false);
     void stopSequence();
     void updateSequence();               // cSequenceManager::Update, at the start of each game frame
+    void unloadSequence();   // a stopped 2D sequence's app goes (cSequence::UnLoad): the city renders again
     void renderCutscene(int width, int height);
     void renderMissionHud(int width, int height);
     void gameCamera(int32_t eye[3], uint16_t& yaw, uint16_t& pitch) const;   // the camera updateView builds

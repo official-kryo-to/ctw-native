@@ -1308,6 +1308,9 @@ void Game::updateDeath() {
     // stats count what he could pay). The app then makes way for the game, which fades in over 12 frames (state 6:
     // cScreenFade::FadeIn(12)).
     if (deathFrames_ == respawnFrame()) {
+        // cDeathArrestWatcher: cScreenFade::FadeIn(12) on the player's fades, which also clears a fade a script or a
+        // minigame left on the screen (the sinking car's drowning)
+        screenFade.in(12);
         deathScreen.close();
         deathStarted_ = false;
         const RestartTables::Point* closest = nullptr;
@@ -1352,7 +1355,7 @@ void Game::tick() {
     for (auto& c : contrails) c->process(frame);
     if (mission) {
         mission->tick(*this);
-        if (mission && mission->finished()) mission.reset();
+        if (mission && mission->finished()) { mission.reset(); if (!sequence) unloadSequence(); }   // (its sequences go)
     }
     radio.update(*this);
     ++frame;

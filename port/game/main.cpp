@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <string>
 #include <vector>
+#include <stb_image_write.h>
 
 static bool saveBmp(const char* path) {
     int W = (int)OS_ScreenGetWidth(), H = (int)OS_ScreenGetHeight();
@@ -43,12 +44,36 @@ static bool saveBmp(const char* path) {
     return true;
 }
 
+// --capture: the frame at half size as a JPEG (2 x 2 averages, top row first), for checking whole runs frame by frame
+static bool saveCaptureJpg(const std::string& path) {
+    const int W = (int)OS_ScreenGetWidth(), H = (int)OS_ScreenGetHeight(), w = W / 2, h = H / 2;
+    if (w <= 0 || h <= 0) return false;
+    std::vector<unsigned char> px((size_t)W * H * 3), out((size_t)w * h * 3);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, W, H, GL_RGB, GL_UNSIGNED_BYTE, px.data());
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x)
+            for (int c = 0; c < 3; ++c) {
+                const int sy = H - 2 - 2 * y;
+                const unsigned sum = px[((size_t)sy * W + 2 * x) * 3 + c] + px[((size_t)sy * W + 2 * x + 1) * 3 + c] +
+                                     px[((size_t)(sy + 1) * W + 2 * x) * 3 + c] + px[((size_t)(sy + 1) * W + 2 * x + 1) * 3 + c];
+                out[((size_t)y * w + x) * 3 + c] = (unsigned char)((sum + 2) / 4);
+            }
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) return false;
+    const int ok = stbi_write_jpg_to_func([](void* file, void* data, int size) { fwrite(data, 1, (size_t)size, (FILE*)file); },
+                                          f, w, h, 3, out.data(), 85);
+    fclose(f);
+    return ok != 0;
+}
+
 int main(int argc, char** argv) {
     if (argc == 2 && !strcmp(argv[1], "--license")) { Ctw_PrintLicense(); return 0; }
     std::string data, mods;
     const char* shot = nullptr;
     int frames = 60;
-    int shotEvery = 0;   // --shot-every N: also save <shot>_<frame>.bmp every N frames (watching motion)
+    int shotEvery = 0;
+    const char* capture = nullptr;   // --shot-every N: also save <shot>_<frame>.bmp every N frames (watching motion)
     const char* keys = nullptr;
     const char* ui = nullptr;   // shot mode: "frame:key=N;frame:click=x,y;frame:mouse=x,y;frame:wheel=x,y,n" (UI tests)
     bool trace = false;
@@ -83,7 +108,7 @@ int main(int argc, char** argv) {
                  strcmp(option, "--frames") && strcmp(option, "--keys") && strcmp(option, "--export-textures") && strcmp(option, "--loading-shot") && strcmp(option, "--movie-shot") && strcmp(option, "--ui") && strcmp(option, "--state") &&
                  strcmp(option, "--enter") && strcmp(option, "--handbrake") && strcmp(option, "--burnout") && strcmp(option, "--hour") &&
                  strcmp(option, "--weather") && strcmp(option, "--weapon") && strcmp(option, "--fire") && strcmp(option, "--throw") && strcmp(option, "--wanted") && strcmp(option, "--die") && strcmp(option, "--money") && strcmp(option, "--seq") && strcmp(option, "--mission") && strcmp(option, "--teleport") &&
-                 strcmp(option, "--shot-every")) {
+                 strcmp(option, "--shot-every") && strcmp(option, "--capture")) {
             fprintf(stderr, "Unknown option: %s\n", option);
             return 4;
         }
@@ -96,6 +121,7 @@ int main(int argc, char** argv) {
         if (!strcmp(argv[i], "--shot")) shot = argv[i + 1];
         if (!strcmp(argv[i], "--frames")) frames = atoi(argv[i + 1]);
         if (!strcmp(argv[i], "--shot-every")) shotEvery = atoi(argv[i + 1]);
+        if (!strcmp(argv[i], "--capture")) capture = argv[i + 1];   // shot mode: every frame into DIR/NNNNNN.jpg
         if (!strcmp(argv[i], "--ui")) ui = argv[i + 1];
         if (!strcmp(argv[i], "--export-textures")) exportTextures = argv[i + 1];
         if (!strcmp(argv[i], "--loading-shot")) loadingShot = argv[i + 1];
@@ -247,6 +273,12 @@ int main(int argc, char** argv) {
                 game.world.loadAllNow(teleportX, teleportY);
             }
             game.tick();
+            if (capture) {
+                game.render((int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());
+                char name[32];
+                std::snprintf(name, sizeof name, "/%06d.jpg", f);
+                saveCaptureJpg(std::string(capture) + name);
+            }
             if (shotEvery > 0 && f % shotEvery == 0) {
                 game.render((int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());
                 std::string base = shot;

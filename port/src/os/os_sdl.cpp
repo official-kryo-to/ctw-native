@@ -139,6 +139,10 @@ bool OS_ShowingSplashScreen() { return false; }
 
 // ---------------------------------------------------------------- host
 bool Host_Init(const char* title, int w, int h) {
+    // CTW_HEADLESS=1 (automated runs): no window on screen and no sound, the frames still drawn and read back
+    const char* headlessEnv = SDL_getenv("CTW_HEADLESS");
+    const bool headless = headlessEnv && *headlessEnv && strcmp(headlessEnv, "0") != 0;
+    if (headless) SDL_setenv("SDL_AUDIODRIVER", "dummy", 1);
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER | SDL_INIT_TIMER) != 0) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return false;
@@ -149,7 +153,8 @@ bool Host_Init(const char* title, int w, int h) {
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
     g_win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h,
-                             SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+                             SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
+                             (headless ? SDL_WINDOW_HIDDEN : 0));
     if (!g_win) { fprintf(stderr, "window: %s\n", SDL_GetError()); return false; }
     g_inputFocused = (SDL_GetWindowFlags(g_win) & SDL_WINDOW_INPUT_FOCUS) != 0;
     g_gl = SDL_GL_CreateContext(g_win);
