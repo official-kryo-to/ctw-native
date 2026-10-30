@@ -286,6 +286,7 @@ void Game::updateWorldObjects() {   // once per game frame, after the vehicles m
     for (auto& kv : fountains)
         for (auto& f : kv.second) f->process(*this);
     propDynamics.update(*this);
+    for (auto& d : doors) d->process();   // cDynDoorProp::Process
 }
 
 void Game::addBlood(const int32_t pos[3], int count) {

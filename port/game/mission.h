@@ -25,6 +25,7 @@ public:
     std::u16string text(int id) const;
 
 protected:
+    virtual void onFrame(Game&) {}                          // the mission's own processes, before its waits
     void wait(int frames, std::function<void()> fn);        // TimerImpl::Wait
     void when(std::function<bool()> test, std::function<void()> fn);   // polled every frame until true
     void cancelAll();                                       // cScriptProcessBase::Stop

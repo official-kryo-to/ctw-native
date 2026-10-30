@@ -182,6 +182,12 @@ void WantedManager::setLevel(int level, bool onlyRaise, bool clearRating) {   //
     takeDowns_ = 0;
 }
 
+void WantedManager::scriptSetLevel(int level, bool onlyRaise, bool clearRating, bool failNoCrime) {
+    if (maxLevel_ < level) setMaxLevel(level);
+    if (failNoCrime) failAnyNoCrimeState();
+    setLevel(level, onlyRaise, clearRating);
+}
+
 void WantedManager::setMaxLevel(int level) {   // cWantedManager::SetMaxLevel
     maxLevel_ = level;
     if ((state_ == 2 ? 0 : level_) <= level || level_ == level) return;

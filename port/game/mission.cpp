@@ -18,7 +18,9 @@ void Mission::cancelAll() {
     ++generation_;
 }
 
-void Mission::tick(Game&) {
+void Mission::tick(Game& game) {
+    if (finished_) return;
+    onFrame(game);
     if (finished_) return;
     const unsigned gen = generation_;
     // the callbacks may add or cancel waits: run the due ones from copies
@@ -60,7 +62,6 @@ void ScreenFade::toBlack(int frames, std::function<void()> done) {
     target_ = 0x10;
     const int32_t rest = 0x10000 - level_, step = rest / std::max(frames, 1);
     step_ = step ? step : rest;
-    if (frames <= 0) { level_ = 0x10000; step_ = 0; }   // (the port's instant cut)
     alpha = level_ / 65536.f;
     if (step_ == 0 && done_) { auto fn = std::move(done_); done_ = nullptr; fn(); }
 }
@@ -70,7 +71,6 @@ void ScreenFade::in(int frames, std::function<void()> done) {
     target_ = 0;
     const int32_t step = -level_ / std::max(frames, 1);
     step_ = step ? step : -level_;
-    if (frames <= 0) { level_ = 0; step_ = 0; }
     alpha = level_ / 65536.f;
     if (step_ == 0 && done_) { auto fn = std::move(done_); done_ = nullptr; fn(); }
 }

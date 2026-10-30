@@ -462,7 +462,8 @@ void Player::integrate(Collision* col) {
         bool walkable = false, hit = false;
         aheadValid_ = inWater;
         if (inWater) climbAhead();
-        constrainByCollision(col, moveLen, walkable, hit);
+        if (collisionProof) freeMove();   // cSimpleMover::Integrate only (not cEntity::IsCollidable)
+        else constrainByCollision(col, moveLen, walkable, hit);
         // cPed::Integrate's vertical/full path applies gravity after the
         // constrained move. Being within 0.6 units of ground does not cancel
         // it: that distance marks standing, it is not a vertical impulse.
@@ -483,6 +484,7 @@ void Player::integrate(Collision* col) {
             else { if (!appliedGravity) vel[2] -= kGravity; onGround_ = false; }
         } else { inWater = false; onGround_ = true; }
     }
+    if (collisionProof) vel[2] = 0;   // (cPed::Integrate: a ped that is not collidable does not fall)
     // cPed::Integrate, player part: one frame of grace when leaving the ground, and a ped hanging still in the
     // air for 10 frames counts as standing
     if (playerControlled && !reacting() && !onGround_ && !inWater) {
@@ -754,13 +756,18 @@ void Player::animate(const PedSprites* sprites) {
     if (level_) legs=locomotionLegs; // moving peds retain their gait's legs (0x87ea48)
     bool hold = false, sync = false;
     uint8_t punchNext = punch;
-    const int weaponUp = playerControlled ? weaponUpper(base, up, level_!=0, weaponType, weaponState, weaponFlags, hold, sync, punchNext) : up;
+    int weaponUp = playerControlled ? weaponUpper(base, up, level_!=0, weaponType, weaponState, weaponFlags, hold, sync, punchNext) : up;
     punch = punchNext;
     if (weaponType==0 && (weaponUp==base+233 || weaponUp==base+243))
         fightIdleFrames_=90; // GetMeleeAnim calls cPlayer::StartFightIdle for each active unarmed swing
+    // cPed::AnimateReactionAnims (after the weapons): the door's reaction restarts as 0xC9 and holds the upper body
+    // on 0xF5 until that one-shot is done, then ends
+    if (doorReaction_ == 0xCA) doorReaction_ = 0xC9;
+    else if (doorReaction_ == 0xC9 && upperOneShotDone_) doorReaction_ = 0;
+    if (doorReaction_ == 0xC9) weaponUp = base + 0xF5;
     if (weaponUp != locomotionUpper || idlePose) {   // AnimateWalkRunCycle with a weapon pose: it restarts when it changes and steps at the
         // fixed rate (0x88 >> 4) unless synced with the legs; the legs keep their own cycle
-        if (weaponUp != animUpper_) { animUpper_ = weaponUp; frameUpper_ = 0; }
+        if (weaponUp != animUpper_) { animUpper_ = weaponUp; frameUpper_ = 0; upperOneShotDone_ = false; }
         if (legs != animLegs_) { animLegs_ = legs; frameLegs_ = 0; }
         const int step = (int)(((int64_t)currentSpeed() * 0x88) >> 16);
         if (level_) frameLegs_ = sprites->advance(animLegs_, frameLegs_, step);
@@ -768,7 +775,12 @@ void Player::animate(const PedSprites* sprites) {
         else frameLegs_ = 0;
         // Standing resets before Animate; moving resets after it (native 0x87ed3c / 0x87ed20).
         if (hold && !level_) frameUpper_=0;
-        if (!(sync && !level_)) frameUpper_ = sprites->advance(animUpper_, frameUpper_, sync ? step : 0x88 >> 4);
+        if (!(sync && !level_)) {   // (cPedSprite::AnimateHelper: a one-shot that reaches its end stays done)
+            const int upperStep = sync ? step : 0x88 >> 4;
+            int end = frameUpper_;
+            if (sprites->oneShot(animUpper_) && sprites->advanceOneShot(animUpper_, end, upperStep)) upperOneShotDone_ = true;
+            frameUpper_ = sprites->advance(animUpper_, frameUpper_, upperStep);
+        }
         if (hold && level_) frameUpper_ = 0;
         return;
     }

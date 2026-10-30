@@ -61,6 +61,12 @@ public:
     bool blockedByWater = false;
     bool inWater = false;          // cEntity +0x64 bit 1: swimming
     bool splashed = false;         // fell in this frame (the game makes the type 9 splash)
+    // Entity::Set(eScriptCollisionFlags) 1: cEntity +0x6D set with +0x6E bit 2, so cEntity::IsCollidable is false and
+    // cPed::Integrate moves the ped without ConstrainByCollision (through walls) and stops its fall; 0 clears it
+    bool collisionProof = false;
+    // Ped::StartOpenDoorAnim (cPed +0xEB = 0xCA): cPed::AnimateReactionAnims puts the one-shot 275 x body set + 0xF5
+    // on the upper body from its first frame until it has played through
+    void startOpenDoorAnim() { doorReaction_ = 0xCA; }
 
     void placeOnGround(Collision* col);
     void update(const Input& in, Collision* col, const PedSprites* sprites);
@@ -158,6 +164,8 @@ private:
     int32_t clearance_ = 0, lastPos_[3] = {0, 0, 0};     // +0x320, +0x2F8
     int32_t ahead_[3] = {0, 0, 0};                         // (Integrate: the climb-out point ahead, var_B8)
     bool aheadValid_ = false;
+    uint8_t doorReaction_ = 0;       // cPed +0xEB for the door: 0xCA asked for, 0xC9 playing
+    bool upperOneShotDone_ = false;  // cPedSprite +0x41 of the upper body (cPed +0x265): a one-shot reached its end
     int animUpper_ = -1, animLegs_ = -1, frameUpper_ = 0, frameLegs_ = 0;
     int previousUpperFrame_ = -1; // cPedSprite's previous integer frame, used by melee sound cues
     uint8_t fightIdleFrames_ = 0; // cPlayer +4497

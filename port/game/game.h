@@ -38,6 +38,7 @@
 #include "sinkingcar.h"
 #include "devmenu.h"
 #include "hotwiring.h"
+#include "doors.h"
 #include "minigamecam.h"
 #include "multiplayerworld.h"
 #include "mission.h"
@@ -279,6 +280,7 @@ public:
     Vehicle::Controls carControls(const Vehicle& car) const;   // a script's, else the traffic AI's
     static constexpr int kScriptFountains = -1;         // fountains' key for FXImpl::CreateFountain from scripts
     std::vector<ScriptProp> scriptProps;
+    std::vector<std::shared_ptr<DoorProp>> doors;   // WorldImpl::CreateDoor for scripts (processed with the props)
     ScriptProp* scriptProp(int id);
     void removeScriptProp(int id);
     void renderScriptProps();

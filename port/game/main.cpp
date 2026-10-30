@@ -300,7 +300,12 @@ int main(int argc, char** argv) {
                     int at = -1, x = 0, y = 0, n = 0;
                     char what[8] = "";
                     if (sscanf(p, "%d:%7[a-z]=%d,%d,%d", &at, what, &x, &y, &n) >= 3 && at == f) {
-                        if (!strcmp(what, "key")) game.key(x);
+                        if (!strcmp(what, "key")) {   // as Game::run: a key the game does not take may be the vehicle button
+                            if (!game.key(x) && (x == SDL_SCANCODE_F || x == SDL_SCANCODE_RETURN)) {
+                                game.enterPressed = true;
+                                game.scriptWalk.on = false;
+                            }
+                        }
                         else if (!strcmp(what, "goto")) {   // walk or swim (running) to whole units x, y
                             game.scriptWalk.on = true;
                             game.scriptWalk.target[0] = x * 4096; game.scriptWalk.target[1] = y * 4096;

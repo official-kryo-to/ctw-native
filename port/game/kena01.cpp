@@ -36,6 +36,10 @@ private:
     int planeFrame_ = 0, planePitch_ = 0;   // cPlaneLand +0x330, +0x328
     bool planeDone_ = false;                // +0x334
     Emitter* clouds_ = nullptr;
+    DoorHandler door_;                      // cCutscene_AtKennys +0x340
+    static constexpr int32_t kKennysDoor[3] = {0x145A14, -0x3B999, 0};   // qword_47B508: (325.63, -59.60)
+
+    void onFrame(Game& game) override { door_.tick(game); }
 
     void placePlayer(float x, float y, float z) {   // Ped::SetPosition
         const int32_t at[3] = {fx(x), fx(y), fx(z)};
@@ -45,7 +49,7 @@ private:
     // cKEN_A01::Init: the screen goes black, then FadedInit
     void init() {
         g_->cutscene = g_->scriptCutscene = true;
-        g_->screenFade.toBlack(1, [this] { doPlaneIntro(); });
+        fadeToBlack(1, [this] { doPlaneIntro(); });
     }
 
     void setTime(uint32_t t) {
@@ -53,6 +57,16 @@ private:
         g_->world.timeCycle().evaluate();
     }
 
+    // CameraImpl::FadeToBlack / FadeIn(frames, callback, .., true): the screen's fade (the player's +0x114C, the one
+    // cGame::Render draws) and the callback from TimerImpl::Wait(frames + 1), not from the fade's end
+    void fadeToBlack(int frames, std::function<void()> fn = nullptr) {
+        g_->screenFade.toBlack(frames);
+        if (fn) wait(frames + 1, std::move(fn));
+    }
+    void fadeIn(int frames, std::function<void()> fn = nullptr) {
+        g_->screenFade.in(frames);
+        if (fn) wait(frames + 1, std::move(fn));
+    }
     // CameraImpl::GetScreenBrightNess: 16 - the screen fade's level >> 12 (0 black, 16 clear)
     int brightness() const { return 16 - (g_->screenFade.level() >> 12); }
     // FadeOutAndFadeIn (cGlobalFader::Init): to black over 15 frames unless it is black already, then (Wait) setup,
@@ -62,10 +76,10 @@ private:
             setup();
             wait(frames, [this, finished] {
                 finished();
-                wait(0xF, [this] { if (brightness() <= 0xF) g_->screenFade.in(0xF); });
+                wait(0xF, [this] { if (brightness() <= 0xF) fadeIn(0xF); });
             });
         };
-        if (brightness() != 0) g_->screenFade.toBlack(0xF, go);
+        if (brightness() != 0) fadeToBlack(0xF, go);
         else go();
     }
 
@@ -103,7 +117,7 @@ private:
         // cPreIntro::SequenceEnd -> FadeBeforeEnd: to black over 15 frames unless it is already (IsScreenFaded), End
         play("CSS_KEN_A01_NewIntro1.seq", [this] {
             auto end = [this] { g_->unloadSequence(); endPlaneIntro(); doLandingIntro(); };   // (End: the next is loaded)
-            if (brightness() != 0) g_->screenFade.toBlack(0xF, end);
+            if (brightness() != 0) fadeToBlack(0xF, end);
             else end();
         });
         g_->screenFade.in(30);
@@ -130,10 +144,14 @@ private:
             planeFrame_ = planePitch_ = 0;
             planeDone_ = false;
         }, [this] {   // IntroFinished: PlaySequence
-            Sequence* s = play("CSS_KEN_A01_PlaneLand.seq", [this] {
-                g_->removeScriptProp(kPlane);
-                g_->removeScriptProp(kShadow);
-                wait(0x1E, [this] { doPortIntro(); });
+            Sequence* s = play("CSS_KEN_A01_PlaneLand.seq", [this] {   // SequenceEnd -> End
+                auto end = [this] {   // IntroEndFinished, Finish, then WaitAfterLanding
+                    g_->removeScriptProp(kPlane);
+                    g_->removeScriptProp(kShadow);
+                    wait(0x1E, [this] { doPortIntro(); });
+                };
+                if (brightness() != 0) fadeToBlack(0xF, end);
+                else end();
             });
             if (s) s->setCallback(0, [this] { wait(1, [this] { movePlane(); }); });   // StartPlane
         }, 0xF);
@@ -346,8 +364,7 @@ private:
     void doPortIntro() {   // cKenA01Intro::Begin
         endScene();
         sceneOn_ = true;
-        // (WaitForFadeInAirport fades in from black: the apron is loaded meanwhile)
-        g_->screenFade.toBlack(0);
+        // (black since cPlaneLand::End; WaitForFadeInAirport fades in)
         g_->world.loadAllNow(1775.f, -60.f);
         // the apron cleared (Area::ClearEntities; SetCarGensOff, SetRoadNodesOff)
         for (int i = (int)g_->cars.size() - 1; i >= 0; --i)
@@ -431,7 +448,7 @@ private:
             g_->player.playOneShot(0x2B, 0x2A, false);
             g_->scriptAnim = true;
         });
-        wait(0x28, [this] { g_->screenFade.in(15); });   // WaitForFadeInAirport, 40 frames in
+        wait(0x28, [this] { fadeIn(15); });   // WaitForFadeInAirport, 40 frames in
         wait(1, [this] { sceneStep(); });
     }
 
@@ -506,7 +523,7 @@ private:
     // (CSS_Ken_A01_Splash: 7 RemoveVehicles, the splash at -341.03, 19.37 and its sound 0x313)
     // DoneIntroMakeSureFaded: to black over 15 frames unless it is already (IsScreenFaded), then DoneIntro
     void doneIntro() {
-        if (brightness() != 0) g_->screenFade.toBlack(0xF, [this] { doneIntroFaded(); });
+        if (brightness() != 0) fadeToBlack(0xF, [this] { doneIntroFaded(); });
         else doneIntroFaded();
     }
     void doneIntroFaded() {
@@ -554,8 +571,8 @@ private:
         Sequence* s = g_->startSequence("CSS_Ken_A01_Splash.seq");
         if (!s) { wait(1, [this] { carInWaterEnd(); }); return; }
         s->setCallback(Sequence::kEnded, [this] { wait(1, [this] { carInWaterEnd(); }); });   // SequenceEnd -> End
-        s->setCallback(Sequence::kSkipped, [this] {   // Skipped: to black, then 5 frames
-            g_->screenFade.toBlack(1, [this] { wait(5, [this] { displaySinkingCar(); }); });
+        s->setCallback(Sequence::kSkipped, [this] {   // Skipped: FadeToBlack(0), then 5 frames
+            fadeToBlack(0, [this] { wait(5, [this] { displaySinkingCar(); }); });
         });
         s->setCallback(5, [this] { getOut(kAmbusherA2); walkTo(kAmbusherA2, -308.88f, 44.86f); });    // JumpOutOfVehicle
         s->setCallback(6, [this] { getOut(kAmbusherB2); walkTo(kAmbusherB2, -302.79f, -23.65f); });   // JumpOutOfVehicle2
@@ -566,7 +583,7 @@ private:
         });
     }
     void carInWaterEnd() {   // End: to black over 15 frames, then FadedOutAfterImpact
-        g_->screenFade.toBlack(15, [this] { displaySinkingCar(); });
+        fadeToBlack(15, [this] { displaySinkingCar(); });
     }
     void displaySinkingCar() {   // DisplaySinkingCar: DeleteCar, then 30 frames
         endScene();
@@ -797,15 +814,28 @@ private:
         return dx * dx + dy * dy < r * r;
     }
 
-    // GetToKennysComplete -> cCutscene_AtKennys: the conversation (SCENE_02)
+    // GetToKennysComplete -> cCutscene_AtKennys::Begin (StartCutscene) -> LeftVehicle: CameraImpl::FadeToBlack(15,
+    // true, false) fades only the second screen, which Android does not draw; the door handler walks him into the
+    // restaurant (cDoorHandler::CreateDoor at heading 0, DoMainStuff(enter, true)), then IntroSetup
     void getToKennysComplete() {
         g_->removeBlip(2);
         g_->objective.frames = 0;
         g_->cutscene = g_->scriptCutscene = true;
-        g_->screenFade.toBlack(15, [this] {
-            g_->screenFade.in(15);
-            play("CSS_KEN_A01_SCENE_02.seq", [this] { cutsceneAtKennysDoFadeIn(); }, false);
-        });
+        door_.start(*g_, kKennysDoor, 0, DoorHandler::kEnter, [this] { atKennysIntroSetup(); }, true);
+    }
+
+    // IntroSetup: the conversation (SCENE_02, WalkOut on its callback 0), the player's orders cleared and the wanted
+    // level with them (ScriptPlayer::SetWantedLevel(0, false, true, true))
+    void atKennysIntroSetup() {
+        g_->scriptWalk.on = false;   // Ped::ClearAllOrders
+        g_->wanted.scriptSetLevel(0, false, true, true);
+        Sequence* s = play("CSS_KEN_A01_SCENE_02.seq", [this] { cutsceneAtKennysDoFadeIn(); }, false);
+        if (s) s->setCallback(0, [this] { atKennysWalkOut(); });
+    }
+
+    // WalkOut: another door in the same place, and he walks out of it from inside (DoMainStuff(leave, true))
+    void atKennysWalkOut() {
+        door_.start(*g_, kKennysDoor, 0, DoorHandler::kLeave, nullptr, true);
     }
 
     // CutsceneAtKennysDoFadeIn: the apartment (364.08, 25.02), arrived at within 5 units
@@ -823,8 +853,8 @@ private:
         g_->removeBlip(3);
         g_->objective.frames = 0;
         g_->cutscene = g_->scriptCutscene = true;
-        g_->screenFade.toBlack(15, [this] {
-            g_->screenFade.in(15);
+        fadeToBlack(15, [this] {   // then cCutscene_AtSafehouse_Sequence: PlayTheSequence's FadeIn(0)
+            fadeIn(0);
             play("CSS_Ken_A01_Safehouse.seq", [this] { passed(); }, false);
         });
     }

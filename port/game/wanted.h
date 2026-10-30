@@ -40,6 +40,9 @@ public:
     void setLevel(int level, bool onlyRaise, bool clearRating);   // cWantedManager::SetLevel
     void setMaxLevel(int level);                                  // SetMaxLevel
     void setMinLevel(int level);                                  // SetMinLevel
+    // ScriptPlayer::SetWantedLevel: the maximum raised to the level when below it, FailAnyNoCrimeState if asked, then
+    // SetLevel
+    void scriptSetLevel(int level, bool onlyRaise, bool clearRating, bool failNoCrime);
     void forceDropWantedLevel(bool clearRating);                  // ForceDropWantedLevel
     void onTakeDown();                                            // OnTakeDown: a cop car was taken down
 
