@@ -240,8 +240,10 @@ class GameBinary:
         return b'CTWREND1' + self.read(0x486b04, 36) + self.read(0x486a8c, 24) + angles + colours
 
     def markers(self):
-        # iPosition's 11 marker colours (5-bit r, g, b): sMarker3D::Render and iPosition::ColourSpriteBlips.
-        return b'CTWMARK1' + self.read(0x488165, 33)
+        # iPosition's 11 marker colours (5-bit r, g, b): sMarker3D::Render and iPosition::ColourSpriteBlips; then
+        # ColourSpriteBlips' colour for each blip palette 4..12 (64-bit entries, kept as bytes).
+        palettes = bytes(v & 0xFF for v in struct.unpack('<9q', self.read(0x488200, 72)))
+        return b'CTWMARK2' + self.read(0x488165, 33) + palettes
 
     def ped_comments(self):
         # Gender/sample ranges, timing records and initial repeat histories from this verified build.

@@ -71,6 +71,12 @@ struct RadarBlip {
     uint8_t chevronType = 0;     // Marker::SetChevronType
     int32_t markerSize = 0;      // sPosPrimitive +0x70 (Marker::SetRadius); 0: the representation's own
     bool onRadar = true;         // Marker::SetBlip
+    // the radar sprite (iPosition): -1 a plugin's dot; HUDImpl::AddBlip's sprite 106 in palette 7, long range
+    int16_t sprite = -1;         // +0x46 (HUDImpl::SetBlipSprite)
+    uint8_t palette = 7;         // +0x48 (Marker::SetSpritePalette)
+    bool longRange = true;       // +0x4A bit 1 (eBlipRange 1): kept at the radar's edge when far
+    int16_t appear = 0x1000;     // +0x40: the pop-in (DrawBlip / AnimScaleBlip), at the scale once it has settled
+    int16_t spriteScale = 0x1000;   // the sprite's current scale
 };
 
 // gp_MissionText objectives (HUDImpl::DisplayObjective): a line at the bottom of the screen for a while

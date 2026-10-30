@@ -889,7 +889,9 @@ private:
         s->setCallback(1, click);   // Callback_TextSave
         s->setCallback(2, [this, click] {   // Callback_TextRadar: the garage's blip (sprite 0x74, drawn as a dot)
             click();
-            g_->addBlip(kGarage, 0x30D010FF, 4);   // (palette 11: colour 6, green)
+            g_->addBlip(kGarage, 0x30D010FF, 4);   // AddBlip(.., 4, short range), ChangeBlipStyle(.., 11, 1), SetBlipSprite(0x74)
+            for (RadarBlip& b : g_->blips)
+                if (b.id == 4) { b.palette = 11; b.sprite = 0x74; b.longRange = false; }
         });
         s->setCallback(3, click);   // Callback_TextSafehouse
         s->setCallback(4, [this, click] {   // Callback_TextGarage: it is bought, and opens

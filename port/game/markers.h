@@ -24,6 +24,9 @@ class Markers {
 public:
     bool load(const std::string& dataDir);   // the colours (marker_tables.bin) and the texture
     uint16_t colour(int index) const;        // RGB555 (red in the low bits), white past the table
+    // iPosition::ColourSpriteBlips: the colour a blip palette tints its radar sprite (palettes 4..12 from the table,
+    // any other 2)
+    uint16_t paletteColour(int palette) const;
     // sMarker3D::Render at centre (20.12) for game frame `frame`
     void renderMarker3D(const int32_t centre[3], int colourIndex, int32_t size, uint32_t frame) const;
     // sMarkerChevron::Render (CreateChevron's eChevronType: 0 four large, 1 four, 2 two that do not light up)
@@ -32,6 +35,7 @@ public:
 
 private:
     uint16_t colours_[11] = {};
+    uint8_t palettes_[9] = {};
     bool coloursOk_ = false;
     int texture_ = -1;   // resource id
 };

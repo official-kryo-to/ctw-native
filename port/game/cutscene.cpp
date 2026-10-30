@@ -165,14 +165,42 @@ void Game::showObjective(const std::u16string& text, int frames) {
 void Game::addBlip(const int32_t pos[3], uint32_t rgba, int id, int marker) {
     removeBlip(id);
     blips.push_back({{pos[0], pos[1], pos[2]}, rgba, id});
-    blips.back().marker = (int8_t)marker;
+    RadarBlip& b = blips.back();
+    b.marker = (int8_t)marker;
+    if (id < kPluginBlips) {   // iPosition::iPosition: sprite 106; it pops in after the blips made just before it
+        b.sprite = 106;
+        b.appear = (int16_t)(-0x2000 - blipStagger_);
+        b.spriteScale = 0x1000;
+        const int next = blipStagger_ + 0x19A;   // cAreaManager::IncrementBlipScaleStagger
+        blipStagger_ = (int16_t)(next < 0x3000 ? next : 0x3000);
+    }
+}
+
+void Game::stepBlips() {
+    if (blipStagger_ >= 1) blipStagger_ = (int16_t)(std::max<int>(blipStagger_, 0x19A) - 0x19A);   // cAreaManager::Process
+    for (RadarBlip& b : blips) {   // iPosition::DrawBlip: the sprite's scale on its way to +0x44 (1.0)
+        if (b.sprite < 0 || b.appear == 0x1000) continue;
+        const int cur = b.appear, target = 0x1000;
+        if (cur <= -0x2001) {   // waiting its turn, not shown
+            b.spriteScale = 0;
+            b.appear = (int16_t)(cur > -0x219A ? 0 : cur + 0x199);
+        } else if (cur > 0) {   // shrinking back to 1 from 2
+            if (target < cur) b.appear = b.spriteScale = (int16_t)std::max(cur - 0x333, target);
+        } else if (cur - 0xB33 > -0x2001) {   // growing: 0.7, 1.4 ..
+            b.spriteScale = (int16_t)(0xB33 - cur);
+            b.appear = (int16_t)(cur - 0xB33);
+        } else {
+            b.appear = b.spriteScale = 0x2000;
+        }
+    }
 }
 
 void Game::addChevron(const int32_t pos[3], uint32_t rgba, int id, int degrees, int type, int palette, int style,
                       int32_t size) {
     addBlip(pos, rgba, id, 5);
     RadarBlip& b = blips.back();
-    b.markerColour = (uint8_t)(palette - 5);   // ChangeBlipStyle(.., palette, style, 1, false): SetColour(palette - 5)
+    b.markerColour = (uint8_t)(palette - 5);
+    b.palette = (uint8_t)palette;   // ChangeBlipStyle(.., palette, style, 1, false): SetColour(palette - 5)
     b.onRadar = style <= 3 && ((3 >> style) & 1);   // Marker::SetBlip
     b.markerAngle = (int16_t)((degrees - 180) * 0xB6);   // Marker::SetAngle(degrees - 180)
     b.chevronType = (uint8_t)type;

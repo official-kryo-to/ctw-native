@@ -78,7 +78,7 @@ void GameplayHud::shutdown() {
     map_ = RadarMap{};
 }
 
-void GameplayHud::sprite(int index, float x, float y, float scale, float angle, float alpha) const {
+void GameplayHud::sprite(int index, float x, float y, float scale, float angle, float alpha, uint32_t tint) const {
     if (index < 0 || index >= (int)sprites_.sprites().size()) return;
     const SpriteDef& d = sprites_.sprites()[index];
     const float w = d.w + 1.f, h = d.h + 1.f; // cSprite::CalculateVerts includes the last stored pixel.
@@ -90,7 +90,7 @@ void GameplayHud::sprite(int index, float x, float y, float scale, float angle, 
     const float v[4] = {d.y * 2.f, d.y * 2.f, (d.y + h) * 2.f, (d.y + h) * 2.f};
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texture_);
-    glColor4f(1, 1, 1, alpha);
+    glColor4f((tint >> 24) / 255.f, (tint >> 16 & 0xFF) / 255.f, (tint >> 8 & 0xFF) / 255.f, (tint & 0xFF) / 255.f * alpha);
     glBegin(GL_QUADS);
     for (int i = 0; i < 4; ++i) {
         glTexCoord2f(u[i] / textureWidth_, v[i] / textureHeight_);
@@ -206,8 +206,20 @@ void GameplayHud::render(const Game& game, int width, int height) const {
     projection.worldOffset(north, pos, nx, ny, diameter * .5f);
     sprite(107, cx + nx * k, cy + ny * k, k);
     glDisable(GL_TEXTURE_2D);
-    for (const RadarBlip& b : game.blips) {   // HUDImpl::AddBlip (a dot in the blip's colour; at the edge when far)
+    for (const RadarBlip& b : game.blips) {   // a plugin's blip: a dot in its colour, at the edge when far
         if (!b.onRadar) continue;
+        if (b.sprite >= 0) {   // iPosition::DrawBlip -> cRadar::DrawBlipToRadar
+            if (b.spriteScale == 0) continue;
+            float bx, by;   // GetRadarSpaceFromWorldSpace: long range ones stay at RADAR_GRAPHIC_RADIUS (75)
+            projection.worldOffset(b.pos, pos, bx, by, b.longRange ? diameter * .5f : 0.f);
+            if (!b.longRange && bx * bx + by * by > diameter * diameter * .25f) continue;
+            const uint16_t c = game.markers.paletteColour(b.palette);   // ColourSpriteBlips: alpha 0xF8
+            const uint32_t tint = (uint32_t)((c & 0x1F) << 3) << 24 | (uint32_t)((c >> 5 & 0x1F) << 3) << 16 |
+                                  (uint32_t)((c >> 10 & 0x1F) << 3) << 8 | 0xF8u;
+            sprite(b.sprite, cx + std::floor(bx) * k, cy + std::floor(by) * k, k * b.spriteScale / 4096.f, 0.f, 1.f,
+                   tint);
+            continue;
+        }
         float bx, by;
         const float markerRadius = b.label[0] ? (b.label[1] ? 11.f : 8.f) : 5.f;
         projection.worldOffset(b.pos, pos, bx, by, diameter * .49f - markerRadius - 1.5f);

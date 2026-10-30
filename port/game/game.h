@@ -69,6 +69,8 @@ public:
     PropLibrary props;                       // street furniture (cDynamicPropManager)
     Garages garages;                         // cGarageManager: garages.dat and the doors (kind-1 props)
     Markers markers;                         // the mission markers in the world (iPosition's shapes)
+    void stepBlips();                        // the radar blips' pop-in, once a frame
+    int16_t blipStagger_ = 0;                // cAreaManager +8: how long the next new blip waits to pop in
     // The props around the camera: draw = false collects their lights for the world renderer, true draws them.
     void renderProps(const WorldCamera& cam, bool draw);
     void updateCityEmitters();               // cCityEmitters: steam and fountains from the cells around the player

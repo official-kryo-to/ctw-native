@@ -43,7 +43,8 @@ public:
     void setRotation(bool enabled) { rotation_ = enabled; }
     bool rotation() const { return rotation_; }
 private:
-    void sprite(int index, float x, float y, float scale, float angle = 0.f, float alpha = 1.f) const;
+    void sprite(int index, float x, float y, float scale, float angle = 0.f, float alpha = 1.f,
+                uint32_t tint = 0xFFFFFFFFu) const;   // tint 0xRRGGBBAA (cSprite +0x74)
     // cMiniHud::UpdateWantedStars / ProcessWantedRating: six SS_AlwaysLoaded stars (124 lit, 125 on probation)
     void renderWantedStars(const Game& game, float k, int width, int height) const;
     void renderCash(const Game& game, float k) const;

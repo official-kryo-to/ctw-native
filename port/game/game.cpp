@@ -1373,6 +1373,7 @@ void Game::updateDeath() {
 }
 
 void Game::tick() {
+    stepBlips();
     snapshotPoses();
     multiplayerWorld.advanceVehicles(*this, OS_TimeAccurate());
     updateSequence();

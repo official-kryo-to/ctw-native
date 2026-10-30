@@ -424,10 +424,14 @@ impl<'a> GameBinary<'a> {
         Ok(out)
     }
 
-    /// iPosition's 11 marker colours (5-bit r, g, b): sMarker3D::Render and iPosition::ColourSpriteBlips.
+    /// iPosition's 11 marker colours (5-bit r, g, b): sMarker3D::Render and iPosition::ColourSpriteBlips; then
+    /// ColourSpriteBlips' colour for each blip palette 4..12 (64-bit entries, kept as bytes).
     pub fn markers(&self) -> Result<Vec<u8>, TableError> {
-        let mut out = b"CTWMARK1".to_vec();
+        let mut out = b"CTWMARK2".to_vec();
         out.extend(self.read(0x488165, 33)?);
+        for chunk in self.read(0x488200, 72)?.chunks(8) {
+            out.push(chunk[0]);
+        }
         Ok(out)
     }
 

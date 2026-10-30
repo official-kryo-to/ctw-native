@@ -12,10 +12,13 @@
 
 bool Markers::load(const std::string& dataDir) {
     std::vector<uint8_t> t;
-    coloursOk_ = Data_ReadAll(dataDir + "/marker_tables.bin", t) && t.size() == 8 + 33 && !std::memcmp(t.data(), "CTWMARK1", 8);
-    if (coloursOk_)
+    coloursOk_ = Data_ReadAll(dataDir + "/marker_tables.bin", t) && t.size() == 8 + 33 + 9 &&
+                 !std::memcmp(t.data(), "CTWMARK2", 8);
+    if (coloursOk_) {
         for (int i = 0; i < 11; ++i)
             colours_[i] = (uint16_t)(t[8 + i * 3] | t[9 + i * 3] << 5 | t[10 + i * 3] << 10);
+        std::memcpy(palettes_, &t[8 + 33], 9);
+    }
     std::vector<uint8_t> dir, d;   // cAssetManager::LoadAssets: gGameDir[13] into +0x248, its two textures from +0x24A
     uint16_t gd[28];
     if (Assets_Pak().read(0, dir) && dir.size() >= sizeof gd) {
@@ -23,6 +26,10 @@ bool Markers::load(const std::string& dataDir) {
         if (Assets_Pak().read(gd[13], d) && d.size() >= 6) texture_ = d[4] | d[5] << 8;
     }
     return coloursOk_ && texture_ >= 0;
+}
+
+uint16_t Markers::paletteColour(int palette) const {
+    return colour(palette >= 4 && palette <= 12 && coloursOk_ ? palettes_[palette - 4] : 2);
 }
 
 uint16_t Markers::colour(int i) const {
