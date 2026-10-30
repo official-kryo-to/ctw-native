@@ -40,6 +40,7 @@
 #include "hotwiring.h"
 #include "doors.h"
 #include "garages.h"
+#include "markers.h"
 #include "minigamecam.h"
 #include "multiplayerworld.h"
 #include "mission.h"
@@ -67,6 +68,7 @@ public:
     Collision collision;
     PropLibrary props;                       // street furniture (cDynamicPropManager)
     Garages garages;                         // cGarageManager: garages.dat and the doors (kind-1 props)
+    Markers markers;                         // the mission markers in the world (iPosition's shapes)
     // The props around the camera: draw = false collects their lights for the world renderer, true draws them.
     void renderProps(const WorldCamera& cam, bool draw);
     void updateCityEmitters();               // cCityEmitters: steam and fountains from the cells around the player
@@ -267,7 +269,7 @@ public:
     std::vector<RadarBlip> blips;
     static constexpr int kPluginBlips = 0x40000000;   // ids from here on are the plugins' (set_radar_blip)
     void showObjective(const std::u16string& text, int frames = 0xD2);   // HUDImpl::DisplayObjective(.., 210)
-    void addBlip(const int32_t pos[3], uint32_t rgba, int id);
+    void addBlip(const int32_t pos[3], uint32_t rgba, int id, int marker = -1);   // marker: eMarkerRepresentation
     void removeBlip(int id);
     std::u16string mainText(int id) const;   // e_main.gxt
     // WorldImpl::CreateDynamicProp for scripts: a prop model (ePropModel = the prop definition) placed by the

@@ -161,9 +161,10 @@ void Game::showObjective(const std::u16string& text, int frames) {
     objective.frames = text.empty() ? 0 : frames;
 }
 
-void Game::addBlip(const int32_t pos[3], uint32_t rgba, int id) {
+void Game::addBlip(const int32_t pos[3], uint32_t rgba, int id, int marker) {
     removeBlip(id);
     blips.push_back({{pos[0], pos[1], pos[2]}, rgba, id});
+    blips.back().marker = (int8_t)marker;
 }
 
 void Game::removeBlip(int id) {

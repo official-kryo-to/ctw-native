@@ -58,12 +58,15 @@ private:
 };
 
 // HUDImpl::AddBlip for the mission: a radar marker (the original's eMarkerRepresentation sprites are drawn as a dot
-// in the blip's colour, clamped to the radar's edge when out of range)
+// in the blip's colour, clamped to the radar's edge when out of range) and, for some representations, a marker in
+// the world (markers.h)
 struct RadarBlip {
     int32_t pos[3];
     uint32_t colour;   // 0xRRGGBBAA
     int id;
     char label[3]{};   // optional short plugin marker, e.g. A or AA; empty keeps the normal dot
+    int8_t marker = -1;          // eMarkerRepresentation: 1 sMarker3D; -1 (a plugin's) or 4 only on the radar
+    uint8_t markerColour = 2;    // Location::SetColour (HUDImpl::AddBlip sets 2)
 };
 
 // gp_MissionText objectives (HUDImpl::DisplayObjective): a line at the bottom of the screen for a while

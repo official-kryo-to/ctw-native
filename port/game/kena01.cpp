@@ -634,7 +634,7 @@ private:
     // the water and in the circle (LeftWater / OutOfWaterInHalo), or in a vehicle: PlayLeftWaterSequence.
     void getToShore() {
         const int32_t shore[3] = {fx(-307.74f), fx(-40.05f), fx(-6.5f)};
-        g_->addBlip(shore, 0xFFE000FF, 4);
+        g_->addBlip(shore, 0xFFE000FF, 4, 1);
         if (g_->player.inWater) g_->showObjective(text(0x53A));
         when([this, shore] {
             if (g_->playerCar >= 0) return true;
@@ -844,7 +844,7 @@ private:
         g_->cutscene = g_->scriptCutscene = false;
         g_->seqCamera.active = false;
         const int32_t home[3] = {fx(364.08f), fx(25.02f), 0};
-        g_->addBlip(home, 0xFFE000FF, 3);
+        g_->addBlip(home, 0xFFE000FF, 3, 1);
         g_->showObjective(text(0x53F));   // "Go to your apartment."
         when([this, home] { return near(home, 5.f); }, [this] { parkAtSafehouseComplete(); });
     }

@@ -121,6 +121,7 @@ bool Game::init(const std::string& data, const std::string& mods) {
         fprintf(stderr, "shard_tables.bin missing or invalid: death fades to black (run scripts/setup_game.py)\n");
     if (!wanted.init(dataDir))
         fprintf(stderr, "wanted_tables.bin missing or invalid: no wanted level (run scripts/setup_game.py)\n");
+    if (!markers.load(dataDir)) fprintf(stderr, "marker_tables.bin missing or invalid: markers are white (run scripts/setup_game.py)\n");
     if (!garages.load(dataDir)) fprintf(stderr, "garages.dat missing: no garages\n");
     if (!weather.init(dataDir))
         fprintf(stderr, "weather_tables.bin missing or invalid: the weather does not change (run scripts/setup_game.py)\n");
@@ -1721,6 +1722,8 @@ void Game::render(int W, int H) {
         for (const auto& c : contrails) c->render(cam);
     }
     TheParticles().render(cam);
+    for (const RadarBlip& b : blips)   // the area manager's markers: sMarker3D::Render
+        if (b.marker == 1) markers.renderMarker3D(b.pos, b.markerColour, 0x3000, frame);
     traces.render();
     muzzleFlashes.render();
     fires.render(cam);

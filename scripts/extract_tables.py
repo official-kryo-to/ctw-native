@@ -239,6 +239,10 @@ class GameBinary:
         colours = self.symbol_data('TextColours', 92)[:32]
         return b'CTWREND1' + self.read(0x486b04, 36) + self.read(0x486a8c, 24) + angles + colours
 
+    def markers(self):
+        # iPosition's 11 marker colours (5-bit r, g, b): sMarker3D::Render and iPosition::ColourSpriteBlips.
+        return b'CTWMARK1' + self.read(0x488165, 33)
+
     def ped_comments(self):
         # Gender/sample ranges, timing records and initial repeat histories from this verified build.
         return (b'CTWPEDV1' + self.read(0x480370, 2 * 26 * 8) + self.read(0xe00670, 26 * 32) +
@@ -327,4 +331,5 @@ def extract_tables(binary):
             'radio_tables.bin': game.radio(), 'restart_tables.bin': game.restart(),
             'weather_tables.bin': game.weather(), 'weapon_tables.bin': game.weapons(),
             'wanted_tables.bin': game.wanted(), 'shard_tables.bin': game.shards(),
-            'driving_props.bin': game.driving(), 'ped_comments.bin': game.ped_comments()}
+            'driving_props.bin': game.driving(), 'ped_comments.bin': game.ped_comments(),
+            'marker_tables.bin': game.markers()}

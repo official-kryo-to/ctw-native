@@ -424,6 +424,13 @@ impl<'a> GameBinary<'a> {
         Ok(out)
     }
 
+    /// iPosition's 11 marker colours (5-bit r, g, b): sMarker3D::Render and iPosition::ColourSpriteBlips.
+    pub fn markers(&self) -> Result<Vec<u8>, TableError> {
+        let mut out = b"CTWMARK1".to_vec();
+        out.extend(self.read(0x488165, 33)?);
+        Ok(out)
+    }
+
     pub fn ped_comments(&self) -> Result<Vec<u8>, TableError> {
         let mut out = b"CTWPEDV1".to_vec();
         out.extend(self.read(0x480370, 2 * 26 * 8)?);
@@ -661,6 +668,7 @@ pub fn extract_tables(binary: &[u8]) -> Result<Vec<(&'static str, Vec<u8>)>, Tab
         ("shard_tables.bin", game.shards()?),
         ("driving_props.bin", game.driving()?),
         ("ped_comments.bin", game.ped_comments()?),
+        ("marker_tables.bin", game.markers()?),
     ])
 }
 
