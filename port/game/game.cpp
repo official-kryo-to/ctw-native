@@ -1863,6 +1863,9 @@ void Game::updateHotwire() {
     const int cls = c.hotwireClass;
     const uint32_t uid = c.uid;
     hotwiring.playSfx = [](int sample, int volume) { TheSound().playHud(sample, volume); };
+    hotwiring.timedOut = [this, uid] {   // (cVehicle::TryToTriggerAlarm is not ported) vtable +0x428(false): the engine off
+        for (Vehicle& v : cars) if (v.uid == uid) v.engineOn = false;
+    };
     const bool showTimer = !suppressHotwireTimer && hotwireAttempts[cls] != 0;
     const bool started = hotwiring.start(dataDir, cls, showTimer, [this, uid, cls](bool success, bool quit) {
         Vehicle* car = nullptr;

@@ -34,7 +34,6 @@ float appLeft(int W, int H) {
 bool HotWiring::start(const std::string& dataDir, int hotwireClass, bool showTimer, std::function<void(bool, bool)> done) {
     stop();
     if (hotwireClass != 1) return false;   // (medium and hard are not ported)
-    (void)showTimer;                       // (the timer bar is not ported)
     std::vector<uint8_t> directory, slots, backgrounds, defs, always;
     GameFs fs;
     if (!Assets_Pak().read(0, directory) || directory.size() < 27 * 2) return false;
@@ -80,6 +79,11 @@ bool HotWiring::start(const std::string& dataDir, int hotwireClass, bool showTim
     arrowMin_ = 0.5f; arrowMax_ = 1.0f; arrowStep_ = 0.1f; arrowFade_ = 1; arrowIn_ = true;
     ratchetStep_ = 0;
     zoomA_[0] = zoomB_[0] = 374; zoomA_[1] = zoomB_[1] = 218; zoomScale_ = 1;   // g_EasyMode_NoZoom
+    // the timer bar, when shown: 300 frames, at (700, 720) with the bar 14, 13 in (qword_47B778); +0x72C = 5
+    timer_ = showTimer && sprites_.sprites().size() >= 2;
+    timerFrames_ = 0; timerLimit_ = 0x12C;
+    timerX_ = 0x2BC; timerY_ = 0x2D0; timerOffX_ = 0xE; timerOffY_ = 0xD;
+    epilogue_ = false;
     state_ = 0;
     finished_ = false;
     touchDown_ = false;
@@ -132,6 +136,15 @@ void HotWiring::process(uint32_t frame, float timeOfDay) {
     if (!active_ || finished_) return;
     exitAlpha_ = std::min(exitAlpha_ + 0.2f, 1.f);   // (the exit button fades in: cSprite +0x70 0.2 towards +0x7C 1)
     exit_.alpha = exitAlpha_;
+    // cHotWiringApp::Process: the timer counts until the epilogue; when it runs out the alarm goes off, the engine
+    // stops, and the app finishes with code 1 (0x101), which cPlayerInVehicleHotwire::OnFinished takes as hotwired
+    if (!epilogue_ && timer_) {
+        if (++timerFrames_ >= timerLimit_) {
+            if (timedOut) timedOut();
+            finish(true, false);
+            return;
+        }
+    }
     switch (state_) {
     case 0: {
         line_.update(touchDown_, !touchDown_, touchX_, touchY_);
@@ -200,6 +213,7 @@ void HotWiring::process(uint32_t frame, float timeOfDay) {
             arrows_[0].shown = false;
             inserted_[0].shown = inserted_[1].shown = false;
             if (playSfx) playSfx(0x191, 0x7F);   // the starter motor (BeginEpilogue)
+            epilogue_ = true;                          // (+0x738)
             if (timeOfDay < 7.f || timeOfDay >= 20.f) revCounter_.shown = true;
             state_ = 5;
             break;
@@ -283,6 +297,35 @@ void HotWiring::drawSprite(const SpriteSet& set, unsigned tex, int tw, int th, c
     glDisable(GL_TEXTURE_2D);
 }
 
+// MiniGameTimerBar::Render: the frame (meta 1) at the position, w x h of the sheet from (u, v); then
+// MiniGameTimerBar_LeftToRight::RenderBar, the bar (meta 0) at position + offset, trunc(w x passed / limit) wide.
+// SendVertices: texture coordinates in 1/2048 of the sheet, by 2048 / width (integer division). The app's transition
+// offset (+0x17A) is not ported (zero after the opening transition).
+void HotWiring::drawTimer(int W, int H) const {
+    if (!timer_ || finished_) return;
+    const SpriteDef& frame = sprites_.sprites()[1];
+    const SpriteDef& bar = sprites_.sprites()[0];
+    const float left = appLeft(W, H), kx = W / (1024.f - left), ky = H / 768.f;
+    const int su = 0x800 / std::max(1, sheetW_), sv = 0x800 / std::max(1, sheetH_);
+    auto quad = [&](int x, int y, int w, int h, int u, int v) {
+        const float u0 = u * su / 2048.f, u1 = (u + w) * su / 2048.f, v0 = v * sv / 2048.f, v1 = (v + h) * sv / 2048.f;
+        glTexCoord2f(u0, v0); glVertex2f((x - left) * kx, y * ky);
+        glTexCoord2f(u1, v0); glVertex2f((x + w - left) * kx, y * ky);
+        glTexCoord2f(u1, v1); glVertex2f((x + w - left) * kx, (y + h) * ky);
+        glTexCoord2f(u0, v1); glVertex2f((x - left) * kx, (y + h) * ky);
+    };
+    const float f = (float)timerFrames_ / (float)timerLimit_;
+    const int width = std::clamp((int)(bar.w * f), -0x8000, 0x7FFF);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, sheet_);
+    glColor4f(1, 1, 1, 1);   // (xmmword_46AB40)
+    glBegin(GL_QUADS);
+    quad(timerX_, timerY_, frame.w, frame.h, frame.x, frame.y);
+    quad(timerX_ + timerOffX_, timerY_ + timerOffY_, (int16_t)width, bar.h, bar.x, bar.y);
+    glEnd();
+    glDisable(GL_TEXTURE_2D);
+}
+
 void HotWiring::render(int W, int H) const {
     if (!active_ || W <= 0 || H <= 0) return;
     Hud_Begin(W, H);
@@ -293,6 +336,7 @@ void HotWiring::render(int W, int H) const {
     for (int layer = 6; layer >= 0; --layer) {
         if (layer == 6) drawBackground(dashboard_, 0x400 - 0x19F, 0x300 - 0x172, W, H);
         if (layer == 1) drawBackground(frameLine_, 0x400 - 0x1A2, 0x300 - 0x17A, W, H);
+        if (layer == 5) drawTimer(W, H);   // RenderPostBGPreSprites(+0x72C)
         for (const Sprite* s : all)
             if (s->priority == layer) drawSprite(sprites_, sheet_, sheetW_, sheetH_, *s, W, H);
         if (layer == 0) drawSprite(always_, alwaysSheet_, alwaysW_, alwaysH_, exit_, W, H);

@@ -115,13 +115,19 @@ void DevMenu::build(Game& g) {
         action("Start hotwiring (easy)", [this, &g] {
             open_ = false;
             g.hotwiring.playSfx = [](int sample, int volume) { TheSound().playHud(sample, volume); };
-            const bool started = g.hotwiring.start(g.dataDir, 1, false, [this, &g](bool success, bool quit) {
+            g.hotwiring.timedOut = nullptr;
+            const bool started = g.hotwiring.start(g.dataDir, 1, timerRun_, [this, &g](bool success, bool quit) {
                 status_ = success ? "Hotwired." : quit ? "Hotwiring given up." : "Hotwiring failed.";
                 g.restoreCam();   // (no car to get out of here)
             });
             if (started) g.startMinigameCam(0xA000);
             status_ = started ? "Hotwiring started." : "Hotwiring could not load.";
         });
+        Row timer;   // cHotWiringApp: the timer bar, shown from the second attempt at a class
+        timer.label = "Hotwiring: timer bar";
+        timer.value = [this] { return std::string(timerRun_ ? "on" : "off"); };
+        timer.change = [this](int) { timerRun_ = !timerRun_; };
+        rows_.push_back(std::move(timer));
         action("Stop the minigame", [this, &g] {
             g.sinkingCar.stop();
             g.hotwiring.stop();

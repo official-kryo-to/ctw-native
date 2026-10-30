@@ -37,6 +37,7 @@ private:
     int page_ = 0, selected_ = 0, scroll_ = 0;
     bool open_ = false;
     std::string sequence_ = "CSS_KEN_A01_SCENE_02.seq";   // the cutscene field
+    bool timerRun_ = false;                               // hotwiring with the timer bar
     int carStyle_ = 0;                                    // eSinkingVehicleStyle for the minigame
     std::string status_;                                  // the last action's result
     int lastMouse_[2] = {-1, -1};

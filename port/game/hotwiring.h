@@ -46,6 +46,8 @@ public:
     void quit() { if (active_ && !finished_) finish(false, true); }   // OnExitButtonPress
     int state() const { return state_; }
     std::function<void(int sample, int volume)> playSfx;
+    // the timer ran out (cHotWiringApp::Process: TryToTriggerAlarm, the engine off); it then finishes as hotwired
+    std::function<void()> timedOut;
 
 private:
     struct Sprite { int index = -1; float x = 0, y = 0; bool shown = true; float alpha = 1; uint16_t rotation = 0; int priority = 0; };
@@ -55,6 +57,7 @@ private:
     void winding(int sprite);                 // states 2..4: the turn and its arrow
     void ratchet();
     void finish(bool success, bool quit);
+    void drawTimer(int W, int H) const;       // MiniGameTimerBar::Render (RenderPostBGPreSprites, layer 5)
 
     bool active_ = false;
     std::function<void(bool, bool)> done_;
@@ -89,4 +92,9 @@ private:
     float zoomA_[2] = {374, 218}, zoomB_[2] = {374, 218}, zoomScale_ = 1;
     float zoomTo_[5] = {0, 0, 0, 0, 0}, zoomT_ = 0, zoomStep_ = 0;
     bool finished_ = false;
+    // MiniGameTimerBar_LeftToRight (+0x730): frames passed (+0x20) of the limit (+0x22), the frame (meta 1) at
+    // (+0x18, +0x1A) and the bar (meta 0) at the offset (+0x1C, +0x1E) from it; it stops at the epilogue (+0x738)
+    bool timer_ = false, epilogue_ = false;
+    uint16_t timerFrames_ = 0, timerLimit_ = 0;
+    int16_t timerX_ = 0, timerY_ = 0, timerOffX_ = 0, timerOffY_ = 0;
 };
