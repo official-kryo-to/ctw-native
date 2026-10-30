@@ -116,11 +116,12 @@ private:
             g_->fountains[Game::kScriptFountains].push_back(std::make_unique<Fountain>(at, jet));
         }
         // cPreIntro::SequenceEnd -> FadeBeforeEnd: to black over 15 frames unless it is already (IsScreenFaded), End
-        play("CSS_KEN_A01_NewIntro1.seq", [this] {
+        Sequence* intro = play("CSS_KEN_A01_NewIntro1.seq", [this] {
             auto end = [this] { g_->unloadSequence(); endPlaneIntro(); doLandingIntro(); };   // (End: the next is loaded)
             if (brightness() != 0) fadeToBlack(0xF, end);
             else end();
         });
+        if (intro) intro->restoreComic = true;   // cPreIntro::Begin: SetRestorePDA(.., 0x3A)
         g_->screenFade.in(30);
     }
 
@@ -385,6 +386,7 @@ private:
         makeActor(kAmbusherB2, 3, kCarB, 1, 90);
         Sequence* s = play("CSS_KEN_A01_NewIntro2.seq", [this] { endScene(); startIntro(); });
         if (!s) return;
+        s->restoreComic = true;   // cKenA01Intro::Begin: SetRestorePDA(.., 0x3A)
         s->setCallback(0, [this] {   // PlayerMiddleOfStairs
             placePlayer(1762.83f, -66.49f, 1.4f);
             g_->player.setHeading((int16_t)deg(0x5A));
@@ -571,6 +573,7 @@ private:
     void splashSequence() {   // IntroFinished: PlaySequence
         Sequence* s = g_->startSequence("CSS_Ken_A01_Splash.seq");
         if (!s) { wait(1, [this] { carInWaterEnd(); }); return; }
+        s->restoreComic = true;   // cCarInWater::IntroSetup: SetRestorePDA(.., 0x3A)
         s->setCallback(Sequence::kEnded, [this] { wait(1, [this] { carInWaterEnd(); }); });   // SequenceEnd -> End
         s->setCallback(Sequence::kSkipped, [this] {   // Skipped: FadeToBlack(0), then 5 frames
             fadeToBlack(0, [this] { wait(5, [this] { displaySinkingCar(); }); });

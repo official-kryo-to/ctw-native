@@ -108,6 +108,9 @@ public:
     // (the touch held down; Escape / Start skips at once). False once the sequence has stopped.
     bool update(bool tapped, bool held, bool startPressed, bool screenFading);
     void stop(bool fromSkip = false);   // cSequence::Stop
+    // cScriptSequenceBase::SetRestorePDA(.., 0x3A or 0x59): the 2D sequence app is not swapped back for the game's
+    // own (app 0x10, the default) when the sequence stops, so its black page stays until the next one is loaded
+    bool restoreComic = false;
     bool playing() const { return playing_; }
     int frame() const { return frame_; }
     int lastFrame() const { return lastFrame_; }

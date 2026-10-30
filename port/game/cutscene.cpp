@@ -44,10 +44,11 @@ Sequence* Game::startSequence(const std::string& name, bool loop) {
 
 void Game::retireSequence() {   // cSequence::Stop's end: EndCutscene, the player's controls back
     if (!sequence) return;
+    const bool keepComic = sequence->restoreComic;
     retiredSequences_.push_back(std::move(sequence));
     cutscene = scriptCutscene;
     if (!scriptCutscene) seqCamera.active = false;
-    comic.stop();
+    comic.stop(keepComic);
 }
 
 void Game::unloadSequence() { comic.end(); }   // cScriptSequenceBase::UnLoadSequence (or its process ending)

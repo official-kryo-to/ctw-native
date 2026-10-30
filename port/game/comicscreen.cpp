@@ -70,6 +70,7 @@ void ComicScreen::begin(const Sequence& seq, const TimeCycle& tc) {
     textShown_ = false;
     printed_ = printDelay_ = 0;
     active_ = true;
+    loaded_ = true;
     hidesWorld_ = false;
     // the subtitles: InitMovieText(the header's table) unless it is "cut"
     std::string name = seq.textTable();
@@ -83,9 +84,16 @@ void ComicScreen::begin(const Sequence& seq, const TimeCycle& tc) {
     }
 }
 
-void ComicScreen::stop() {}   // (the app is not processed any more, but it still renders as it was)
+void ComicScreen::stop(bool keepApp) {
+    active_ = false;   // (not processed any more)
+    bgVisible_ = spriteVisible_ = 0;   // SoftReset: the images released, the text sprite removed
+    textShown_ = false;
+    text_.clear();
+    if (!keepApp) end();   // cPda::LoadApp(the sequence's restore app)
+}
 
 void ComicScreen::end() {
+    loaded_ = false;
     active_ = false;
     hidesWorld_ = false;
     textShown_ = false;
@@ -281,7 +289,7 @@ void ComicScreen::drawSprite(const Quad& q) const {
 }
 
 void ComicScreen::render(int W, int H) const {
-    if (!active_ || W <= 0 || H <= 0) return;
+    if (!loaded_ || W <= 0 || H <= 0) return;
     const Virtual v(W, H);
     if (fade_ != 0.f) {
         glViewport(0, 0, W, H);

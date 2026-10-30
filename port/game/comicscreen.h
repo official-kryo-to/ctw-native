@@ -24,9 +24,10 @@ public:
     void begin(const Sequence& seq, const TimeCycle& tc);   // cTwoDSequenceApp::Init / SoftReset for a sequence
     void process(Sequence& seq);                           // cTwoDSequenceApp::Process, once per 30 Hz frame
     void render(int width, int height) const;              // cTwoDSequenceApp::Render and the subtitle sprite
-    // cSequence::Stop: the app is no longer processed, but it stays loaded and goes on rendering what it showed (its
-    // black backdrop, and the city hidden if it was); end() is cSequence::UnLoad (cTwoDSequenceApp::DeInit)
-    void stop();
+    // cSequence::Stop: cTwoDSequenceApp::SoftReset lets the panels and the subtitle go; then the game's own app comes
+    // back (end) unless the script asked to keep this one (SetRestorePDA), which then goes on drawing its black page
+    // (and keeps the city hidden if it was) until the next sequence is loaded. end() is cTwoDSequenceApp::DeInit.
+    void stop(bool keepApp);
     void end();
     bool hidesWorld() const { return hidesWorld_; }        // cRenderWorld::DisableRendering while a panel is up
     bool active() const { return active_; }
@@ -52,6 +53,7 @@ private:
     uint32_t top_ = 0xFFFFFFFF, bottom_ = 0xFFFFFFFF;       // +0x1F8, +0x1FC
     float fade_ = 0.f;                                      // +0x208
     bool active_ = false, hidesWorld_ = false;
+    bool loaded_ = false;                                   // the app is running (Gui::cPda::RunningAppType 0x3A)
     // the subtitle (a printing text sprite, Gfx2d::cPrintingText)
     std::u16string text_;
     bool textShown_ = false;
