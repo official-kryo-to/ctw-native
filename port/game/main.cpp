@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
     int shotEvery = 0;
     const char* capture = nullptr;   // --shot-every N: also save <shot>_<frame>.bmp every N frames (watching motion)
     const char* keys = nullptr;
-    const char* ui = nullptr;   // shot mode: "frame:key=N;frame:click=x,y;frame:mouse=x,y;frame:wheel=x,y,n" (UI tests)
+    const char* ui = nullptr;   // shot mode: "frame:key=N;frame:click=x,y;frame:mouse=x,y;frame:wheel=x,y,n;frame:goto=x,y;frame:tp=x,y" (UI tests)
     bool trace = false;
     const char* movieShot = nullptr;        // --movie-shot BMP: the intro movie --frames frames in (testing)
     const char* loadingShot = nullptr;      // --loading-shot BMP: the loading screen after --frames frames (testing)
@@ -301,6 +301,24 @@ int main(int argc, char** argv) {
                     char what[8] = "";
                     if (sscanf(p, "%d:%7[a-z]=%d,%d,%d", &at, what, &x, &y, &n) >= 3 && at == f) {
                         if (!strcmp(what, "key")) game.key(x);
+                        else if (!strcmp(what, "goto")) {   // walk or swim (running) to whole units x, y
+                            game.scriptWalk.on = true;
+                            game.scriptWalk.target[0] = x * 4096; game.scriptWalk.target[1] = y * 4096;
+                            game.scriptWalk.walking = false;
+                        } else if (!strcmp(what, "tp")) {   // the player, or his car, to whole units x, y
+                            const int32_t at[3] = {x * 4096, y * 4096, 0};
+                            if (game.playerCar >= 0) {
+                                Vehicle& c = game.cars[game.playerCar];
+                                int32_t to[3] = {at[0], at[1], c.pos[2]};
+                                const float q[4] = {0, 0, 0, 1};
+                                const int32_t still[3] = {0, 0, 0};
+                                c.setPose(to, q, still);
+                            } else {
+                                std::copy(at, at + 3, game.player.pos);
+                                game.player.placeOnGround(&game.collision);
+                            }
+                            game.world.loadAllNow((float)x, (float)y);
+                        }
                         else if (!strcmp(what, "down") || !strcmp(what, "up")) {   // a held left button (drags)
                             Host_TestMouse(x, y, !strcmp(what, "down") ? 1 : 0, 0);
                             Host_TestMouseHeld(!strcmp(what, "down") ? 1 : 0);

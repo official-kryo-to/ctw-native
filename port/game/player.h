@@ -143,6 +143,7 @@ private:
     void turnTo(int16_t target, int16_t maxStep);
     void integrate(Collision* col);
     void climbOut(Collision* col);
+    void climbAhead();
     static bool sphereBlocked(Collision* col, const int32_t c[3], int32_t r);
     void constrainByCollision(Collision* col, int32_t moveLen, bool& walkable, bool& hit);
     void animate(const PedSprites* sprites);
@@ -155,6 +156,8 @@ private:
     bool onGround_ = true;                                // +0x338 bit 9
     uint8_t airFrames_ = 0, stuckFrames_ = 0;             // +0x36E, +0x36D
     int32_t clearance_ = 0, lastPos_[3] = {0, 0, 0};     // +0x320, +0x2F8
+    int32_t ahead_[3] = {0, 0, 0};                         // (Integrate: the climb-out point ahead, var_B8)
+    bool aheadValid_ = false;
     int animUpper_ = -1, animLegs_ = -1, frameUpper_ = 0, frameLegs_ = 0;
     int previousUpperFrame_ = -1; // cPedSprite's previous integer frame, used by melee sound cues
     uint8_t fightIdleFrames_ = 0; // cPlayer +4497

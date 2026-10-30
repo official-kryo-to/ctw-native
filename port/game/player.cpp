@@ -149,15 +149,22 @@ void Player::act(const Input& in, const PedSprites* sprites) {
 
 }
 
-// cPed::Integrate in the water: climb out at a point ahead (the next position plus 0.7 radius along the motion),
-// else where it is, onto flat solid ground within 1.5 units of that height with room for a 0.7-radius sphere
+// cPed::Integrate in the water: climb out at a point ahead (the next position plus 0.7 radius along the motion, taken
+// before the collision stops the move), else where it is, onto flat solid ground within 1.5 units of that height with room for a 0.7-radius sphere
+void Player::climbAhead() {   // (before ConstrainByCollision, from the velocity the ped tries to move with)
+    const int32_t r7 = (int32_t)(((int64_t)kRadius * 0xB33) >> 12);
+    int32_t dir[3] = {vel[0], vel[1], vel[2]};
+    for (int i = 0; i < 3; ++i) ahead_[i] = pos[i] + (int32_t)(((int64_t)vel[i] * 0x11) >> 9);
+    if ((int64_t)dir[0] * dir[0] + (int64_t)dir[1] * dir[1] + (int64_t)dir[2] * dir[2] >= 0x641) normalise(dir);
+    for (int i = 0; i < 3; ++i) ahead_[i] += mulq(dir[i], r7);
+}
+
 void Player::climbOut(Collision* col) {
     const int32_t r7 = (int32_t)(((int64_t)kRadius * 0xB33) >> 12);
-    int32_t ahead[3], dir[3] = {vel[0], vel[1], vel[2]};
-    for (int i = 0; i < 3; ++i) ahead[i] = pos[i] + (int32_t)(((int64_t)vel[i] * 0x11) >> 9);
-    if ((int64_t)dir[0] * dir[0] + (int64_t)dir[1] * dir[1] + (int64_t)dir[2] * dir[2] >= 0x641) normalise(dir);
-    for (int i = 0; i < 3; ++i) ahead[i] += mulq(dir[i], r7);
-    for (int attempt = 0; attempt < 2; ++attempt) {
+    const int32_t* ahead = ahead_;
+    // (the original's point is zero on the first frame in the water, when it was not swimming yet; a ped put
+    // straight into the water there would be tested at the world's origin, so the port starts with its position)
+    for (int attempt = aheadValid_ ? 0 : 1; attempt < 2; ++attempt) {
         const int32_t p[3] = {attempt ? pos[0] : ahead[0], attempt ? pos[1] : ahead[1], attempt ? pos[2] : ahead[2]};
         const Collision::Ground g = col->ground(p[0] / 4096.f, p[1] / 4096.f, (p[2] + 0x1800) / 4096.f);
         const int32_t gz = (int32_t)lroundf(g.z * 4096.f);
@@ -453,6 +460,8 @@ void Player::integrate(Collision* col) {
         if (!onGround_ && !inWater) vel[2] -= kGravity;   // (no gravity in the water)
     } else {
         bool walkable = false, hit = false;
+        aheadValid_ = inWater;
+        if (inWater) climbAhead();
         constrainByCollision(col, moveLen, walkable, hit);
         // cPed::Integrate's vertical/full path applies gravity after the
         // constrained move. Being within 0.6 units of ground does not cancel
