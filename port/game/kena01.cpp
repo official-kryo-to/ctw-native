@@ -4,8 +4,9 @@
 // kena01::cKEN_A01, the first mission ("Arrival in Liberty"): the prologue on the plane, the landing, the ambush
 // at the port and the intro movie, then Huang on the jetty, a car, Uncle Kenny's restaurant and the apartment.
 //
-// Not ported yet, and passed over here: the plane's sound, hotwiring (cHotWiringApp), the GPS route and the help
-// texts (cInWaterHelpText, cFindCarHelpText: HUDText's help queue is not ported). At the port and the pier the people
+// Not ported yet, and passed over here: the plane's sound, the GPS route, the help texts (cInWaterHelpText,
+// cFindCarHelpText, the handbrake help: HUDText's help queue is not ported), the markers' sprites and chevrons, the
+// safehouse's building swap and purchase, and Vehicle::SetStop on the player's car. At the port and the pier the people
 // are puppets the scene moves (getting in and out of cars without the door animations, Ped::SetDive as a step out
 // and a walk) and only the bodyguards' deaths are decided, as the story has them.
 #include "mission.h"
@@ -848,16 +849,68 @@ private:
         when([this, home] { return near(home, 5.f); }, [this] { parkAtSafehouseComplete(); });
     }
 
-    // ParkAtSafehouseComplete -> cCutscene_AtSafehouse_Sequence: the apartment's tour, then Passed
+    // ParkAtSafehouseComplete: the area, blip and route go, StartCutscene(false); to black over 15 frames unless it
+    // is black already, and 60 frames on StartSafehouseCutscene (Vehicle::SetStop on the player's car is not ported)
     void parkAtSafehouseComplete() {
         g_->removeBlip(3);
         g_->objective.frames = 0;
         g_->cutscene = g_->scriptCutscene = true;
-        fadeToBlack(15, [this] {   // then cCutscene_AtSafehouse_Sequence: PlayTheSequence's FadeIn(0)
-            fadeIn(0);
-            play("CSS_Ken_A01_Safehouse.seq", [this] { passed(); }, false);
-        });
+        if (brightness() != 0) fadeToBlack(15);
+        wait(0x3C, [this] { startSafehouseCutscene(); });
     }
+
+    // StartSafehouseCutscene: cCutscene_AtSafehouse_Sequence::Start (CutsceneAtSafehouseComplete when it is done),
+    // and SafehouseDoor 32 frames on
+    void startSafehouseCutscene() {
+        safehouseSetup();
+        wait(0x20, [this] { safehouseDoor(); });
+    }
+
+    static constexpr int32_t kGarage[3] = {0x179A14, 0x16DC2, 0};   // qword_479CC0: (377.63, 22.86)
+    int garage_ = -1;                // cCutscene_AtSafehouse_Sequence +0x578 (Garage)
+    bool garageOpened_ = false;      // +0x584
+
+    // Start (the building swap of group 13 is not ported) -> Setup: StartCutscene, the garage nearest the apartment,
+    // the player on foot put at (360.00, 25.07), the wanted level cleared, the tour's callbacks; PlayTheSequence
+    // fades in at once if the screen is black
+    void safehouseSetup() {
+        garage_ = g_->garages.closest(kGarage);
+        garageOpened_ = false;
+        if (g_->playerCar < 0) placePlayer(360.f, 25.07f, 0.f);   // qword_47D3A0
+        g_->wanted.scriptSetLevel(0, false, true, true);
+        Sequence* s = play("CSS_Ken_A01_Safehouse.seq", [this] { safehouseTidyUp(); }, false);
+        if (brightness() == 0) fadeIn(0);
+        if (!s) return;
+        auto click = [] { TheSound().playResident(0x22E, 0x7F); };   // SoundImpl::PlaySimpleSFX(0x22E, 0x7F, 2, ..)
+        s->setCallback(0, click);   // Callback_TextLoad
+        s->setCallback(1, click);   // Callback_TextSave
+        s->setCallback(2, [this, click] {   // Callback_TextRadar: the garage's blip (sprite 0x74, drawn as a dot)
+            click();
+            g_->addBlip(kGarage, 0xFFE000FF, 4);
+        });
+        s->setCallback(3, click);   // Callback_TextSafehouse
+        s->setCallback(4, [this, click] {   // Callback_TextGarage: it is bought, and opens
+            click();
+            g_->garages.open(garage_);
+            garageOpened_ = true;
+        });
+        s->setCallback(5, click);   // Callback_TextGarage2
+        s->setCallback(6, [this] { g_->objective.frames = 0; });   // Callback_TidyUp: the queue and print texts
+    }
+
+    // TidyUpEndOfSafehouse (the sequence's end or skip): the garage shuts again if it was opened, the blip goes,
+    // EndCutscene, then CutsceneAtSafehouseComplete: 60 frames on, Passed
+    void safehouseTidyUp() {
+        if (garageOpened_) g_->garages.close(garage_);
+        g_->removeBlip(4);
+        g_->cutscene = g_->scriptCutscene = false;
+        g_->seqCamera.active = false;
+        wait(0x3C, [this] { passed(); });
+    }
+
+    // SafehouseDoor: the safehouses are enabled again and the garage gets its chevron (not ported: CreateChevron at
+    // the garage, heading -270, radius 3)
+    void safehouseDoor() {}
 
     void passed() {
         g_->cutscene = g_->scriptCutscene = false;

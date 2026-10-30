@@ -121,6 +121,7 @@ bool Game::init(const std::string& data, const std::string& mods) {
         fprintf(stderr, "shard_tables.bin missing or invalid: death fades to black (run scripts/setup_game.py)\n");
     if (!wanted.init(dataDir))
         fprintf(stderr, "wanted_tables.bin missing or invalid: no wanted level (run scripts/setup_game.py)\n");
+    if (!garages.load(dataDir)) fprintf(stderr, "garages.dat missing: no garages\n");
     if (!weather.init(dataDir))
         fprintf(stderr, "weather_tables.bin missing or invalid: the weather does not change (run scripts/setup_game.py)\n");
     weather.reset(*this, 0);
@@ -221,7 +222,12 @@ void Game::renderProps(const WorldCamera& cam, bool draw) {   // cDynamicPropMan
                 if (ddx * ddx + ddy * ddy > range * range || p.state != 0) continue;   // (knocked: PropDynamics)
                 if (!draw) { props.lights(p, world.propLights); continue; }
                 const int32_t at[3] = {p.x, p.y, p.z};
-                if (canSee(at, props.radius(p.prop))) props.draw(p);
+                const int garage = garages.doorOf(p);
+                if (garage >= 0) {   // a garage's door is where cGarage::Process puts it
+                    Collision::Prop door = p;
+                    door.z = garages.doorZ(garage);
+                    if (canSee(at, props.radius(p.prop))) props.draw(door);
+                } else if (canSee(at, props.radius(p.prop))) props.draw(p);
             }
         }
     if (draw) {
@@ -231,6 +237,19 @@ void Game::renderProps(const WorldCamera& cam, bool draw) {   // cDynamicPropMan
         glDisable(GL_ALPHA_TEST);
         glDepthMask(GL_TRUE);
     }
+}
+
+bool Game::garageDoor(int garage, Collision::Prop& out) {   // the door cGarageManager gave this garage
+    int32_t at[3];
+    garages.position(garage, at);
+    int cx, cy;
+    Collision::cellOfPos(at[0], at[1], cx, cy);
+    for (int dy = -1; dy <= 1; ++dy)
+        for (int dx = -1; dx <= 1; ++dx)
+            if (const std::vector<Collision::Prop>* list = collision.props(cx + dx, cy + dy))
+                for (const Collision::Prop& p : *list)
+                    if (garages.doorOf(p) == garage) { out = p; return true; }
+    return false;
 }
 
 void Game::setRenderDistance(float units) {
@@ -287,6 +306,15 @@ void Game::updateWorldObjects() {   // once per game frame, after the vehicles m
         for (auto& f : kv.second) f->process(*this);
     propDynamics.update(*this);
     for (auto& d : doors) d->process();   // cDynDoorProp::Process
+    for (int i = 0; i < garages.count(); ++i) {   // cGarage::Process: a moving door sounds (event 0x58) where it is
+        const Garages::State st = garages.state(i);
+        Collision::Prop door;
+        if ((st == Garages::kOpening || st == Garages::kClosing) && garageDoor(i, door)) {
+            const int32_t at[3] = {door.x, door.y, garages.doorZ(i)};
+            TheSound().objectEvent(0x47000000u | (uint32_t)i, at, 0x58, 0x7F, 0x5DC);
+        }
+    }
+    garages.process();
 }
 
 void Game::addBlood(const int32_t pos[3], int count) {

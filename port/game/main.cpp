@@ -73,7 +73,8 @@ int main(int argc, char** argv) {
     const char* shot = nullptr;
     int frames = 60;
     int shotEvery = 0;
-    const char* capture = nullptr;   // --shot-every N: also save <shot>_<frame>.bmp every N frames (watching motion)
+    const char* capture = nullptr;
+    int captureFrom = 0;   // --shot-every N: also save <shot>_<frame>.bmp every N frames (watching motion)
     const char* keys = nullptr;
     const char* ui = nullptr;   // shot mode: "frame:key=N;frame:click=x,y;frame:mouse=x,y;frame:wheel=x,y,n;frame:goto=x,y;frame:tp=x,y" (UI tests)
     bool trace = false;
@@ -108,7 +109,7 @@ int main(int argc, char** argv) {
                  strcmp(option, "--frames") && strcmp(option, "--keys") && strcmp(option, "--export-textures") && strcmp(option, "--loading-shot") && strcmp(option, "--movie-shot") && strcmp(option, "--ui") && strcmp(option, "--state") &&
                  strcmp(option, "--enter") && strcmp(option, "--handbrake") && strcmp(option, "--burnout") && strcmp(option, "--hour") &&
                  strcmp(option, "--weather") && strcmp(option, "--weapon") && strcmp(option, "--fire") && strcmp(option, "--throw") && strcmp(option, "--wanted") && strcmp(option, "--die") && strcmp(option, "--money") && strcmp(option, "--seq") && strcmp(option, "--mission") && strcmp(option, "--teleport") &&
-                 strcmp(option, "--shot-every") && strcmp(option, "--capture")) {
+                 strcmp(option, "--shot-every") && strcmp(option, "--capture") && strcmp(option, "--capture-from")) {
             fprintf(stderr, "Unknown option: %s\n", option);
             return 4;
         }
@@ -122,6 +123,7 @@ int main(int argc, char** argv) {
         if (!strcmp(argv[i], "--frames")) frames = atoi(argv[i + 1]);
         if (!strcmp(argv[i], "--shot-every")) shotEvery = atoi(argv[i + 1]);
         if (!strcmp(argv[i], "--capture")) capture = argv[i + 1];   // shot mode: every frame into DIR/NNNNNN.jpg
+        if (!strcmp(argv[i], "--capture-from")) captureFrom = atoi(argv[i + 1]);   // ... from this frame on
         if (!strcmp(argv[i], "--ui")) ui = argv[i + 1];
         if (!strcmp(argv[i], "--export-textures")) exportTextures = argv[i + 1];
         if (!strcmp(argv[i], "--loading-shot")) loadingShot = argv[i + 1];
@@ -273,7 +275,7 @@ int main(int argc, char** argv) {
                 game.world.loadAllNow(teleportX, teleportY);
             }
             game.tick();
-            if (capture) {
+            if (capture && f >= captureFrom) {
                 game.render((int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight());
                 char name[32];
                 std::snprintf(name, sizeof name, "/%06d.jpg", f);

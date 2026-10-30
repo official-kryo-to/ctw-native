@@ -39,6 +39,7 @@
 #include "devmenu.h"
 #include "hotwiring.h"
 #include "doors.h"
+#include "garages.h"
 #include "minigamecam.h"
 #include "multiplayerworld.h"
 #include "mission.h"
@@ -65,6 +66,7 @@ public:
     WorldRenderer world;
     Collision collision;
     PropLibrary props;                       // street furniture (cDynamicPropManager)
+    Garages garages;                         // cGarageManager: garages.dat and the doors (kind-1 props)
     // The props around the camera: draw = false collects their lights for the world renderer, true draws them.
     void renderProps(const WorldCamera& cam, bool draw);
     void updateCityEmitters();               // cCityEmitters: steam and fountains from the cells around the player
@@ -280,6 +282,7 @@ public:
     Vehicle::Controls carControls(const Vehicle& car) const;   // a script's, else the traffic AI's
     static constexpr int kScriptFountains = -1;         // fountains' key for FXImpl::CreateFountain from scripts
     std::vector<ScriptProp> scriptProps;
+    bool garageDoor(int garage, Collision::Prop& out);   // its door, when the world has it
     std::vector<std::shared_ptr<DoorProp>> doors;   // WorldImpl::CreateDoor for scripts (processed with the props)
     ScriptProp* scriptProp(int id);
     void removeScriptProp(int id);
