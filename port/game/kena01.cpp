@@ -803,7 +803,7 @@ private:
     void findACarComplete() {
         g_->removeBlip(1);
         const int32_t kenny[3] = {fx(325.86f), fx(-57.59f), 0};
-        g_->addChevron(kenny, 0xFFE000FF, 2, 180, 2);   // CreateChevron(.., 180, two chevrons, sprite 7, style 0)
+        g_->addChevron(kenny, 0xFFE000FF, 2, 180, 2, 7, 0);   // CreateChevron(.., 180, two, palette 7, style 0)
         g_->showObjective(text(0x53E));   // "Meet Uncle Kenny at his restaurant."
         when([this, kenny] { return g_->playerCar >= 0 && near(kenny, 8.f); },
              [this] { g_->showObjective(text(0x537), 150); });   // "Touch the vehicle button to exit..."
@@ -889,7 +889,7 @@ private:
         s->setCallback(1, click);   // Callback_TextSave
         s->setCallback(2, [this, click] {   // Callback_TextRadar: the garage's blip (sprite 0x74, drawn as a dot)
             click();
-            g_->addBlip(kGarage, 0xFFE000FF, 4);
+            g_->addBlip(kGarage, 0x30D010FF, 4);   // (palette 11: colour 6, green)
         });
         s->setCallback(3, click);   // Callback_TextSafehouse
         s->setCallback(4, [this, click] {   // Callback_TextGarage: it is bought, and opens
@@ -912,8 +912,8 @@ private:
     }
 
     // SafehouseDoor: the safehouses are enabled again (not ported) and the garage gets its chevrons (CreateChevron at
-    // -270 degrees, four, sprite 11, style 2; Marker::SetRadius(3))
-    void safehouseDoor() { g_->addChevron(kGarage, 0xFFE000FF, 5, -270, 1, 0x3000); }
+    // -270 degrees, four, palette 11 (green), style 2: not on the radar; Marker::SetRadius(3))
+    void safehouseDoor() { g_->addChevron(kGarage, 0x40C040FF, 5, -270, 1, 11, 2, 0x3000); }
 
     void passed() {   // Passed: the markers go (the safehouse's chevrons), then WorldImpl::MissionFinished
         g_->removeBlip(5);

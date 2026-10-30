@@ -168,9 +168,12 @@ void Game::addBlip(const int32_t pos[3], uint32_t rgba, int id, int marker) {
     blips.back().marker = (int8_t)marker;
 }
 
-void Game::addChevron(const int32_t pos[3], uint32_t rgba, int id, int degrees, int type, int32_t size) {
+void Game::addChevron(const int32_t pos[3], uint32_t rgba, int id, int degrees, int type, int palette, int style,
+                      int32_t size) {
     addBlip(pos, rgba, id, 5);
     RadarBlip& b = blips.back();
+    b.markerColour = (uint8_t)(palette - 5);   // ChangeBlipStyle(.., palette, style, 1, false): SetColour(palette - 5)
+    b.onRadar = style <= 3 && ((3 >> style) & 1);   // Marker::SetBlip
     b.markerAngle = (int16_t)((degrees - 180) * 0xB6);   // Marker::SetAngle(degrees - 180)
     b.chevronType = (uint8_t)type;
     b.markerSize = size;

@@ -207,6 +207,7 @@ void GameplayHud::render(const Game& game, int width, int height) const {
     sprite(107, cx + nx * k, cy + ny * k, k);
     glDisable(GL_TEXTURE_2D);
     for (const RadarBlip& b : game.blips) {   // HUDImpl::AddBlip (a dot in the blip's colour; at the edge when far)
+        if (!b.onRadar) continue;
         float bx, by;
         const float markerRadius = b.label[0] ? (b.label[1] ? 11.f : 8.f) : 5.f;
         projection.worldOffset(b.pos, pos, bx, by, diameter * .49f - markerRadius - 1.5f);

@@ -270,8 +270,10 @@ public:
     static constexpr int kPluginBlips = 0x40000000;   // ids from here on are the plugins' (set_radar_blip)
     void showObjective(const std::u16string& text, int frames = 0xD2);   // HUDImpl::DisplayObjective(.., 210)
     void addBlip(const int32_t pos[3], uint32_t rgba, int id, int marker = -1);   // marker: eMarkerRepresentation
-    // CreateChevron(marker, pos, degrees, type, ..): a blip whose world marker is an sMarkerChevron
-    void addChevron(const int32_t pos[3], uint32_t rgba, int id, int degrees, int type, int32_t size = 0x2000);
+    // CreateChevron(marker, pos, degrees, type, palette, style): a blip whose world marker is an sMarkerChevron, in
+    // the colour HUDImpl::ChangeBlipStyle gives the palette (palette - 5), on the radar for styles 0 and 1
+    void addChevron(const int32_t pos[3], uint32_t rgba, int id, int degrees, int type, int palette, int style,
+                    int32_t size = 0x2000);
     void removeBlip(int id);
     std::u16string mainText(int id) const;   // e_main.gxt
     // WorldImpl::CreateDynamicProp for scripts: a prop model (ePropModel = the prop definition) placed by the

@@ -70,6 +70,7 @@ struct RadarBlip {
     int16_t markerAngle = 0;     // sMarkerChevron::SetAngle (Marker::SetAngle: degrees x 0xB6)
     uint8_t chevronType = 0;     // Marker::SetChevronType
     int32_t markerSize = 0;      // sPosPrimitive +0x70 (Marker::SetRadius); 0: the representation's own
+    bool onRadar = true;         // Marker::SetBlip
 };
 
 // gp_MissionText objectives (HUDImpl::DisplayObjective): a line at the bottom of the screen for a while
