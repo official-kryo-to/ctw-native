@@ -1692,6 +1692,12 @@ void Game::render(int W, int H) {
     TimeCycle& tc = world.timeCycle();
     uint32_t t = tc.time();
     PedLight light = PedLight::fromTimeCycle(tc);
+    for (const RadarBlip& b : blips) {   // the area manager's markers (cAreaManager::Render: those the camera can see)
+        const int32_t size = b.markerSize ? b.markerSize : b.marker == 1 ? 0x3000 : 0x2000;
+        if ((b.marker != 1 && b.marker != 5) || !canSee(b.pos, size / 4096.f)) continue;
+        if (b.marker == 1) markers.renderMarker3D(b.pos, b.markerColour, size, frame);
+        else markers.renderChevrons(b.pos, b.markerColour, b.markerAngle, b.chevronType, size, frame);
+    }
     TheSkidmarks().render();
     for (const Vehicle& c : cars) c.render(carModel(c.infoId));   // (lit by the world renderer's lights)
     renderScriptProps();
@@ -1722,8 +1728,6 @@ void Game::render(int W, int H) {
         for (const auto& c : contrails) c->render(cam);
     }
     TheParticles().render(cam);
-    for (const RadarBlip& b : blips)   // the area manager's markers: sMarker3D::Render
-        if (b.marker == 1) markers.renderMarker3D(b.pos, b.markerColour, 0x3000, frame);
     traces.render();
     muzzleFlashes.render();
     fires.render(cam);

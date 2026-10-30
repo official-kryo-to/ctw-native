@@ -65,8 +65,11 @@ struct RadarBlip {
     uint32_t colour;   // 0xRRGGBBAA
     int id;
     char label[3]{};   // optional short plugin marker, e.g. A or AA; empty keeps the normal dot
-    int8_t marker = -1;          // eMarkerRepresentation: 1 sMarker3D; -1 (a plugin's) or 4 only on the radar
+    int8_t marker = -1;          // eMarkerRepresentation: 1 sMarker3D, 5 sMarkerChevron; -1 (a plugin's), 4 radar only
     uint8_t markerColour = 2;    // Location::SetColour (HUDImpl::AddBlip sets 2)
+    int16_t markerAngle = 0;     // sMarkerChevron::SetAngle (Marker::SetAngle: degrees x 0xB6)
+    uint8_t chevronType = 0;     // Marker::SetChevronType
+    int32_t markerSize = 0;      // sPosPrimitive +0x70 (Marker::SetRadius); 0: the representation's own
 };
 
 // gp_MissionText objectives (HUDImpl::DisplayObjective): a line at the bottom of the screen for a while

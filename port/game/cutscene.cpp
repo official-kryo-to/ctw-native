@@ -167,6 +167,14 @@ void Game::addBlip(const int32_t pos[3], uint32_t rgba, int id, int marker) {
     blips.back().marker = (int8_t)marker;
 }
 
+void Game::addChevron(const int32_t pos[3], uint32_t rgba, int id, int degrees, int type, int32_t size) {
+    addBlip(pos, rgba, id, 5);
+    RadarBlip& b = blips.back();
+    b.markerAngle = (int16_t)((degrees - 180) * 0xB6);   // Marker::SetAngle(degrees - 180)
+    b.chevronType = (uint8_t)type;
+    b.markerSize = size;
+}
+
 void Game::removeBlip(int id) {
     blips.erase(std::remove_if(blips.begin(), blips.end(), [id](const RadarBlip& b) { return b.id == id; }), blips.end());
 }
