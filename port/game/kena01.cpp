@@ -666,7 +666,7 @@ private:
     // PlayerDead -> Failed
     void failed() {
         g_->cutscene = g_->scriptCutscene = false;
-        g_->showObjective(g_->mainText(0x5C), 150);   // "MISSION FAILED"
+        g_->showWinLose(g_->mainText(0x5C), 0x46);   // "MISSION FAILED" (cActStructure::UnloadCurrentMission)
         finish();
     }
 
@@ -921,7 +921,7 @@ private:
         g_->removeBlip(5);
         g_->cutscene = g_->scriptCutscene = false;
         g_->seqCamera.active = false;
-        g_->showObjective(g_->mainText(93), 150);   // "MISSION PASSED"
+        g_->showWinLose(g_->mainText(0x5D), 0x5A);   // "MISSION PASSED" (UnloadCurrentMission, no reward to show)
         finish();
     }
 };

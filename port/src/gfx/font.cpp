@@ -9,6 +9,22 @@
 #include <algorithm>
 #include <cstring>
 
+bool BitmapFont::loadWithTexture(const std::vector<uint8_t>& bin, unsigned texture, int width, int height) {
+    if (bin.size() < 4 || !texture || width <= 0 || height <= 0) return false;
+    uint16_t n, h;
+    memcpy(&n, &bin[0], 2);
+    memcpy(&h, &bin[2], 2);
+    if (bin.size() != 4 + (size_t)n * 6) return false;
+    if (tex_ && ownsTexture_) glDeleteTextures(1, &tex_);
+    tex_ = texture;
+    ownsTexture_ = false;
+    texW_ = width; texH_ = height;
+    glyphs_.resize(n);
+    for (uint16_t i = 0; i < n; ++i) memcpy(&glyphs_[i], &bin[4 + i * 6], 6);
+    height_ = h;
+    return true;
+}
+
 bool BitmapFont::load(const std::vector<uint8_t>& bin, const std::string& pngPath) {
     if (bin.size() < 4) return false;
     uint16_t n, h;
@@ -31,8 +47,9 @@ bool BitmapFont::load(const std::vector<uint8_t>& bin, const std::string& pngPat
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, hh, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
     stbi_image_free(px);
     // Keep a loaded font usable when a replacement atlas cannot be opened or decoded.
-    if (tex_) glDeleteTextures(1, &tex_);
+    if (tex_ && ownsTexture_) glDeleteTextures(1, &tex_);
     tex_ = texture;
+    ownsTexture_ = true;
     texW_ = w; texH_ = hh;
     glyphs_.resize(n);
     for (uint16_t i = 0; i < n; ++i) memcpy(&glyphs_[i], &bin[4 + i * 6], 6);

@@ -1379,6 +1379,7 @@ void Game::tick() {
     updateSequence();
     screenFade.tick();
     if (objective.frames > 0) --objective.frames;
+    if (winLose.frames > 0) --winLose.frames;   // cScriptText::Update
     sinkingCar.process(frame);
     updateHotwire();
     hotwiring.process(frame, world.timeCycle().time() / 4096.f);

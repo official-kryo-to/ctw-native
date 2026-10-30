@@ -243,6 +243,10 @@ public:
     bool startMission(const std::string& name);   // false: no such mission
     ScreenFade screenFade;
     Objective objective;
+    // HUDText::DisplayWinLose ("MISSION PASSED" / "MISSION FAILED"): the objective queue is cleared and the text is
+    // centred on the screen in font 5 (Osaka_30x30) at the phone text scale 1.5 for `frames` frames
+    Objective winLose;
+    void showWinLose(const std::u16string& text, int frames);
     SinkingCar sinkingCar;               // the sinking-car minigame (cSinkingCarApp), over everything while it runs
     // cGenericPlayerMiniGameTask for the sinking car: the app with the game's sound, fade and splash; drowned, the
     // player dies (cSinkingCarApp::Process state 5). done(escaped) runs after SetFinished.

@@ -12,6 +12,8 @@
 class BitmapFont {
 public:
     bool load(const std::vector<uint8_t>& bin, const std::string& pngPath);   // needs a GL context
+    // The glyph table with a texture the caller owns (cFontManager's font assets: game.pak textures)
+    bool loadWithTexture(const std::vector<uint8_t>& bin, unsigned texture, int width, int height);
     // Japanese font (GTACTWJapanese): full-width advance, no '>0xAD -> -' replacement, per-glyph line wrapping.
     void setJapanese(bool v) { japanese_ = v; }
     int lineHeight() const { return height_; }
@@ -33,5 +35,6 @@ private:
     bool japanese_ = false;
     int adv(int w) const { return japanese_ ? w : w - 1; }   // advance and sampled width
     unsigned tex_ = 0;
+    bool ownsTexture_ = true;
     int texW_ = 1, texH_ = 1;
 };
