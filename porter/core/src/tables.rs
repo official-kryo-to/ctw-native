@@ -435,6 +435,14 @@ impl<'a> GameBinary<'a> {
         Ok(out)
     }
 
+    /// cFontManager's TextColours: 23 RGBA entries (RenderStrip's 0..7 and the Osaka fonts' 11..20, then the two
+    /// user colours).
+    pub fn fonts(&self) -> Result<Vec<u8>, TableError> {
+        let mut out = b"CTWFONT1".to_vec();
+        out.extend(self.symbol_data("TextColours", 92)?);
+        Ok(out)
+    }
+
     pub fn ped_comments(&self) -> Result<Vec<u8>, TableError> {
         let mut out = b"CTWPEDV1".to_vec();
         out.extend(self.read(0x480370, 2 * 26 * 8)?);
@@ -673,6 +681,7 @@ pub fn extract_tables(binary: &[u8]) -> Result<Vec<(&'static str, Vec<u8>)>, Tab
         ("driving_props.bin", game.driving()?),
         ("ped_comments.bin", game.ped_comments()?),
         ("marker_tables.bin", game.markers()?),
+        ("font_tables.bin", game.fonts()?),
     ])
 }
 

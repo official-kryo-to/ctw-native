@@ -20,6 +20,7 @@
 #include <SDL.h>
 #include <glad/gl.h>
 #include "text/gxt.h"
+#include "gfx/gametext.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -52,6 +53,7 @@ bool Game::init(const std::string& data, const std::string& mods) {
     world.setRadius(1);   // the game keeps a 3 x 3 sector window; one block ring around the player covers it
     if (!loadingFrame()) return false;
     Hud_Init(dataDir);
+    if (!GameText::Fonts().load(dataDir)) fprintf(stderr, "game fonts or font_tables.bin missing: no HUD text\n");
     if (!comic.load(dataDir)) fprintf(stderr, "sequence image tables missing: no comic cutscenes\n");
     if (!pauseScreen.init(dataDir)) fprintf(stderr, "SS_Hud missing: pause-screen artwork unavailable\n");
     if (!gameplayHud.init(dataDir)) fprintf(stderr, "radar map / SS_AlwaysLoaded missing: no radar HUD\n");
@@ -1378,7 +1380,7 @@ void Game::tick() {
     multiplayerWorld.advanceVehicles(*this, OS_TimeAccurate());
     updateSequence();
     screenFade.tick();
-    if (objective.frames > 0) --objective.frames;
+    hudText.update(false);   // HUDText::UpdateText: g_DynamicHud's UpdateAndLayout
     if (winLose.frames > 0) --winLose.frames;   // cScriptText::Update
     sinkingCar.process(frame);
     updateHotwire();

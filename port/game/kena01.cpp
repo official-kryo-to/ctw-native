@@ -651,7 +651,7 @@ private:
     // PlayedWaterSequence -> WaitBeforeGetToShoreComplete: 30 frames -> GetToShoreComplete
     void playLeftWaterSequence() {
         g_->removeBlip(4);
-        g_->objective.frames = 0;
+        g_->hudText.deleteQueue();   // cLeaveWater::Begin: HUDImpl::DeleteQueue
         g_->cutscene = g_->scriptCutscene = true;
         play("CSS_KEN_A01_LeaveWater.seq", [this] { wait(0x1E, [this] { getToShoreComplete(); }); }, false);
     }
@@ -785,11 +785,13 @@ private:
             hotwiringFailed();
         });
     }
-    void hotwiringComplete() {   // HotwiringComplete: the time limit back, on to Kenny's
+    void hotwiringComplete() {   // HotwiringComplete: the queue cleared, the time limit back, on to Kenny's
+        g_->hudText.deleteQueue();
         g_->suppressHotwireTimer = false;
         findACarComplete();
     }
-    void hotwiringFailed() {     // HotwiringFailed: back to FindACar
+    void hotwiringFailed() {     // HotwiringFailed: the queue cleared, back to FindACar
+        g_->hudText.deleteQueue();
         hotwireFailed_ = true;
         findACar();
     }
@@ -802,6 +804,7 @@ private:
     // FindACarComplete -> GetToKennys: the restaurant's chevrons
     void findACarComplete() {
         g_->removeBlip(1);
+        g_->hudText.deleteQueue();
         const int32_t kenny[3] = {fx(325.86f), fx(-57.59f), 0};
         g_->addChevron(kenny, 0xFFE000FF, 2, 180, 2, 7, 0);   // CreateChevron(.., 180, two, palette 7, style 0)
         g_->showObjective(text(0x53E));   // "Meet Uncle Kenny at his restaurant."
@@ -823,7 +826,7 @@ private:
     // restaurant (cDoorHandler::CreateDoor at heading 0, DoMainStuff(enter, true)), then IntroSetup
     void getToKennysComplete() {
         g_->removeBlip(2);
-        g_->objective.frames = 0;
+        g_->hudText.deleteQueue();
         g_->cutscene = g_->scriptCutscene = true;
         door_.start(*g_, kKennysDoor, 0, DoorHandler::kEnter, [this] { atKennysIntroSetup(); }, true);
     }
@@ -831,6 +834,7 @@ private:
     // IntroSetup: the conversation (SCENE_02, WalkOut on its callback 0), the player's orders cleared and the wanted
     // level with them (ScriptPlayer::SetWantedLevel(0, false, true, true))
     void atKennysIntroSetup() {
+        g_->hudText.deleteQueue();
         g_->scriptWalk.on = false;   // Ped::ClearAllOrders
         g_->wanted.scriptSetLevel(0, false, true, true);
         Sequence* s = play("CSS_KEN_A01_SCENE_02.seq", [this] { cutsceneAtKennysDoFadeIn(); }, false);
@@ -856,7 +860,7 @@ private:
     // is black already, and 60 frames on StartSafehouseCutscene (Vehicle::SetStop on the player's car is not ported)
     void parkAtSafehouseComplete() {
         g_->removeBlip(3);
-        g_->objective.frames = 0;
+        g_->hudText.deleteQueue();
         g_->cutscene = g_->scriptCutscene = true;
         if (brightness() != 0) fadeToBlack(15);
         wait(0x3C, [this] { startSafehouseCutscene(); });
@@ -877,6 +881,7 @@ private:
     // the player on foot put at (360.00, 25.07), the wanted level cleared, the tour's callbacks; PlayTheSequence
     // fades in at once if the screen is black
     void safehouseSetup() {
+        g_->hudText.deleteQueue();   // cCutscene_AtSafehouse_Sequence::Setup
         garage_ = g_->garages.closest(kGarage);
         garageOpened_ = false;
         if (g_->playerCar < 0) placePlayer(360.f, 25.07f, 0.f);   // qword_47D3A0
@@ -900,12 +905,13 @@ private:
             garageOpened_ = true;
         });
         s->setCallback(5, click);   // Callback_TextGarage2
-        s->setCallback(6, [this] { g_->objective.frames = 0; });   // Callback_TidyUp: the queue and print texts
+        s->setCallback(6, [this] { g_->hudText.deleteQueue(); });   // Callback_TidyUp: HUDImpl::DeleteQueue
     }
 
-    // TidyUpEndOfSafehouse (the sequence's end or skip): the garage shuts again if it was opened, the blip goes,
-    // EndCutscene, then CutsceneAtSafehouseComplete: 60 frames on, Passed
+    // TidyUpEndOfSafehouse (the sequence's end or skip): the queue cleared, the garage shuts again if it was opened,
+    // the blip goes, EndCutscene, then CutsceneAtSafehouseComplete: 60 frames on, Passed
     void safehouseTidyUp() {
+        g_->hudText.deleteQueue();
         if (garageOpened_) g_->garages.close(garage_);
         g_->removeBlip(4);
         g_->cutscene = g_->scriptCutscene = false;

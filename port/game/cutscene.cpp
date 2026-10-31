@@ -162,7 +162,7 @@ bool Game::startMission(const std::string& name) {
 }
 
 void Game::showWinLose(const std::u16string& text, int frames) {
-    objective.frames = 0;   // (its first flag: g_ObjectiveText's queue cleared)
+    hudText.deleteQueue();   // (its first flag: g_ObjectiveText's queue cleared)
     winLose.text = text;
     winLose.frames = text.empty() ? 0 : frames;
 }
@@ -192,8 +192,7 @@ const BitmapFont* winLoseFont(const std::string& dataDir) {
 }
 
 void Game::showObjective(const std::u16string& text, int frames) {
-    objective.text = text;
-    objective.frames = text.empty() ? 0 : frames;
+    hudText.displayObjective(text, (unsigned)frames, true);
 }
 
 void Game::addBlip(const int32_t pos[3], uint32_t rgba, int id, int marker) {
@@ -268,31 +267,7 @@ void Game::renderMissionHud(int W, int H) {
             Hud_End();
         }
     }
-    if (objective.frames > 0 && !objective.text.empty() && !(sequence && comic.active())) {
-        // HUDText's objective: centred under the middle of the screen, wrapped to two thirds of its width
-        Hud_Begin(W, H);
-        const float k = H / 768.f, scale = 1.5f * k, width = W * 0.66f;
-        const std::u16string wrapped = Hud_Wrap16(objective.text, width, scale);
-        int lines = 1;
-        for (char16_t c : wrapped) lines += c == u'\n';
-        const float y = H - (90.f * k + lines * Hud_LineHeight(scale));
-        // each line centred: drawn line by line
-        size_t from = 0;
-        for (int i = 0; i < lines; ++i) {
-            size_t to = wrapped.find(u'\n', from);
-            if (to == std::u16string::npos) to = wrapped.size();
-            const std::u16string line = wrapped.substr(from, to - from);
-            std::string ascii;
-            for (char16_t c : line) if (c < 0x80) ascii += (char)c;
-            const float w = Hud_TextWidth(ascii, scale);
-            std::u16string shadow;   // the shadow stays black: the line without its colour tags
-            for (char16_t c : line) if (c < 0xFE00) shadow += c;
-            Hud_Text16((W - w) * 0.5f + 2.f * k, y + i * Hud_LineHeight(scale) + 2.f * k, scale, 0x000000C0u, shadow);
-            Hud_Text16((W - w) * 0.5f, y + i * Hud_LineHeight(scale), scale, 0xFFFFFFFFu, line);
-            from = to + 1;
-        }
-        Hud_End();
-    }
+    HudText::RenderSprites(W, H);   // the Gfx2d text sprites: the objective line
 }
 
 // ---- script props ----

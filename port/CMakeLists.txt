@@ -31,7 +31,7 @@ target_include_directories(glad PUBLIC third_party/glad/include)
 # ---- engine: everything shared by the showcase and the game (src/) ----------------------------------------
 add_library(ctw_engine STATIC
     src/os/os_sdl.cpp src/os/wad.cpp src/os/gamefs.cpp src/os/dxtbin.cpp src/os/pak.cpp src/os/datafile.cpp
-    src/gfx/spriteset.cpp src/gfx/font.cpp src/gfx/model.cpp src/gfx/character.cpp src/gfx/texload.cpp src/gfx/assets.cpp src/gfx/stb_impl.cpp src/gfx/uifont.cpp src/gfx/pedsprites.cpp src/gfx/rendertables.cpp
+    src/gfx/spriteset.cpp src/gfx/font.cpp src/gfx/model.cpp src/gfx/character.cpp src/gfx/texload.cpp src/gfx/assets.cpp src/gfx/stb_impl.cpp src/gfx/uifont.cpp src/gfx/pedsprites.cpp src/gfx/rendertables.cpp src/gfx/gametext.cpp
     src/text/gxt.cpp src/audio/audio.cpp src/video/movie.cpp
     src/world/worldmap.cpp src/world/timecycle.cpp src/world/worldrenderer.cpp src/world/collision.cpp src/world/collisionsweep.cpp src/world/props.cpp)
 target_include_directories(ctw_engine PUBLIC src third_party/stb third_party/minimp3)
@@ -71,7 +71,7 @@ target_sources(ctw_gameplay PRIVATE game/pedsocial.cpp)
 target_sources(ctw_gameplay PRIVATE game/zones.cpp)
 target_sources(ctw_gameplay PRIVATE game/intro.cpp)
 target_sources(ctw_gameplay PRIVATE game/pickups.cpp)
-target_sources(ctw_gameplay PRIVATE game/sequence.cpp game/comicscreen.cpp game/sinkingcar.cpp game/devmenu.cpp game/porterui.cpp game/stroke.cpp game/hotwiring.cpp game/minigamecam.cpp game/cutscene.cpp game/mission.cpp game/kena01.cpp game/doors.cpp game/garages.cpp game/markers.cpp)
+target_sources(ctw_gameplay PRIVATE game/sequence.cpp game/comicscreen.cpp game/sinkingcar.cpp game/devmenu.cpp game/porterui.cpp game/stroke.cpp game/hotwiring.cpp game/minigamecam.cpp game/cutscene.cpp game/mission.cpp game/kena01.cpp game/doors.cpp game/garages.cpp game/markers.cpp game/hudtext.cpp)
 target_sources(ctw_gameplay PRIVATE game/pedcomments.cpp)
 target_sources(ctw_gameplay PRIVATE game/police.cpp game/policedriving.cpp)
 target_include_directories(ctw_gameplay PUBLIC game)

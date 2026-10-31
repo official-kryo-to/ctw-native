@@ -75,7 +75,7 @@ void DevMenu::build(Game& g) {
             g.seqCamera.active = false;
             g.blips.erase(std::remove_if(g.blips.begin(), g.blips.end(), [](const RadarBlip& b) { return b.id < Game::kPluginBlips; }),
                           g.blips.end());
-            g.objective.frames = 0;
+            g.hudText.deleteQueue();
             status_ = "Mission stopped.";
         });
         break;

@@ -41,6 +41,7 @@
 #include "doors.h"
 #include "garages.h"
 #include "markers.h"
+#include "hudtext.h"
 #include "minigamecam.h"
 #include "multiplayerworld.h"
 #include "mission.h"
@@ -242,7 +243,7 @@ public:
     std::unique_ptr<Mission> mission;
     bool startMission(const std::string& name);   // false: no such mission
     ScreenFade screenFade;
-    Objective objective;
+    HudText::Hud hudText;                // HUDText: g_ObjectiveText in g_DynamicHud
     // HUDText::DisplayWinLose ("MISSION PASSED" / "MISSION FAILED"): the objective queue is cleared and the text is
     // centred on the screen in font 5 (Osaka_30x30) at the phone text scale 1.5 for `frames` frames
     Objective winLose;
@@ -274,7 +275,8 @@ public:
     void updateHotwire();   // cPlayer::ApplyDefaultOrders' hotwire task, once a frame
     std::vector<RadarBlip> blips;
     static constexpr int kPluginBlips = 0x40000000;   // ids from here on are the plugins' (set_radar_blip)
-    void showObjective(const std::u16string& text, int frames = 0xD2);   // HUDImpl::DisplayObjective(.., 210)
+    // HUDImpl::DisplayObjective(id, 0, 210, true, true, ..) as the missions call it: the queue cleared first
+    void showObjective(const std::u16string& text, int frames = 0xD2);
     void addBlip(const int32_t pos[3], uint32_t rgba, int id, int marker = -1);   // marker: eMarkerRepresentation
     // CreateChevron(marker, pos, degrees, type, palette, style): a blip whose world marker is an sMarkerChevron, in
     // the colour HUDImpl::ChangeBlipStyle gives the palette (palette - 5), on the radar for styles 0 and 1

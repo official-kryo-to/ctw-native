@@ -79,7 +79,7 @@ struct RadarBlip {
     int16_t spriteScale = 0x1000;   // the sprite's current scale
 };
 
-// gp_MissionText objectives (HUDImpl::DisplayObjective): a line at the bottom of the screen for a while
+// a string shown for a number of frames (HUDText::DisplayWinLose's)
 struct Objective {
     std::u16string text;
     int frames = 0;

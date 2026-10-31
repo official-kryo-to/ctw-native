@@ -245,6 +245,11 @@ class GameBinary:
         palettes = bytes(v & 0xFF for v in struct.unpack('<9q', self.read(0x488200, 72)))
         return b'CTWMARK2' + self.read(0x488165, 33) + palettes
 
+    def fonts(self):
+        # cFontManager's TextColours: 23 RGBA entries (RenderStrip's 0..7 and the Osaka fonts' 11..20, then the two
+        # user colours).
+        return b'CTWFONT1' + self.symbol_data('TextColours', 92)
+
     def ped_comments(self):
         # Gender/sample ranges, timing records and initial repeat histories from this verified build.
         return (b'CTWPEDV1' + self.read(0x480370, 2 * 26 * 8) + self.read(0xe00670, 26 * 32) +
@@ -334,4 +339,4 @@ def extract_tables(binary):
             'weather_tables.bin': game.weather(), 'weapon_tables.bin': game.weapons(),
             'wanted_tables.bin': game.wanted(), 'shard_tables.bin': game.shards(),
             'driving_props.bin': game.driving(), 'ped_comments.bin': game.ped_comments(),
-            'marker_tables.bin': game.markers()}
+            'marker_tables.bin': game.markers(), 'font_tables.bin': game.fonts()}
