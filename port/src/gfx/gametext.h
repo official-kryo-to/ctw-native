@@ -84,9 +84,15 @@ public:
     void print(const char16_t* s, uint16_t firstLine, uint16_t maxLines);
     // cTextSprite::Render: the strips under the current matrices; black draws the shadow pass (no icons)
     void render(bool black, float alpha) const;
+    // cTextSprite::Reprint: sized for the text again, emptied and printed from the top left
+    void reprint(const char16_t* s, uint16_t firstLine, uint16_t maxLines);
+    void newLine();   // cTextSprite::NewLine: x back to 0, y down a line
     int font() const { return font_; }
+    uint16_t width() const { return width_; }   // +8, with the justification bits
+    int16_t maxY() const { return (int16_t)maxY_; }
     int16_t endX() const { return x_; }
     int16_t endY() const { return y_; }
+    void setX(int16_t x) { x_ = x; }
 private:
     uint8_t font_;
     uint16_t width_, maxY_;

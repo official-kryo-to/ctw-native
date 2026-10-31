@@ -12,6 +12,7 @@
 // down, at 4 units per position unit. Everything is clipped to the comic strip from y 133 to 645.
 #pragma once
 #include "sequence.h"
+#include "hudtext.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -38,8 +39,9 @@ private:
     void drawBackground(const Quad& q) const;
     void drawSprite(const Quad& q) const;
     void scissor(int layer) const;
-    void buildText(int string);
-    void printFrame();
+    void buildText(int string, int style);
+    void createSubtitle(const Sequence::TextTrack& t);
+    void removeSubtitle();
 
     std::vector<Image> bgImages_, spriteImages_;
     std::string dataDir_, table_;
@@ -54,9 +56,7 @@ private:
     float fade_ = 0.f;                                      // +0x208
     bool active_ = false, hidesWorld_ = false;
     bool loaded_ = false;                                   // the app is running (Gui::cPda::RunningAppType 0x3A)
-    // the subtitle (a printing text sprite, Gfx2d::cPrintingText)
+    // the subtitle: a text sprite typed by its Gfx2d::cPrintingText (+0x1F0)
     std::u16string text_;
-    bool textShown_ = false;
-    int printed_ = 0;                                       // cPrintingText +0
-    uint8_t printDelay_ = 0, printSpeed_ = 0;               // +9, +0xA
+    std::shared_ptr<HudText::Sprite> subtitle_;
 };

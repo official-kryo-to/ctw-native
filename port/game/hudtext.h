@@ -18,6 +18,16 @@ struct SpriteDef;
 
 namespace HudText {
 
+// Gfx2d::cPrintingText: a text typed into its sprite a few characters at a time (0xFEF0..0xFEF7 set the speed,
+// 0xFEF8 + n pauses), each line started where its justification puts it
+struct PrintingText {
+    std::u16string text;                   // +0x10
+    uint16_t pos = 0, lineEnd = 0;         // +0, +2
+    unsigned justification = 0;            // +4: the sprite's, put back when it is done
+    uint8_t lineY = 0xFF, delay = 0, speed = 0;   // +8, +9, +0xA
+    bool update(GameText::TextSprite& s);  // cPrintingText::Update: true once it is all typed
+};
+
 // Gfx2d::cSprite: a cTextSprite, or an image from a sprite sheet
 struct Sprite {
     std::shared_ptr<GameText::TextSprite> text;
@@ -31,6 +41,7 @@ struct Sprite {
     uint16_t scaleX = 0x100, scaleY = 0x100;   // +0x30, +0x32 (8.8)
     int16_t uvAdd[4] = {0, 0, 0, 0};       // +0x50 u0, +0x54 v0, +0x58 u1, +0x5C v1 (the sheet's 2048ths)
     std::shared_ptr<Sprite> shadow;        // +0x10, moved, shown and re-listed with it
+    std::unique_ptr<PrintingText> printing;   // +0x90 while +0x21 is 3
     void setPos(int px, int py);           // SetSpritePos
     void show(bool on);                    // ShowSprite
     void setScale(int32_t sx, int32_t sy); // SetSpriteScale (cFixed 20.12)
@@ -48,7 +59,12 @@ const SpriteDef* AlwaysLoaded(int index);
 std::shared_ptr<Sprite> AddText(const std::u16string& text, int font, int x, int y, unsigned style, unsigned width,
                                 int justification, uint16_t firstLine, uint16_t maxLines);
 std::shared_ptr<Sprite> AddImage(const SpriteDef* image);   // AddSpriteImpl(data, .., 0, 0, 0, 0, style 0x10)
-void SetPriority(const std::shared_ptr<Sprite>& s, unsigned priority);   // SetPriority(p, true): re-listed as newest
+void SetPriority(const std::shared_ptr<Sprite>& s, unsigned priority);
+// RefreshSprite's cPrintingText::Update for the typing sprites (once a frame), and its Skip once one is typed or the
+// player asks (cSprite::SkipTextPrinting): the whole text again at its justification. scale: the text scale they type
+// at (cutSceneScale in a cutscene, else 1.5)
+void UpdatePrinting(float scale);
+void SkipPrinting(const std::shared_ptr<Sprite>& s, float scale);   // SetPriority(p, true): re-listed as newest
 void RemoveSprite(const std::shared_ptr<Sprite>& s);   // RemoveSprite(s, true): it and its shadow
 void RenderSprites(int width, int height);           // cPda::Render's ProcessSprites over the lists
 

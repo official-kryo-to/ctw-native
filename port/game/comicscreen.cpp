@@ -3,6 +3,7 @@
 // See LICENSE in the repository root.
 #include "comicscreen.h"
 #include "hud.h"
+#include "os/os.h"
 #include "gfx/assets.h"
 #include "os/pak.h"
 #include "text/gxt.h"
@@ -66,9 +67,7 @@ void ComicScreen::begin(const Sequence& seq, const TimeCycle& tc) {
     top_ = tc.colour(0x20);
     bottom_ = tc.colour(0x23);
     fade_ = 0.f;
-    text_.clear();
-    textShown_ = false;
-    printed_ = printDelay_ = 0;
+    removeSubtitle();
     active_ = true;
     loaded_ = true;
     hidesWorld_ = false;
@@ -87,8 +86,7 @@ void ComicScreen::begin(const Sequence& seq, const TimeCycle& tc) {
 void ComicScreen::stop(bool keepApp) {
     active_ = false;   // (not processed any more)
     bgVisible_ = spriteVisible_ = 0;   // SoftReset: the images released, the text sprite removed
-    textShown_ = false;
-    text_.clear();
+    removeSubtitle();
     if (!keepApp) end();   // cPda::LoadApp(the sequence's restore app)
 }
 
@@ -96,23 +94,31 @@ void ComicScreen::end() {
     loaded_ = false;
     active_ = false;
     hidesWorld_ = false;
-    textShown_ = false;
+    removeSubtitle();
 }
 
-// cTwoDSequenceApp::Process builds the printing text: a speaker's line (it starts with a name colour, 0xFF03..0xFF0C)
-// is kept whole, with speed 1 (0xFEF1) and an 8-frame pause (0xFEF9) put in before the colour reset (0xFF00) that
-// ends the name, so the name shows at once; anything else starts with speed 1 and loses the line before its first
-// newline. (A cPrintingText starts at speed 0: all at once.)
-void ComicScreen::buildText(int string) {
+void ComicScreen::removeSubtitle() {
+    HudText::RemoveSprite(subtitle_);
+    subtitle_.reset();
     text_.clear();
-    printed_ = printDelay_ = printSpeed_ = 0;
+}
+
+// cTwoDSequenceApp::Process builds the printing text: with a style (a speaker's line), the string whole, and when
+// it starts with a name colour (0xFF03..0xFF0C) speed 1 (0xFEF1) and an 8-frame pause (0xFEF9) put in before the
+// colour reset (0xFF00) that ends the name, so the name shows at once; with none, speed 1 and the string less the
+// line before its first newline. (A cPrintingText starts at speed 0: all at once.)
+void ComicScreen::buildText(int string, int style) {
+    text_.clear();
     if (string < 0 || (size_t)string >= strings_.size()) return;
     const std::u16string& s = strings_[string];
-    const char16_t c0 = s.empty() ? 0 : s[0];
-    if (c0 >= 0xFF03 && c0 <= 0xFF0C) {
+    if (style) {
+        const char16_t c0 = s.empty() ? 0 : s[0];
         bool tagged = false;
         for (size_t i = 0; i < s.size() && s[i]; ++i) {
-            if (s[i] == 0xFF00 && !tagged) { text_ += (char16_t)0xFEF1; text_ += (char16_t)0xFEF9; }
+            if (s[i] == 0xFF00 && c0 >= 0xFF03 && c0 <= 0xFF0C && !tagged) {
+                text_ += (char16_t)0xFEF1;
+                text_ += (char16_t)0xFEF9;
+            }
             if (s[i] >= 0xFEF0 && s[i] <= 0xFF00) tagged = true;
             text_ += s[i];
         }
@@ -125,33 +131,62 @@ void ComicScreen::buildText(int string) {
     for (size_t i = from; i < s.size() && s[i]; ++i) text_ += s[i];
 }
 
-// Gfx2d::cPrintingText::Update: after a pause (+9) it takes characters up to the next printable one after the first
-// (+0 the position). Spaces, line ends and colour codes go with the next character. At speed (+0xA) 0 a frame takes
-// everything; otherwise a printable character costs speed frames, and ! - . : ? before a space or the end five
-// times that. 0xFEF0..0xFEF7 set the speed, 0xFEF8 + n pauses 8n frames.
-void ComicScreen::printFrame() {
-    if (printDelay_ > 0) { --printDelay_; return; }
-    bool one = false;
-    for (;;) {
-        const char16_t c = printed_ < (int)text_.size() ? text_[printed_] : 0;
-        if (!c) return;
-        if (c >= 0x21 && c <= 0xFEEF) {   // printable
-            if (one) return;
-            if (printSpeed_) {
-                printDelay_ = (uint8_t)(printSpeed_ - 1);
-                const char16_t next = printed_ + 1 < (int)text_.size() ? text_[printed_ + 1] : 0;
-                if (next <= 0x20 && (c == u'!' || c == u'-' || c == u'.' || c == u':' || c == u'?'))
-                    printDelay_ = (uint8_t)(printSpeed_ - 1 + printSpeed_ * 4);
-                one = true;
-            }
+// cTwoDSequenceApp::Process's subtitle sprite: font 2, centred, outlined (style 0x11), at cutSceneScale (2 on a
+// screen at least 1501 wide, else 1.5), typed (the save's typing setting on). A speaker's line (a style) spans the
+// screen less a margin of a hundredth of its width a side; otherwise the aspect-corrected page's width, or its left
+// or right half (the track's justify 0 and 2), less the margins. It sits a font height and a fifth over the comic
+// strip's bottom edge on a wide screen (wider than 1.34), else centred on that edge.
+void ComicScreen::createSubtitle(const Sequence::TextTrack& t) {
+    buildText(t.string, t.style);
+    if (text_.empty()) return;
+    const unsigned W = OS_ScreenGetWidth(), H = std::max(OS_ScreenGetHeight(), 1u);
+    const float aspect = (float)W / (float)H;
+    float band = (aspect + -1.3333334f) / -0.66666663f + 1.f;
+    band *= 133.f;
+    const float bottomEdge = 768.f - band, middleEdge = band * -0.5f + 768.f;   // S8, S9
+    const float cutSceneScale = W >= 0x5DD ? 2.f : 1.5f;
+    const float margin = (float)(W * 10) / 1024.f;
+    const float less = (float)(W * 10) * -0.0009765625f;
+    auto spread = [](unsigned w, unsigned h) {   // the aspect-corrected page's extra width
+        const int vw = (int)((w * 3 * 256) / h);
+        int e = vw - 0x400;
+        if (e < 0) e = vw - 0x3FF;
+        return e;
+    };
+    int x;
+    unsigned width;
+    if (t.style) {
+        x = (int)margin;
+        width = (unsigned)std::fmaf(less, 2.f, 1024.f);
+    } else {
+        const int e = spread(W, H);
+        x = (int)(margin + (float)(-(e >> 1)));
+        const int full = (e >> 1) + 0x400 + (e >> 1);
+        if (t.justify == 1) {
+            width = (unsigned)std::fmaf(less, 2.f, (float)full);
+        } else {
+            const float half = (float)((full < 0 ? full + 1 : full) >> 1);
+            width = (unsigned)std::fmaf(less, 2.f, half);
+            if (t.justify == 2) x = (int)((float)x + (margin + half));
         }
-        if ((c & 0xFFF0) == 0xFEF0) {
-            if (c >= 0xFEF8) printDelay_ = (uint8_t)(c * 8 + 0x40);
-            else printSpeed_ = (uint8_t)(c + 0x10);
-            one = true;
-        }
-        ++printed_;
     }
+    GameText::FontManager& m = GameText::Fonts();
+    const unsigned justification = m.justification;
+    m.justification = 0x4000;
+    m.printing = true;
+    m.textScale = cutSceneScale;
+    subtitle_ = HudText::AddText(text_, 2, x, 0x2A6, 0x11, width, 1, 0, 0xFFFF);
+    if (subtitle_) {
+        subtitle_->ortho = 8;   // (its own 0: the app's projection, the page's aspect-corrected 1024 x 768)
+        const int spriteH = subtitle_->text->maxY(), fontH = m.fontHeight(2);
+        const float y = aspect > 1.34f ? std::fmaf((float)fontH, -1.2f, bottomEdge - (float)spriteH)
+                                       : middleEdge - (float)((unsigned)spriteH >> 1);
+        subtitle_->setPos(subtitle_->x, (int)y);
+        subtitle_->show(t.shown != 0);
+    }
+    m.textScale = 1.f;
+    m.printing = false;
+    m.justification = justification;
 }
 
 void ComicScreen::process(Sequence& seq) {
@@ -160,20 +195,22 @@ void ComicScreen::process(Sequence& seq) {
     // the subtitle sprite
     for (Sequence::TextTrack& t : seq.texts) {
         if (t.flags & 1) {
-            textShown_ = false;
-            text_.clear();
-            if (t.shown) { buildText(t.string); textShown_ = true; }
+            HudText::RemoveSprite(subtitle_);
+            subtitle_.reset();
+            if (t.shown) createSubtitle(t);
             t.flags ^= 1;
         }
         if (t.flags & 4) {
-            textShown_ = t.shown != 0 && !text_.empty();
+            if (subtitle_) subtitle_->show(t.shown != 0);
             t.flags ^= 4;
         }
     }
-    // Gfx2d::cPrintingText::Update, once a frame
-    if (seq.skipTextPrinting) { printed_ = (int)text_.size(); seq.skipTextPrinting = false; }
-    if (textShown_ && printed_ < (int)text_.size()) printFrame();
-    seq.textPrinting = textShown_ && printed_ < (int)text_.size();
+    // a tap finishes the typing (cTwoDSequenceApp::SkipTextPrinting); IsTextPrinting while it types
+    if (seq.skipTextPrinting) {
+        HudText::SkipPrinting(subtitle_, OS_ScreenGetWidth() >= 0x5DD ? 2.f : 1.5f);
+        seq.skipTextPrinting = false;
+    }
+    seq.textPrinting = subtitle_ && subtitle_->printing;
     // the backgrounds
     for (Sequence::BgTrack& t : seq.bgs) {
         if (t.layer < 0 || t.layer >= 10) continue;
@@ -323,25 +360,5 @@ void ComicScreen::render(int W, int H) const {
         }
         glDisable(GL_SCISSOR_TEST);
         glDisable(GL_TEXTURE_2D);
-    }
-    // the subtitle: under the comic strip, wrapped to the text box (AddSpriteImpl's 678 units)
-    if (textShown_ && !text_.empty()) {
-        Hud_Begin(W, H);
-        const float scale = v.scale * 1.25f, width = 678.f * v.scale;
-        const std::u16string wrapped = Hud_Wrap16(text_, width, scale);
-        // the text sprite sits above a line 1.2 font heights over the screen's bottom band (cTwoDSequenceApp::
-        // Process); the whole printed text is laid out at once so the block does not move while it types
-        int lines = 1;
-        for (char16_t c : wrapped) lines += c == u'\n';
-        const float lineH = Hud_LineHeight(scale);
-        const float x = (1024.f / 2 - 678.f / 2 - v.left) * v.scale;
-        const float y = std::max(645.f * v.scale + 0.25f * lineH, H - 0.9f * lineH - lines * lineH);
-        int shown = 0, chars = 0;   // the printed share of the wrapped text (the wrap adds newlines)
-        while (shown < (int)wrapped.size() && chars < printed_) {
-            if (wrapped[shown] != u'\n' || (chars < (int)text_.size() && text_[chars] == u'\n')) ++chars;
-            ++shown;
-        }
-        Hud_Text16(x, y, scale, 0xFFFFFFFF, wrapped.substr(0, shown));
-        Hud_End();
     }
 }

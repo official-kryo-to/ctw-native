@@ -182,13 +182,23 @@ std::shared_ptr<Sprite> AddText(const std::u16string& text, int font, int x, int
         const size_t n = std::min(text.size(), (size_t)0x1FF);
         std::copy(text.begin(), text.begin() + (ptrdiff_t)n, src.begin());
     }
-    m.replaceUnsupported(src.data(), font);   // (cPrintingText's typed text is never asked for: +8 stays clear)
+    // typed (a speed or pause code in it, while the font manager's +8 asks for typing): a cPrintingText, no shadow
+    const bool typed = m.replaceUnsupported(src.data(), font);
     const uint32_t size = m.textSize(src.data(), (int)width, font, firstLine, maxLines);
     if (size < 0x10000) return nullptr;
     if (justification == 1) m.justification = 0x4000;
     else if (justification == 2) m.justification = 0x8000;
     auto sprite = std::make_shared<GameText::TextSprite>((uint16_t)width, (uint16_t)((int32_t)size >> 16), font);
     sprite->alignment(m.justification);
+    if (typed) {
+        auto s = addSprite(sprite, x, y, style);
+        s->printing = std::make_unique<PrintingText>();
+        s->printing->text.assign(src.data());
+        s->printing->justification = sprite->width() & 0xC000;
+        sprite->alignment(0);
+        m.justification = 0;
+        return s;
+    }
     sprite->print(src.data(), firstLine, maxLines);
     auto s = addSprite(sprite, x, y, style);
     // FontWantsDropShadow's fonts (not the icons) get the shadow sprite unless the text is black: one down and
@@ -215,6 +225,75 @@ std::shared_ptr<Sprite> AddImage(const SpriteDef* image) {
     s->image = image;
     list(0).push_back(s);
     return s;
+}
+
+bool PrintingText::update(GameText::TextSprite& s) {
+    if (delay) { --delay; return false; }
+    if (s.endY() >= s.maxY()) return true;
+    GameText::FontManager& m = GameText::Fonts();
+    if ((int)s.endY() != lineY) {   // a new line: where it starts, and where it ends
+        const char16_t* end = nullptr;
+        const int width = s.width() & 0x3FFF;
+        const int w = m.lineEnd(text.c_str() + pos, width, s.font(), &end);
+        const int off = (width - w) >> (justification == 0x4000 ? 1 : 0);
+        lineY = (uint8_t)s.endY();
+        s.setX((int16_t)(justification ? off : 0));
+        lineEnd = (uint16_t)(end - text.c_str());
+    }
+    // the characters up to the next printable one after the first (spaces, line ends and codes go with it)
+    std::u16string chunk;
+    bool got = false;
+    for (;;) {
+        const char16_t c = pos < text.size() ? text[pos] : 0;
+        const bool printable = c && (unsigned)(c - 0x21) <= 0xFECEu;
+        if (printable || !c) {
+            if (got) break;
+            if (speed) {
+                delay = (uint8_t)(speed - 1);
+                const char16_t next = pos + 1 < text.size() ? text[pos + 1] : 0;
+                got = true;
+                if (next <= 0x20 && c <= 0x3F && (0x8400600200000000ull >> c & 1))   // ! - . : ? before a space
+                    delay = (uint8_t)(speed - 1 + speed * 4);
+            }
+            if (!c) return true;
+        }
+        if ((c & 0xFFF0) == 0xFEF0) {   // a pause or a speed: it counts as the one
+            if (c >= 0xFEF8) delay = (uint8_t)(c * 8 + 0x40);
+            else speed = (uint8_t)(c + 0x10);
+            got = true;
+            ++pos;
+            continue;
+        }
+        chunk += c;
+        ++pos;
+    }
+    s.print(chunk.c_str(), 0, 0xFFFF);
+    if (pos >= lineEnd && s.endY() == lineY) s.newLine();
+    return false;
+}
+
+void UpdatePrinting(float scale) {
+    GameText::FontManager& m = GameText::Fonts();
+    std::vector<std::shared_ptr<Sprite>> done;
+    for (unsigned p = 0; p < kLists; ++p)
+        for (const auto& s : list(p)) {
+            if (!s->printing || !s->text || !s->visible) continue;   // (RefreshSprite types only shown sprites)
+            m.textScale = scale;
+            const bool finished = s->printing->update(*s->text);
+            m.textScale = 1.f;
+            if (finished) done.push_back(s);
+        }
+    for (const auto& s : done) SkipPrinting(s, scale);
+}
+
+void SkipPrinting(const std::shared_ptr<Sprite>& s, float scale) {
+    if (!s || !s->printing || !s->text) return;
+    GameText::FontManager& m = GameText::Fonts();
+    s->text->alignment(s->printing->justification);
+    m.textScale = scale;
+    s->text->reprint(s->printing->text.c_str(), 0, 0xFFFF);
+    m.textScale = 1.f;
+    s->printing.reset();
 }
 
 void SetPriority(const std::shared_ptr<Sprite>& s, unsigned priority) {

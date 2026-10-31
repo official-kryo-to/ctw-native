@@ -452,6 +452,22 @@ void TextSprite::print(const char16_t* s, uint16_t firstLine, uint16_t maxLines)
     if (!m.keepColour) m.colourTop = m.colourBottom = 0;
 }
 
+void TextSprite::reprint(const char16_t* s, uint16_t firstLine, uint16_t maxLines) {
+    const uint32_t size = Fonts().textSize(s, (int16_t)width_, font_, firstLine, maxLines);
+    maxY_ = (uint16_t)(size >> 16);
+    glyphs_ = Strip{};
+    icons_ = Strip{};
+    x_ = y_ = 0;
+    print(s, firstLine, maxLines);
+}
+
+void TextSprite::newLine() {
+    const FontManager& m = Fonts();
+    x_ = 0;
+    const float lineH = (float)(int)std::fmaf((float)m.heightByte(font_), m.fontTextScale(font_), 0.5f);
+    y_ = clamp16((int)(lineH + (float)y_));
+}
+
 void TextSprite::render(bool black, float alpha) const {
     renderStrip(const_cast<Strip&>(glyphs_), font_, black, alpha);
     if (!black) renderStrip(const_cast<Strip&>(icons_), kIconFont, false, alpha);
