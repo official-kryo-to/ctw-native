@@ -62,6 +62,12 @@ public:
     void fightGrunt(uint32_t uid, const int32_t pos[3], bool male, bool force, bool loud);
     void startBurnout(const Vehicle& v);   // cAudioManager::StartBurnout: event 0x93 as the burnout launches
     bool ok() const { return !res_.data.empty(); }
+    // SoundImpl::PlaySimpleSFX on a bank SoundImpl::LoadBankNow put in RAM bank 1 (cAudioManager::PlayScriptSimpleSfx
+    // -> cAudioBaseOAL::PlaySfx): no position, volume 0..127, pan 0..127; the voice, or -1. PanSimpleSFX moves its
+    // pan, StopSimpleSFX stops it.
+    int playBankSfx(int romBank, int sample, int volume, int pan, bool loop);
+    void panBankSfx(int voice, int pan);
+    void stopBankSfx(int voice);
 
 private:
     struct Bank {
@@ -73,6 +79,7 @@ private:
     };
     Bank res_, car_;
     std::map<std::string, Bank> carBanks_;
+    std::map<int, int> simpleVolume_;   // a simple SFX voice's volume (0..127)
     const Bank* activeCarBank_ = nullptr;
     SoundTables tables_;
     int carBankEnum_ = -1;

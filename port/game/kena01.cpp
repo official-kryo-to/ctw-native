@@ -4,7 +4,7 @@
 // kena01::cKEN_A01, the first mission ("Arrival in Liberty"): the prologue on the plane, the landing, the ambush
 // at the port and the intro movie, then Huang on the jetty, a car, Uncle Kenny's restaurant and the apartment.
 //
-// Not ported yet, and passed over here: the plane's sound, the GPS route, the on-screen buttons' flashing
+// Not ported yet, and passed over here: the GPS route, the on-screen buttons' flashing
 // (cIPhonePad::FlashButton) with the help texts, the safehouse's building swap and purchase, and Vehicle::SetStop on
 // the player's car. At the port and the pier the people
 // are puppets the scene moves (getting in and out of cars without the door animations, Ped::SetDive as a step out
@@ -36,6 +36,8 @@ private:
     uint32_t carUid_ = 0;
     int planeFrame_ = 0, planePitch_ = 0;   // cPlaneLand +0x330, +0x328
     bool planeDone_ = false;                // +0x334
+    // its sound (+0x370, the simple SFX's channel) and that sound's pan (+0x374): the mission's memory starts zeroed
+    int planeSound_ = -1, planePan_ = 0;
     Emitter* clouds_ = nullptr;
     DoorHandler door_;                      // cCutscene_AtKennys +0x340
     static constexpr int32_t kKennysDoor[3] = {0x145A14, -0x3B999, 0};   // qword_47B508: (325.63, -59.60)
@@ -273,23 +275,33 @@ private:
             placePlayer(1752.17f, 21.06f, 0.f);
             planeFrame_ = planePitch_ = 0;
             planeDone_ = false;
+            planePan_ = 0;
         }, [this] {   // IntroFinished: PlaySequence
             Sequence* s = play("CSS_KEN_A01_PlaneLand.seq", [this] {   // SequenceEnd -> End
                 auto end = [this] {   // IntroEndFinished, Finish, then WaitAfterLanding
                     g_->removeScriptProp(kPlane);
                     g_->removeScriptProp(kShadow);
+                    TheSound().stopBankSfx(planeSound_);   // SoundImpl::StopSimpleSFX
+                    planeSound_ = -1;
                     wait(0x1E, [this] { doPortIntro(); });
                 };
                 if (brightness() != 0) fadeToBlack(0xF, end);
                 else end();
             });
             if (s) s->setCallback(0, [this] { wait(1, [this] { movePlane(); }); });   // StartPlane
+            // PlaneSound: Begin's LoadBankNow(0x13) put carbnkpl in RAM bank 1; its sample 0, full volume, once,
+            // from the middle (PlaySimpleSFX(0, 0x7F, 2, false, 1, 0x3F))
+            if (s) s->setCallback(1, [this] { planeSound_ = TheSound().playBankSfx(0x13, 0, 0x7F, 0x3F, false); });
         }, 0xF);
     }
 
     // cPlaneLand::MovePlane, every frame: down the glide path, the shadow under it, the nose lifting for the last
     // seventy frames; gone after 181
     void movePlane() {
+        if (planeSound_ != -1) {   // the sound pans a step right each frame
+            TheSound().panBankSfx(planeSound_, planePan_);
+            planePan_ = planePan_ + 1 >= 0x7F ? 0x7F : planePan_ + 1;
+        }
         const int n = planeFrame_;
         if (Game::ScriptProp* plane = g_->scriptProp(kPlane)) {
             plane->pos[0] = fx(2085.08f) + n * fx(-1.445f);

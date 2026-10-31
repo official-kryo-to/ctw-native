@@ -77,7 +77,35 @@ bool Sound::init(const std::string& dataDir) {
         if (file.empty() || carBanks_.count(file)) continue;
         carBanks_[file].load(fs, file.c_str());
     }
+    // the banks the missions' LoadBankNow asks for (kena01's plane: 0x13, carbnkpl), read now with the others
+    for (int e : {0x13}) {
+        const std::string file = bankFile(e);
+        if (!carBanks_.count(file)) carBanks_[file].load(fs, file.c_str());
+    }
     return true;
+}
+
+int Sound::playBankSfx(int romBank, int sample, int volume, int pan, bool loop) {
+    const auto bank = carBanks_.find(bankFile(romBank));
+    const uint8_t* pcm; uint32_t len, rate;
+    if (bank == carBanks_.end() || !bank->second.sample(sample, pcm, len, rate)) return -1;
+    const int v = Audio_SfxPlay(pcm, len, (int)rate, std::clamp(volume, 0, 127) / 127.f,
+                                std::clamp(pan, 0, 127) / 127.f * 2.f - 1.f, loop);
+    if (v <= 0) return -1;   // (0xFF: no channel)
+    simpleVolume_[v] = std::clamp(volume, 0, 127);
+    return v;
+}
+
+void Sound::panBankSfx(int voice, int pan) {   // cAudioBaseOAL::SetPan
+    const auto it = simpleVolume_.find(voice);
+    if (voice < 0 || it == simpleVolume_.end()) return;
+    Audio_SfxSet(voice, it->second / 127.f, std::clamp(pan, 0, 127) / 127.f * 2.f - 1.f, 1.f);
+}
+
+void Sound::stopBankSfx(int voice) {   // cAudio::StopChannel
+    if (voice < 0) return;
+    Audio_SfxStop(voice);
+    simpleVolume_.erase(voice);
 }
 
 void Sound::stopSlots(Entity& e, bool bankOnly) {
