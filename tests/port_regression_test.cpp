@@ -64,6 +64,60 @@ struct VehicleTestAccess {
         check(force(0x10, 0) == (int32_t)(((int64_t)full * 0x333) >> 12), "a burning engine has a fifth of its power");
         check(force(0xFF, 3) == (int32_t)(((int64_t)full * 0xA000) >> 12), "a heavy vehicle's burnout launch has ten times the power");
     }
+    // cDirectVehicleControl (Vehicle::SetStop / SetTempAction) and what the vehicle does with its yoke
+    static void directControl() {
+        const int32_t at[3] = {};
+        Vehicle v; v.init(VehicleInfo{},0,at,0,0);
+        v.steerLock_ = 0x2000;
+        Vehicle::Controls direct; direct.steerDirect = direct.noReverse = true; direct.steer = 0x800;
+        v.act(direct,false,nullptr);
+        check(v.b62_ == 0x20 && v.steerDirect_ == 0x800 && (v.b64_ & 1) && v.steerAngle_ == 0x800,
+              "a direct yoke puts the wheels at the steer of half the lock, and its braking never reverses");
+        Vehicle s; s.init(VehicleInfo{},0,at,0,0);
+        s.vel[1] = 0x10000;
+        Vehicle::Controls full; full.throttle = -0x1000;
+        s.act(full,false,nullptr);
+        check(s.vel[1] == 0x10000, "a full brake leaves the speed to the brakes");
+        Vehicle::Controls hard; hard.throttle = -0xA000;
+        s.act(hard,false,nullptr);
+        check(s.vel[1] == 0xCCD0, "braking at ten times full takes a fifth of the speed off a frame");
+
+        Vehicle c; c.init(VehicleInfo{},0,at,0,0); c.uid = 3;
+        c.vel[1] = 0x8000;
+        DirectVehicleControl stop(DirectVehicleControl::Stop, 0, c);
+        Vehicle::Controls o;
+        check(!stop.process(c, 0, o) && o.throttle == -0x1000 && o.steer == 0 && o.steerDirect && o.noReverse &&
+              o.alignToMotion && !o.handbrake, "a stop order brakes at full where it was told");
+        c.pos[1] += 0x2800;
+        o = {}; stop.process(c, 0, o);
+        check(o.throttle == -(0x1000 + 9 * 0x800), "the brake grows with the distance past the point");
+        c.pos[1] += 0x5000;
+        o = {}; stop.process(c, 0, o);
+        check(o.throttle == -0xA000, "at most ten times full, five units past it");
+        c.vel[1] = 0x198;
+        o = {}; check(stop.process(c, 0, o), "the stop is done once the vehicle is all but still");
+        c.vel[1] = 0;
+        o = {}; stop.process(c, 0, o);
+        check(o.throttle == 0, "nothing on the brake at a standstill");
+
+        c.vel[1] = 0x8000;
+        DirectVehicleControl brake(DirectVehicleControl::BrakeStop, 0x78, c);
+        o = {}; check(!brake.process(c, 4, o) && o.throttle == -0x1800 && o.steer == -0x1000,
+                      "the brake stop nudges the steering on every 8th frame (the frame and the entity's id byte)");
+        o = {}; brake.process(c, 5, o);
+        check(o.steer == 0, "and holds it straight between");
+        c.vel[1] = 0x198;
+        o = {}; check(brake.process(c, 5, o), "the brake stop is done at a standstill, not when its frames run out");
+
+        c.vel[1] = 0x6000;
+        DirectVehicleControl turn(DirectVehicleControl::HandbrakeTurn, 2, c);
+        o = {}; check(!turn.process(c, 0, o) && o.handbrake && o.throttle == 0x1000 && o.steer == -0x1000,
+                      "a handbrake turn: full throttle, the handbrake and the wheels hard left");
+        o = {}; check(turn.process(c, 0, o), "the turn ends when its frames run out");
+        DirectVehicleControl slow(DirectVehicleControl::HandbrakeTurn, 0x78, c);
+        c.vel[1] = 0x4FFF;
+        o = {}; check(slow.process(c, 0, o) && !o.handbrake && o.throttle == 0, "or once below 5 units a second");
+    }
     static void knockOff() {
         VehicleInfo info{}; info.raw[0] = 1;   // a bike
         const int32_t at[3] = {};
@@ -1640,7 +1694,7 @@ int main() {
     check(!Audio_SfxPlaying(voice), "resumed sound effect finishes normally");
     playerFrameIntegration(); vehicleEntry();
     PlayerTestAccess::fightIdle(); SoundTestAccess::run(); CollisionTestAccess::run(); CollisionTestAccess::cameraTests(); CollisionTestAccess::minigameCamTests(); PropTestAccess::run(); PropDynamicsTestAccess::run();
-    slats(); garbage(); VehicleTestAccess::flaps(); VehicleTestAccess::burnouts(); VehicleTestAccess::knockOff(); VehicleTestAccess::debris(); WaterTestAccess::run(); randomStreams(); explosionsAndShake(); fireAndCamera(); RadioTestAccess::run();
+    slats(); garbage(); VehicleTestAccess::flaps(); VehicleTestAccess::burnouts(); VehicleTestAccess::directControl(); VehicleTestAccess::knockOff(); VehicleTestAccess::debris(); WaterTestAccess::run(); randomStreams(); explosionsAndShake(); fireAndCamera(); RadioTestAccess::run();
     Audio_Shutdown();
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }

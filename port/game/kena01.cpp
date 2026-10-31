@@ -5,10 +5,11 @@
 // at the port and the intro movie, then Huang on the jetty, a car, Uncle Kenny's restaurant and the apartment.
 //
 // Not ported yet, and passed over here: the GPS route, the on-screen buttons' flashing
-// (cIPhonePad::FlashButton) with the help texts, the safehouse's building swap and purchase, and Vehicle::SetStop on
-// the player's car. At the port and the pier the people
-// are puppets the scene moves (getting in and out of cars without the door animations, Ped::SetDive as a step out
-// and a walk) and only the bodyguards' deaths are decided, as the story has them.
+// (cIPhonePad::FlashButton) with the help texts, and the safehouse's building swap and purchase. At the port and the
+// pier the people are puppets the scene moves (getting in and out of cars without the door animations, Ped::SetDive
+// as a step out and a walk) and only the bodyguards' deaths are decided, as the story has them; their cars' goto
+// (Vehicle::SetGoTo) is AIDriving::towards, braking hard on the handbrake within 3 units of the point
+// (cGotoTargetInVehicle is not ported).
 #include "mission.h"
 #include "game.h"
 #include "intro.h"
@@ -396,12 +397,21 @@ private:
         if (Vehicle* c = car(which))
             for (int k = 0; k < 3; ++k) c->vel[k] = c->fwd[k] * unitsPerSecond;
     }
-    void stopCar(int which) {   // Vehicle::ClearAllOrders / SetStop: brakes on
+    void goalReached(int which) {   // (the port's goto at its point: brakes on)
         sceneCars_[which].driving = false;
         Vehicle::Controls brake;
         brake.throttle = -0x1000;
         brake.handbrake = true;
         if (sceneCars_[which].uid) g_->scriptCarControls[sceneCars_[which].uid] = brake;
+    }
+    // Vehicle::SetStop / ClearAllOrders on a scene car: its goto is over
+    void setStop(int which, bool now) {
+        sceneCars_[which].driving = false;
+        if (Vehicle* c = car(which)) g_->setStop(*c, now);
+    }
+    void clearOrders(int which) {
+        sceneCars_[which].driving = false;
+        if (Vehicle* c = car(which)) g_->clearCarOrders(*c);
     }
     // Entity::SetPosition + SetHeading: the port's vehicles take their pose when made, so the car is made again
     // there, its driver kept in it
@@ -409,7 +419,7 @@ private:
         Vehicle* c = car(which);
         if (!c) return;
         const int info = c->infoId;
-        g_->scriptCarControls.erase(c->uid);
+        g_->clearCarOrders(*c);
         for (int a = 0; a < kActors; ++a)
             if (actors_[a].car == which && actors_[a].seat == 0)
                 if (Pedestrians::Ped* p = ped(a)) p->puppet.vehicle = 0;
@@ -456,7 +466,7 @@ private:
             Vehicle* c = car(i);
             if (!c || !sc.driving) continue;
             const int64_t dx = (int64_t)sc.goal[0] - c->pos[0], dy = (int64_t)sc.goal[1] - c->pos[1];
-            if (dx * dx + dy * dy < (int64_t)0x3000 * 0x3000) { stopCar(i); continue; }
+            if (dx * dx + dy * dy < (int64_t)0x3000 * 0x3000) { goalReached(i); continue; }
             g_->scriptCarControls[c->uid] = AIDriving::towards(*c, g_->traffic.drivingProps(), sc.goal, sc.speed << 12);
         }
         for (int i = 0; i < kActors; ++i) {
@@ -551,9 +561,11 @@ private:
             launch(kCarA, 0x32);
             launch(kCarB, 0x32);
         });
-        s->setCallback(0xE, [this] {   // RepositionCars
-            stopCar(kCarA);
-            stopCar(kCarB);
+        s->setCallback(0xE, [this] {   // RepositionCars: stopped dead, orders cleared, and moved
+            setStop(kCarA, true);
+            setStop(kCarB, true);
+            clearOrders(kCarA);
+            clearOrders(kCarB);
             placeCar(kCarA, 1779.74f, 36.20f, 0x87);
             placeCar(kCarB, 1803.20f, 31.01f, 0x87);
         });
@@ -565,7 +577,17 @@ private:
             launch(kCarA, 0x32);
             launch(kCarB, 0x32);
         });
-        s->setCallback(0xB, [this] { stopCar(kCarA); stopCar(kCarB); });   // AllStop1
+        s->setCallback(0xA, [this] {   // HandbrakeTurn1: the skid (resbnk 0x2F4 at 0x28, once), car B round
+            TheSound().playResidentSfx(0x2F4, 0x28, 0x3F, false);
+            if (Vehicle* c = car(kCarB)) g_->setTempAction(*c, DirectVehicleControl::HandbrakeTurn, 0x78);
+        });
+        s->setCallback(0xB, [this] {   // AllStop1: car B told to stop
+            clearOrders(kCarB);
+            setStop(kCarB, false);
+        });
+        s->setCallback(0xC, [this] {   // AllStop2: car A brakes
+            if (Vehicle* c = car(kCarA)) g_->setTempAction(*c, DirectVehicleControl::BrakeStop, 0x78);
+        });
         s->setCallback(0xD, [this] {   // EverybodyOut, then the shooting (Shoot1, Out2, Out4)
             getOut(kAmbusherB1);
             walkTo(kAmbusherB1, 1794.31f, -44.98f);
@@ -574,7 +596,7 @@ private:
                 wait(2, [this] { kill(kBodyguard2, kAmbusherB1); });   // BodyShoot1
             });
             wait(0x11, [this] {   // Out2
-                stopCar(kCarA);
+                setStop(kCarA, true);
                 getOut(kAmbusherA1);
                 kill(kAmbusherA1, kBodyguard1);
                 kill(kBodyguard1, kAmbusherA1);
@@ -601,6 +623,7 @@ private:
             if (actors_[i].ped) g_->peds.removePuppet(*g_, actors_[i].ped);
         for (int i = 0; i < kCars; ++i) {
             if (!sceneCars_[i].uid) continue;
+            g_->directControls.erase(sceneCars_[i].uid);
             g_->scriptCarControls.erase(sceneCars_[i].uid);
             if (Vehicle* c = car(i)) g_->removeCar((int)(c - g_->cars.data()));
         }
@@ -978,6 +1001,7 @@ private:
         g_->removeBlip(2);
         secondHelp_.stop();
         g_->contextHelp.clearHelp(*g_);
+        if (g_->playerCar >= 0) g_->setStop(g_->cars[g_->playerCar], false);
         g_->hudText.deleteQueue();
         g_->cutscene = g_->scriptCutscene = true;
         g_->widescreen.set(true);   // cCutscene_AtKennys::Begin: StartCutscene(true)
@@ -1010,9 +1034,10 @@ private:
     }
 
     // ParkAtSafehouseComplete: the area, blip and route go, StartCutscene(false); to black over 15 frames unless it
-    // is black already, and 60 frames on StartSafehouseCutscene (Vehicle::SetStop on the player's car is not ported)
+    // is black already, and 60 frames on StartSafehouseCutscene; the player's car is told to stop (Vehicle::SetStop)
     void parkAtSafehouseComplete() {
         g_->removeBlip(3);
+        if (g_->playerCar >= 0) g_->setStop(g_->cars[g_->playerCar], false);
         g_->hudText.deleteQueue();
         g_->hudText.clearHelp();
         g_->cutscene = g_->scriptCutscene = true;

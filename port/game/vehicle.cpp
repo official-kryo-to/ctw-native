@@ -214,6 +214,11 @@ void Vehicle::setPose(const int32_t p[3], const float q[4], const int32_t veloci
     std::copy(velocity, velocity + 3, vel);
 }
 
+void Vehicle::deadStop() {   // cPhysical::DeadStop -> cSimpleMover::DeadStop
+    vel[0] = vel[1] = vel[2] = 0;
+    for (int k = 0; k < 3; ++k) accel_[k] = force_[k] = torque_[k] = 0;   // +0xF8..+0x11B
+}
+
 int16_t Vehicle::heading() const { return (int16_t)-atan2q(-fwd[0], fwd[1]); }
 int32_t Vehicle::speed() const { return (int32_t)isqrt((int64_t)vel[0] * vel[0] + (int64_t)vel[1] * vel[1] + (int64_t)vel[2] * vel[2]); }
 
@@ -389,9 +394,13 @@ void Vehicle::act(const Controls& yIn, bool playerDriving, Collision* col) {
     if (hazards) indicators = 3;               // CommonActToSimpleAndPhysics: bit 9 sets both every frame
     // cWheeledVehicle::Act (the driver's controls)
     b62_ = 0;
+    b64_ = (uint16_t)((b64_ & 0xFFFE) | (y.noReverse ? 1 : 0));
     steerInputAbs_ = std::abs(y.steer);
     throttleAbs_ = std::abs(y.throttle);
-    if (y.steer < 0) b62_ = 4;
+    if (y.steerDirect) {
+        b62_ = 0x20;
+        steerDirect_ = y.steer;
+    } else if (y.steer < 0) b62_ = 4;
     else if (y.steer > 0) b62_ = 8;
     if (y.handbrake) {
         ++handbrakeTimerHb_;
@@ -445,7 +454,7 @@ void Vehicle::act(const Controls& yIn, bool playerDriving, Collision* col) {
     else handbrakeTimer_ = (int16_t)std::max(handbrakeTimer_ - 6, 0);
     if (!physics_ && b62_ == 0) {   // parked and nobody touches it: nothing to do
         for (Tyre& t : tyre_) { t.skid = t.spinning = t.slide = t.rimSparks = false; }
-    } else updatePhysics(col);
+    } else updatePhysics(col, y);
     if (bike_) bikeAct(y);
 }
 
@@ -556,8 +565,26 @@ void Vehicle::riderRenderBasis(float out[9]) const {
     }
 }
 
-void Vehicle::updatePhysics(Collision* col) {   // cWheeledVehicle::UpdatePhysics (on land)
+void Vehicle::updatePhysics(Collision* col, const Controls& y) {   // cWheeledVehicle::UpdatePhysics (on land)
     updateSteering();
+    if (y.alignToMotion &&
+        (int64_t)vel[0] * vel[0] + (int64_t)vel[1] * vel[1] + (int64_t)vel[2] * vel[2] >= 0x190000001LL) {
+        // over 20 units a second: the back wheels lose their grip, the nose lifts, and the spin turns the body
+        // towards where it is going, the gap between the two headings (the body's forward, +0x156 / +0x158, and the
+        // motion's) taken within a quarter turn (Q12 angles, a turn 2^28)
+        tyre_[1].grip = 0;
+        tiltV_ += 0x28;
+        const int32_t facing = atan2q((int16_t)-fwd[0], (int16_t)-fwd[1]);
+        const int32_t motion = atan2q(-vel[0], -vel[1]);
+        const uint32_t f = (uint32_t)(int32_t)(int16_t)facing << 12, m = (uint32_t)(int32_t)(int16_t)motion << 12;
+        uint32_t gap = (uint32_t)((int32_t)(int16_t)facing - (int32_t)(int16_t)motion) << 12;
+        if ((int32_t)gap >= 0x4000000) gap = 0x4000000;
+        uint32_t lo = m + ((f - m - gap + 0x7FFFFFF) & 0xF8000000u);
+        int32_t below = (int32_t)(f - lo);
+        if (below <= (int32_t)0xFC000000) below = (int32_t)0xFC000000;
+        const uint32_t hi = f + (((uint32_t)below - (f - lo) + 0x7FFFFFF) & 0xF8000000u);
+        angVel[2] += (int32_t)(hi - lo) >> 10;   // (the game's -=: its spin is negated)
+    }
     updateEngine();
     updateTyres(col);
     if (burnout_ == 3) {   // the flames burn the build-up down and pitch the nose up
@@ -566,6 +593,10 @@ void Vehicle::updatePhysics(Collision* col) {   // cWheeledVehicle::UpdatePhysic
         if (burnoutPower_ < 0) burnout_ = 0;
     } else if (burnout_ == 1) burnout();
     if (gear_ == -1) { burnoutPower_ = 0; burnout_ = 0; }
+    if (y.throttle <= -0x1001) {   // braking harder than full: the speed goes as well, 4187 - 91 x the brake a frame
+        const int32_t keep = (int32_t)(((int64_t)y.throttle * 0x5B00000 + 0x105B00000000LL) >> 32);
+        for (int k = 0; k < 3; ++k) vel[k] = mulq(keep, vel[k]);
+    }
     calcForces();
     if (physics_ && !(b62_ & 3) && simple_) {
         // CanCarComeOutOfPhysicsMode: never in the middle of a burnout
@@ -624,6 +655,10 @@ void Vehicle::burnout() {   // cWheeledVehicle::Burnout, cBike::Burnout
 }
 
 void Vehicle::updateSteering() {   // cWheeledVehicle::UpdateSteering
+    if (b62_ & 0x20) {   // steered directly: the steer of half the lock, not limited
+        steerAngle_ = mulq(steerDirect_, (steerLock_ < 0 ? steerLock_ + 1 : steerLock_) >> 1);
+        return;
+    }
     int32_t rate = tyre_[1].spin == 0 ? steerLock_ : mulq(steerRate_, steerInputAbs_ ? steerInputAbs_ : 0x1000);
     int32_t a;
     if (b62_ & 4) a = std::min(steerAngle_, 0) - rate;

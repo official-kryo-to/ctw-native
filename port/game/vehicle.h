@@ -47,6 +47,10 @@ class Vehicle {
 public:
     struct Controls {   // sVirtYoke +0x38, +0x3C, +0x60, +0x8B (the burnout button)
         int32_t throttle = 0, steer = 0; bool handbrake = false, burnout = false;
+        // what cDirectVehicleControl also sets: +0xA2 the wheels go straight to the steer (cWheeledVehicle +0xB62
+        // 0x20, the steer kept at +0xAF0), +0xA5 braking never turns into reversing (+0xB64 bit 0), +0x9A over 20
+        // units a second the body is turned towards its motion (cWheeledVehicle::UpdatePhysics)
+        bool steerDirect = false, noReverse = false, alignToMotion = false;
     };
 
     void init(const VehicleInfo& info, int infoId, const int32_t pos[3], int16_t heading, int palette);
@@ -195,6 +199,8 @@ private:
     void placeUpright(const int32_t p[3], int16_t heading);
 public:
     void setToPhysics(bool on);
+    // cPhysical::DeadStop: no speed (cSimpleMover's), and no acceleration, force or torque; the spin is kept
+    void deadStop();
     void collisionSpheres(int32_t (*out)[4], int& n) const { spheres(out, n); }   // cPhysical::CalcSpheres
 private:
     void setToSimple(bool on);
@@ -215,7 +221,7 @@ private:
     void applyTyreForce(Tyre& t);
     void calcForces();
     void handleSettling(Collision* col);
-    void updatePhysics(Collision* col);
+    void updatePhysics(Collision* col, const Controls& y);
     // cPhysicalIntegrator
     void fullCollision(Collision* col, bool meshNear);
     void simpleCollision(Collision* col);
@@ -261,6 +267,7 @@ private:
     int32_t brakeForce_ = 0, drag_ = 0, steerLock_ = 0, steerRate_ = 0, steerSpeedRed_ = 0;   // +0xAB4..+0xAC4
     int32_t driveSplit_ = 0x800, brakeSplit_ = 0x800, wheelRadius_ = 0x800;   // +0xB18, +0xB24, +0xB1C
     int32_t steerInputAbs_ = 0, throttleAbs_ = 0, steerAngle_ = 0, traction_ = 0, sticky_ = 0x1000;   // +0xAE8 +0xAEC +0xB20 +0xB2C +0xB3C
+    int32_t steerDirect_ = 0;                 // +0xAF0: the steer, while the yoke steers the wheels directly
     uint8_t b62_ = 0;                         // what the driver does: 1 gas, 2 brake, 4 left, 8 right, 0x10/0x40 handbrake
     uint16_t b64_ = 0;
     // burnouts (+0xB63 state: 1 spinning on the spot, 2 released, 3 launched with flaming tyres), their build-up

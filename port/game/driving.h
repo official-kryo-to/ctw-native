@@ -68,3 +68,25 @@ public:
                                     const int32_t target[3], int32_t speedLimit,
                                     const int32_t* targetMotion = nullptr);
 };
+
+// cDirectVehicleControl: a script's order that works the vehicle's controls itself for a while (Vehicle::SetStop(false)
+// on thread 0, Vehicle::SetTempAction on thread 2, above whatever the vehicle was doing). It keeps where the vehicle
+// was (+0x18) and its heading (+0x28) when told. Ported: the actions kena01 gives.
+class DirectVehicleControl {
+public:
+    enum Action {
+        HandbrakeTurn = 4,   // full throttle on the handbrake, wheels hard left, until it has turned (+0x2A) a quarter
+        Stop = 11,           // brake to a standstill where it was told, holding the heading (Vehicle::SetStop)
+        BrakeStop = 12,      // brake at one and a half, nudging the heading straight every 8th frame
+    };
+    DirectVehicleControl(Action action, uint32_t frames, const Vehicle& vehicle);
+    // Process: this frame's yoke (into a fresh one); true when the order is done (that frame still drives)
+    bool process(const Vehicle& vehicle, uint32_t frameCounter, Vehicle::Controls& yoke);
+private:
+    int32_t at_[2];        // +0x18
+    Action action_;        // +0x20
+    uint32_t timer_;       // +0x24: frames left
+    uint16_t heading_;     // +0x28
+    int16_t turn_;         // +0x2A: 0x4000 for the turns, else 0
+    uint8_t state_ = 0;    // +0x2D: the turn's counter-steer frames
+};

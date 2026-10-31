@@ -16,6 +16,15 @@ int32_t divideQ12(int32_t numerator, int32_t denominator) {
 int32_t length3(const int32_t v[3]) {
     return (int32_t)std::sqrt((double)((int64_t)v[0]*v[0] + (int64_t)v[1]*v[1] + (int64_t)v[2]*v[2]));
 }
+// ATan2(cFixed, cFixed): atan2f x 10430, truncated
+int16_t atan2q(int32_t y, int32_t x) {
+    return (int16_t)std::clamp((int)(atan2f((float)y, (float)x) * 10430.f), -0x8000, 0x7FFF);
+}
+// cDirectVehicleControl's steer to take out a heading error: -(error / 10 degrees), at most full lock
+int32_t steerAgainst(int16_t error) {
+    const int32_t s = (int32_t)((((int64_t)error << 32) / 1820) >> 20);
+    return -std::clamp(s, -0x1000, 0x1000);
+}
 // Angle result at 0x6dfc94 (ATan uses the original float conversion and truncation).
 int16_t targetAngle(int32_t dp, bool negative) {
     dp = std::clamp(dp, -4096, 4096);
@@ -217,4 +226,66 @@ Vehicle::Controls AIDriving::towards(const Vehicle& vehicle, const DrivingProps&
     const int32_t desired = std::max(0,std::min({speedLimit,data.speedForSteering(c),data.speedForDeceleration(c)}));
     result.throttle = data.gas(c,desired);
     return result;
+}
+
+DirectVehicleControl::DirectVehicleControl(Action action, uint32_t frames, const Vehicle& vehicle)
+    : action_(action), timer_(frames) {
+    at_[0] = vehicle.pos[0];
+    at_[1] = vehicle.pos[1];
+    heading_ = (uint16_t)-atan2q(-vehicle.fwd[0], vehicle.fwd[1]);
+    turn_ = action == HandbrakeTurn ? 0x4000 : 0;   // (actions 3 and 4 without a given angle)
+}
+
+bool DirectVehicleControl::process(const Vehicle& vehicle, uint32_t frameCounter, Vehicle::Controls& yoke) {
+    // +0xA2 and +0xA3 set, +0x7D cleared (the stuck list's check, which the port has no list for)
+    yoke.steerDirect = true;
+    const int16_t facing = atan2q(-vehicle.fwd[0], vehicle.fwd[1]);
+    const int32_t turned = heading_ + facing;          // how far it has turned since (W23)
+    const int16_t error = (int16_t)-turned;
+    const int32_t speed = vehicle.speed();             // cSimpleMover::GetSpeed
+    bool forced = false;
+    switch (action_) {
+    case Stop: {
+        // harder the further it has gone past the point, up to 5 units: -1 to -10 (UpdatePhysics takes the speed
+        // down for anything past -1)
+        const int32_t dx = (int32_t)((uint32_t)vehicle.pos[0] - (uint32_t)at_[0]);
+        const int32_t dy = (int32_t)((uint32_t)vehicle.pos[1] - (uint32_t)at_[1]);
+        const uint32_t d = (uint32_t)std::sqrt((double)(uint64_t)((int64_t)dx * dx + (int64_t)dy * dy));
+        int32_t ratio = (int32_t)(((int64_t)((uint64_t)d << 32) / 0x5000) >> 20);
+        ratio = std::max(std::min(ratio, 0x1000), 0);
+        yoke.throttle = speed ? -(0x1000 + 9 * ratio) : 0;
+        yoke.steer = steerAgainst(error);
+        yoke.alignToMotion = yoke.noReverse = true;
+        return speed <= 0x198;
+    }
+    case BrakeStop: {
+        yoke.throttle = -0x1800;
+        int16_t nudge = 0;
+        if ((frameCounter + (vehicle.uid & 0xFF) & 7) == 7)   // +0x63, timeslice 0
+            nudge = (int16_t)((error < 0 ? -0x71C : 0x71C) - turned);
+        yoke.steer = steerAgainst(nudge);
+        yoke.alignToMotion = yoke.noReverse = true;
+        return speed < 0x199;
+    }
+    case HandbrakeTurn: {
+        const int16_t t = (int16_t)turned;
+        const int16_t amount = (int16_t)(t < 0 ? -t : t);
+        if (speed < 0x5000 || amount > turn_) { forced = true; break; }   // too slow, or turned enough
+        if (amount <= (3 * turn_ < 0 ? 3 * turn_ + 3 : 3 * turn_) >> 2) {
+            if (state_) { yoke.throttle = 0x1000; forced = true; break; }
+            yoke.handbrake = true;
+            yoke.throttle = 0x1000;
+            yoke.steer = -0x1000;
+        } else {
+            // the last quarter: counter-steer for 4 frames, then done
+            yoke.throttle = yoke.steer = 0x1000;
+            if (!state_) state_ = 4;
+            else if (!(state_ = (uint8_t)(state_ - 1))) forced = true;
+        }
+        break;
+    }
+    }
+    const uint32_t before = timer_;   // its frames run down one a frame (1 << the timeslice)
+    timer_ = before < 1 ? 0 : before - 1;
+    return forced || before <= 1;
 }

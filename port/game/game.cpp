@@ -1503,6 +1503,11 @@ void Game::tick() {
             dc.burnout = scriptedBurnoutFrom >= 0 && (int)frame >= scriptedBurnoutFrom && (int)frame < scriptedBurnoutTo;
             if (dc.burnout) dc.throttle = -0x1000;
         }
+        // a script's order on the car: the player's, ahead of cPlayerInVehicle (the controls), until it is done
+        if (const auto order = directControls.find(cars[playerCar].uid); order != directControls.end()) {
+            dc = Vehicle::Controls{};
+            if (order->second.process(cars[playerCar], frame, dc)) directControls.erase(order);
+        }
         if (task.op == CarTask::Braking) {   // cExitCar OP 2: brake against the motion (handbrake when going forward)
             Vehicle& c = cars[playerCar];
             bool back = (int64_t)c.vel[0] * c.fwd[0] + (int64_t)c.vel[1] * c.fwd[1] + (int64_t)c.vel[2] * c.fwd[2] < 0;

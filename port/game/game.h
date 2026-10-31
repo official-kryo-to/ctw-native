@@ -15,6 +15,7 @@
 #include "radio.h"
 #include "roads.h"
 #include "traffic.h"
+#include "driving.h"
 #include "vehicle.h"
 #include "gfx/model.h"
 #include "gfx/pedsprites.h"
@@ -323,7 +324,16 @@ public:
     std::map<uint32_t, Vehicle::Controls> scriptCarControls;
     struct ScriptWalk { bool on = false; int32_t target[3] = {0, 0, 0}; bool walking = true; } scriptWalk;
     bool scriptAnim = false;
-    Vehicle::Controls carControls(const Vehicle& car) const;   // a script's, else the traffic AI's
+    Vehicle::Controls carControls(const Vehicle& car);   // its order's, else a script's, else the traffic AI's
+    // A script's cDirectVehicleControl on a vehicle (on its driver's orders, when someone drives it): it works the
+    // controls until it is done. Vehicle::SetStop(false) on thread 0, Vehicle::SetTempAction on thread 2, above the
+    // vehicle's own orders, which carry on after it; both only with a driver in it, as at each of kena01's calls.
+    std::map<uint32_t, DirectVehicleControl> directControls;
+    // Vehicle::SetStop: now - cPhysical::DeadStop, then a cIdle (nothing on the controls); else a Stop order (a
+    // cIdle too for vehicle class 0x2C, which no caller here stops)
+    void setStop(Vehicle& car, bool now);
+    void setTempAction(Vehicle& car, DirectVehicleControl::Action action, uint32_t frames);   // Vehicle::SetTempAction
+    void clearCarOrders(const Vehicle& car);   // Vehicle::ClearAllOrders
     static constexpr int kScriptFountains = -1;         // fountains' key for FXImpl::CreateFountain from scripts
     std::vector<ScriptProp> scriptProps;
     bool garageDoor(int garage, Collision::Prop& out);   // its door, when the world has it

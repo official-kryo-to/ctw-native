@@ -66,6 +66,7 @@ public:
     // -> cAudioBaseOAL::PlaySfx): no position, volume 0..127, pan 0..127; the voice, or -1. PanSimpleSFX moves its
     // pan, StopSimpleSFX stops it.
     int playBankSfx(int romBank, int sample, int volume, int pan, bool loop);
+    int playResidentSfx(int sample, int volume, int pan, bool loop);   // the same on RAM bank 0 (resbnk)
     void panBankSfx(int voice, int pan);
     void stopBankSfx(int voice);
 
@@ -80,6 +81,7 @@ private:
     Bank res_, car_;
     std::map<std::string, Bank> carBanks_;
     std::map<int, int> simpleVolume_;   // a simple SFX voice's volume (0..127)
+    int playSimple(const Bank& bank, int sample, int volume, int pan, bool loop);   // cAudio::PlaySfx
     const Bank* activeCarBank_ = nullptr;
     SoundTables tables_;
     int carBankEnum_ = -1;

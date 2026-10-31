@@ -87,8 +87,17 @@ bool Sound::init(const std::string& dataDir) {
 
 int Sound::playBankSfx(int romBank, int sample, int volume, int pan, bool loop) {
     const auto bank = carBanks_.find(bankFile(romBank));
+    if (bank == carBanks_.end()) return -1;
+    return playSimple(bank->second, sample, volume, pan, loop);
+}
+
+int Sound::playResidentSfx(int sample, int volume, int pan, bool loop) {
+    return playSimple(res_, sample, volume, pan, loop);
+}
+
+int Sound::playSimple(const Bank& bank, int sample, int volume, int pan, bool loop) {
     const uint8_t* pcm; uint32_t len, rate;
-    if (bank == carBanks_.end() || !bank->second.sample(sample, pcm, len, rate)) return -1;
+    if (!bank.sample(sample, pcm, len, rate)) return -1;
     const int v = Audio_SfxPlay(pcm, len, (int)rate, std::clamp(volume, 0, 127) / 127.f,
                                 std::clamp(pan, 0, 127) / 127.f * 2.f - 1.f, loop);
     if (v <= 0) return -1;   // (0xFF: no channel)

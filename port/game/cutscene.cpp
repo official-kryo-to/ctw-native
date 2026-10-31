@@ -302,7 +302,30 @@ void Game::renderScriptProps() {
     }
 }
 
-Vehicle::Controls Game::carControls(const Vehicle& car) const {
+Vehicle::Controls Game::carControls(const Vehicle& car) {
+    const auto order = directControls.find(car.uid);
+    if (order != directControls.end()) {   // cAITaskHub::Process runs only the top thread's task
+        Vehicle::Controls y;
+        if (order->second.process(car, frame, y)) directControls.erase(order);
+        return y;
+    }
     const auto it = scriptCarControls.find(car.uid);
     return it != scriptCarControls.end() ? it->second : traffic.controls(car.uid);
+}
+
+void Game::setStop(Vehicle& car, bool now) {
+    if (now) {
+        car.deadStop();
+        directControls.erase(car.uid);
+        scriptCarControls[car.uid] = Vehicle::Controls{};   // cIdle
+    } else directControls.insert_or_assign(car.uid, DirectVehicleControl(DirectVehicleControl::Stop, 0, car));
+}
+
+void Game::setTempAction(Vehicle& car, DirectVehicleControl::Action action, uint32_t frames) {
+    directControls.insert_or_assign(car.uid, DirectVehicleControl(action, frames, car));
+}
+
+void Game::clearCarOrders(const Vehicle& car) {
+    directControls.erase(car.uid);
+    scriptCarControls.erase(car.uid);
 }
