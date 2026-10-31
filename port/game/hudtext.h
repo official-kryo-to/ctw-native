@@ -67,6 +67,8 @@ void UpdatePrinting(float scale);
 void SkipPrinting(const std::shared_ptr<Sprite>& s, float scale);   // SetPriority(p, true): re-listed as newest
 void RemoveSprite(const std::shared_ptr<Sprite>& s);   // RemoveSprite(s, true): it and its shadow
 void RenderSprites(int width, int height);           // cPda::Render's ProcessSprites over the lists
+// a screen point (drawable pixels) in the HUD's aspect-corrected 1024 x 768 space (cTouchScreen's coordinates)
+void ScreenToHud(int sx, int sy, int width, int height, int out[2]);
 
 // cHudString<uint> and cHudString<HELP_TEXT_PARAMS>
 struct HudString {
@@ -100,6 +102,8 @@ public:
     virtual int verticalAlignment() = 0;
     virtual int xCoordWhenNotAligned() = 0;
     virtual int leftRightAlignBorder() { return 8; }
+    virtual bool areTouchesToBeHeeded() { return false; }
+    virtual void heedTouchEvent() {}
 };
 
 // cTextWithBox<T> on cEasyClearAndRemoveTextQueue<T>: a queue of strings shown one at a time in a box that grows to
@@ -181,6 +185,9 @@ public:
     void initializeForFirstUse() override;
     void updateDimensions(int& w, int& h, int globalJustify, bool paused) override;
     bool wasTouched() const { return touched_; }
+    bool areTouchesToBeHeeded() override { return state() == 4; }
+    // HeedTouchEvent: the string's callback, else it goes at the next update and the box counts as touched
+    void heedTouchEvent() override;
     std::function<void(int sfx, int volume)> playHudSfx;   // cAudioManager::PlayHudSfx
 protected:
     int computeBoxHeight(const HudString& s) override { return middleSections(s) * 16 + 32; }
@@ -206,7 +213,8 @@ class Layout {
 public:
     explicit Layout(std::vector<Element*> elements, int top) : elements_(std::move(elements)), dims_(elements_.size()),
                                                                top_(top) {}
-    void updateAndLayout(bool paused);
+    // touch: a press this frame in the HUD's aspect-corrected 1024 x 768 space (y down), or null
+    void updateAndLayout(bool paused, const int* touch = nullptr);
     void switchGlobalAlignment(int h, int v);
     int lastBottomY() const { return lastBottom_; }
 private:
@@ -275,10 +283,10 @@ public:
     // just above the middle with a win / lose line up (which then sits at the middle)
     void displayBustedWasted(const std::u16string& text, int font, unsigned frames, bool now, bool clearObjectives);
     // HUDText::UpdateText: the script-text queues, then g_DynamicHud
-    void update(bool paused) {
+    void update(bool paused, const int* touch = nullptr) {
         winLose_.update(paused);
         bustedWasted_.update(paused);
-        layout_.updateAndLayout(paused);
+        layout_.updateAndLayout(paused, touch);
     }
 private:
     ObjectiveText objective_;

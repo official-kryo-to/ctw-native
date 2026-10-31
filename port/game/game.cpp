@@ -1405,7 +1405,15 @@ void Game::tick() {
     updateSequence();
     screenFade.tick();
     contextHelp.tick(*this);
-    hudText.update(false);   // HUDText::UpdateText: g_DynamicHud's UpdateAndLayout
+    {   // HUDText::UpdateText: g_DynamicHud's UpdateAndLayout, with this frame's press (cTouchScreen) for the boxes
+        int touch[2], mx, my;
+        const bool pressed = Plugins_HostApi().mouse_clicked(0) != 0;
+        if (pressed) {
+            Host_GetMouse(&mx, &my);
+            HudText::ScreenToHud(mx, my, (int)OS_ScreenGetWidth(), (int)OS_ScreenGetHeight(), touch);
+        }
+        hudText.update(false, pressed ? touch : nullptr);
+    }
     // RefreshSprite's typing: in a cutscene at cutSceneScale (2 on a screen 1501 or more wide), else 1.5
     HudText::UpdatePrinting(cutscene ? (OS_ScreenGetWidth() >= 0x5DD ? 2.f : 1.5f) : 1.5f);
     sinkingCar.process(frame);

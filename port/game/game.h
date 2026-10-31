@@ -246,12 +246,20 @@ public:
     ScreenFade screenFade;
     HudText::Hud hudText;                // HUDText: g_ObjectiveText and g_HelpText in g_DynamicHud
     ContextHelp contextHelp;             // gpContextHelp: the help box's owner
-    // SaveGameImpl::HelpDisplayed: the helps shown once a game (not saved here)
-    bool helpDisplayed(int id) const { return id >= 0 && id < 128 && (helpShown_[id >> 6] >> (id & 63) & 1); }
-    void setHelpDisplayed(int id) { if (id >= 0 && id < 128) helpShown_[id >> 6] |= 1ull << (id & 63); }
+    // SaveGameImpl::HelpDisplayed(id[, set]): the bit for each help shown once a game, in 32-bit words (the save
+    // game's script section +0x2C on). The port saves no games, so they last as long as the game does.
+    bool helpDisplayed(int id) const {
+        return id >= 0 && (size_t)(id >> 5) < helpWords_.size() && (helpWords_[(size_t)(id >> 5)] >> (id & 31) & 1);
+    }
+    void setHelpDisplayed(int id, bool shown = true) {
+        if (id < 0) return;
+        if ((size_t)(id >> 5) >= helpWords_.size()) helpWords_.resize((size_t)(id >> 5) + 1, 0);
+        uint32_t& w = helpWords_[(size_t)(id >> 5)];
+        w = (w & ~(1u << (id & 31))) | (uint32_t)shown << (id & 31);
+    }
     // HUDText::DisplayWinLose ("MISSION PASSED" / "MISSION FAILED") as the mission's end shows it
     void showWinLose(const std::u16string& text, int frames);
-    uint64_t helpShown_[2] = {0, 0};
+    std::vector<uint32_t> helpWords_;
     SinkingCar sinkingCar;               // the sinking-car minigame (cSinkingCarApp), over everything while it runs
     // cGenericPlayerMiniGameTask for the sinking car: the app with the game's sound, fade and splash; drowned, the
     // player dies (cSinkingCarApp::Process state 5). done(escaped) runs after SetFinished.

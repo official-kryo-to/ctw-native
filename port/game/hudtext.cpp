@@ -566,6 +566,12 @@ void HelpText::updateDimensions(int& w, int& h, int globalJustify, bool paused) 
     touched_ = false;
 }
 
+void HelpText::heedTouchEvent() {
+    if (current_ && current_->callback) { current_->callback(); return; }
+    touched_ = true;
+    if (current_) current_->frames = 1;   // ShowNowEncountered
+}
+
 void HelpText::showBoxSprites(bool on) {
     if (bottom_) bottom_->show(on);
     for (int i = 0; i < middles_ && i < 15; ++i) middle_[i]->show(on);
@@ -639,7 +645,16 @@ void Layout::switchGlobalAlignment(int h, int v) {
     if (state_ == 0 && (globalH_ != h || globalV_ != v)) state_ = 1;
 }
 
-void Layout::updateAndLayout(bool paused) {
+void ScreenToHud(int sx, int sy, int width, int height, int out[2]) {
+    const int vw = (int)((unsigned)(width * 3 * 256) / (unsigned)(height ? height : 1));
+    int t = vw - 0x400;
+    if (t < 0) t = vw - 0x3FF;
+    const int left = -(t >> 1), span = 0x400 + 2 * (t >> 1);
+    out[0] = left + (int)((int64_t)sx * span / (width ? width : 1));
+    out[1] = (int)((int64_t)sy * 768 / (height ? height : 1));
+}
+
+void Layout::updateAndLayout(bool paused, const int* touch) {
     if (state_ == 1) {   // collapse everything for the new alignment
         for (Element* e : elements_) e->beginCollapse();
         state_ = 2;
@@ -698,6 +713,10 @@ void Layout::updateAndLayout(bool paused) {
                 break;
         }
         e->reposition(d.x, d.y, d.w, d.h);
+        // PerfomTouchScreenCheck: a press this frame within the element's box
+        if (e->areTouchesToBeHeeded() && !paused && touch && touch[0] >= d.x && touch[1] >= d.y &&
+            d.x + d.w > touch[0] && d.y + d.h > touch[1])
+            e->heedTouchEvent();
     }
     firstUse_ = false;
     lastBottom_ = y;
