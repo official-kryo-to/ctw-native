@@ -14,8 +14,10 @@ static void check(bool value, const char* message) {
 }
 struct GameTestAccess {
     static void restarts(Game& g) { g.restart_.hospitals = {{{200 * 4096, 200 * 4096, 0}, 0}}; }
-    static void death(Game& g) { g.updateDeath(); }
-    static int respawnFrame(const Game& g) { return g.respawnFrame(); }
+    static void death(Game& g) {   // a frame of it, as Game::tick runs it: the death camera, then the watcher
+        if (g.player.dead || g.arrested()) g.updateDeath();
+        g.processDeathWatcher();
+    }
 };
 
 int main() {
@@ -143,7 +145,7 @@ int main() {
         g.money = 150;
         g.player.dead = true;
         const uint32_t spent = g.stats.data().spentOnHealthCare;
-        for (int i = 0; i < GameTestAccess::respawnFrame(g) + 1 && g.player.dead; ++i) GameTestAccess::death(g);
+        for (int i = 0; i < 100 && g.player.dead; ++i) GameTestAccess::death(g);
         check(!g.player.dead && g.money == 0, "being reborn at the hospital costs up to $200");
         check(g.stats.data().spentOnHealthCare == spent + 150, "the stats count what could be paid");
     }

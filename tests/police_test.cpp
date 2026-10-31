@@ -21,7 +21,10 @@ struct GameTestAccess {
         g.restart_.hospitals = {{{200*4096,200*4096,0},0}};
         g.restart_.police = {{{3*4096,0,0},-90},{{100*4096,100*4096,0},90}};
     }
-    static void death(Game& g) { g.updateDeath(); }
+    static void death(Game& g) {   // a frame of it, as Game::tick runs it: the death camera, then the watcher
+        if (g.player.dead || g.arrested()) g.updateDeath();
+        g.processDeathWatcher();
+    }
 };
 static void wantedTable(const std::filesystem::path& path) {
     std::ofstream out(path, std::ios::binary);
