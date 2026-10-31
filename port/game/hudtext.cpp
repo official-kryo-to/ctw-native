@@ -738,6 +738,12 @@ void ScriptText::print() {
     if (centred) m.justification = 0;
 }
 
+void ScriptText::setPosition(int px, int py) {
+    x = (int16_t)px;
+    y = (int16_t)py;
+    if (sprite) sprite->setPos(x, y);
+}
+
 void ScriptText::remove() {
     RemoveSprite(sprite);
     sprite.reset();
@@ -774,6 +780,32 @@ void ScriptTextQueue::clear() {
 
 // ---- HUDText ----
 
+void Hud::displayBustedWasted(const std::u16string& text, int font, unsigned frames, bool now, bool clearObjectives) {
+    GameText::FontManager& m = GameText::Fonts();
+    m.textScale = 1.5f;   // SetPhoneTextScale(1.5, 1.5)
+    if (clearObjectives) objective_.clearQueue();
+    if (m.ok()) {
+        const uint32_t size = m.textSize(text.c_str(), 0x3F8, font, 0, 0xFFFF);
+        const int h = (int32_t)size >> 16, w = (int16_t)size;
+        int dy = 0x300 - h;
+        if (dy < 0) dy = 0x301 - h;
+        int y = dy >> 1;
+        if (ScriptText* wl = winLose_.top()) {   // a win / lose line up: it moves to the middle, this just above
+            wl->setPosition(wl->x, 0x180);
+            wl->remove();
+            wl->print();
+            y = 0x180 - h;
+        }
+        int dx = 0x400 - w;
+        if (dx < 0) dx = 0x401 - w;
+        auto t = std::make_unique<ScriptText>();
+        t->width = 0x400;
+        t->init(text, dx >> 1, y, frames, font, false, false);
+        bustedWasted_.add(std::move(t), now);
+    }
+    m.textScale = 1.f;    // SetPhoneTextScale(1.0)
+}
+
 void Hud::displayWinLose(const std::u16string& text, int font, unsigned frames, bool now, bool clearObjectives) {
     GameText::FontManager& m = GameText::Fonts();
     m.textScale = 1.5f;   // SetPhoneTextScale(1.5, 1.5)
@@ -785,10 +817,16 @@ void Hud::displayWinLose(const std::u16string& text, int font, unsigned frames, 
         if (dy < 0) dy = 0x301 - h;
         int dx = 0x400 - w;
         if (dx < 0) dx = 0x401 - w;
+        int y = dy >> 1;
+        if (ScriptText* b = bustedWasted_.top()) {   // the busted / wasted line goes just above the middle
+            b->setPosition(b->x, 0x180 - b->height);
+            b->remove();
+            b->print();
+            y = 0x180;
+        }
         auto t = std::make_unique<ScriptText>();
         t->width = 0x400;
-        // (with the busted / wasted line up, it would sit above it)
-        t->init(text, dx >> 1, dy >> 1, frames, font, false, true);
+        t->init(text, dx >> 1, y, frames, font, false, true);
         winLose_.add(std::move(t), now);
     }
     m.textScale = 1.f;    // RestorePhoneTextScale(1.0)

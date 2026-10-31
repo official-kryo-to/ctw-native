@@ -11,7 +11,7 @@ bool ContextHelp::isSafeForHelp(Game& g, bool ignoreCurrent, bool overObjective)
     if ((g.screenFade.level() & ~0xFFF) == 0x10000) return false;       // IsScreenFaded(true, false)
     if (g.screenFade.fading()) return false;                            // IsScreenFading(true, false)
     if (g.hudText.currentHelp() && !ignoreCurrent) return false;
-    if (g.deathScreen.active()) return false;   // (HasDeathArrestBeenExecuted: the death or arrest screen here)
+    if (g.deathArrestExecuted()) return false;                          // HasDeathArrestBeenExecuted
     return !g.hudText.isObjectiveBeingDisplayed() || overObjective;
 }
 

@@ -236,6 +236,7 @@ struct ScriptText {
     // cScriptText::Init(.., text, x, y, frames, font, flashing, centred): its width and height at this text scale
     void init(const std::u16string& s, int px, int py, unsigned n, int f, bool flash, bool centre);
     void print();                          // cScriptText::Print
+    void setPosition(int px, int py);      // cScriptText::SetPosition
     void remove();                         // cScriptText::Remove
 };
 
@@ -244,6 +245,7 @@ public:
     void add(std::unique_ptr<ScriptText> t, bool now);   // cScriptTextQueue::Add: now (or into an empty queue) shown
     void update(bool paused);              // cScriptTextQueue::Update
     void clear();
+    ScriptText* top() { return list_.empty() ? nullptr : list_.front().get(); }   // GetTopScriptText
 private:
     std::list<std::unique_ptr<ScriptText>> list_;
 };
@@ -269,9 +271,13 @@ public:
     // HUDText::DisplayWinLose(text, reason, font, frames, now, clearObjectives, ..): centred on the screen at the
     // phone text scale 1.5 (the reason line under it: no mission here gives one)
     void displayWinLose(const std::u16string& text, int font, unsigned frames, bool now, bool clearObjectives);
+    // HUDText::DisplayBustedWasted(text, font, frames, now, clearObjectives): centred by its width on the screen, or
+    // just above the middle with a win / lose line up (which then sits at the middle)
+    void displayBustedWasted(const std::u16string& text, int font, unsigned frames, bool now, bool clearObjectives);
     // HUDText::UpdateText: the script-text queues, then g_DynamicHud
     void update(bool paused) {
         winLose_.update(paused);
+        bustedWasted_.update(paused);
         layout_.updateAndLayout(paused);
     }
 private:
@@ -279,6 +285,7 @@ private:
     HelpText help_;
     Layout layout_;
     ScriptTextQueue winLose_;              // m_WinLoseTextQueue
+    ScriptTextQueue bustedWasted_;         // m_BustedWastedTextQueue
 };
 
 }

@@ -308,6 +308,7 @@ int main(int argc, char** argv) {
                                 game.scriptWalk.on = false;
                             }
                         }
+                        else if (!strcmp(what, "die")) game.player.takeDamage(0x7FFF, true);   // (die=0,0: a death)
                         else if (!strcmp(what, "goto")) {   // walk or swim (running) to whole units x, y
                             game.scriptWalk.on = true;
                             game.scriptWalk.target[0] = x * 4096; game.scriptWalk.target[1] = y * 4096;

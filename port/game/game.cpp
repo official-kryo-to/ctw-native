@@ -101,26 +101,11 @@ bool Game::init(const std::string& data, const std::string& mods) {
         fprintf(stderr, "weapon_tables.bin missing or invalid: no weapons or blast health damage (run scripts/setup_game.py)\n");
     else if (!WeaponHud_Init(dataDir)) fprintf(stderr, "SS_Weapons / SS_Hud / SS_AlwaysLoaded missing: no weapon HUD\n");
     if (!loadingFrame()) return false;
-    {   // GlobalText 0x62: "WASTED!", its colour tag kept for the HUD font (UTF-8 of the UTF-16 code units)
+    {   // GlobalText (e_main.gxt)
         GxtFile text;
-        wastedText_.clear(); bustedText_.clear();
         mainText_.clear();
         if (text.load(dataDir + "/e_main.gxt"))
             for (size_t i = 0; i < text.count(); ++i) mainText_.push_back(text.get(i));
-        if (text.count())
-          for (int id : {0x62, 0x63}) {
-            std::string& target = id == 0x62 ? wastedText_ : bustedText_;
-            if (text.count() <= (size_t)id) continue;
-            for (char16_t c : text.get(id)) {
-                if (!c) continue;
-                if (c < 0x80) target += (char)c;
-                else if (c < 0x800) { target += (char)(0xC0 | (c >> 6)); target += (char)(0x80 | (c & 63)); }
-                else {
-                    target += (char)(0xE0 | (c >> 12)); target += (char)(0x80 | ((c >> 6) & 63));
-                    target += (char)(0x80 | (c & 63));
-                }
-            }
-          }
     }
     if (!deathScreen.init(dataDir))
         fprintf(stderr, "shard_tables.bin missing or invalid: death fades to black (run scripts/setup_game.py)\n");
@@ -1317,16 +1302,13 @@ void Game::updateDeath() {
         }
     }
     ++deathFrames_;
-    deathScreen.tick();
-    if (deathFrames_ == 1) {
+    if (deathTimer_ < 0) {   // cDeathArrestWatcher::PlayerWasted / PlayerArrested: its timer from 0, state 0
+        deathTimer_ = 0;
+        deathState_ = 0;
         bustedDisplay_ = arrested_;
         if (arrested_) stats.incNumberOfTimesBusted();
-        else stats.incNumberOfTimesWasted();   // cDeathArrestWatcher::PlayerWasted / PlayerArrested
-        // cDeathArrestWatcher::Process state 0 loads the PDA's death app (0x11): the frame shatters
-        if (deathScreen.ok()) deathScreen.open(!arrested_);
+        else stats.incNumberOfTimesWasted();
     }
-    // state 1: the death camera and HUDImpl::DisplayBustedWasted(0x62, font 5, 125): e_main.gxt's "WASTED!"
-    if (deathFrames_ == 2) wastedFrames_ = 125;
     auto approach = [](int32_t& value, int32_t target, int step) { value += std::clamp(target - value, -step, step); };
     if (!deathCameraSettled_) {
         approach(deathEye_[0], player.pos[0], 0x1000);
@@ -1338,16 +1320,39 @@ void Game::updateDeath() {
             std::abs(deathEye_[0] - player.pos[0]) < 0x800 && std::abs(deathEye_[1] - player.pos[1]) < 0x800 &&
             std::abs(deathEye_[2] - player.pos[2] - 0x8000) < 0x800;
     } else deathEye_[2] = std::min(deathEye_[2] + 0x333, 100 * 4096);
-    // State 4, about 60 frames in (state 2 waits for its timer, which counts two a frame, to reach 0x76): six hours
-    // pass and the player is reborn at the nearest hospital for $200, or the nearest police station for $100 (the
-    // stats count what he could pay). The app then makes way for the game, which fades in over 12 frames (state 6:
-    // cScreenFade::FadeIn(12)).
-    if (deathFrames_ == respawnFrame()) {
-        // cDeathArrestWatcher: cScreenFade::FadeIn(12) on the player's fades, which also clears a fade a script or a
-        // minigame left on the screen (the sinking car's drowning)
-        screenFade.in(12);
-        deathScreen.close();
-        deathStarted_ = false;
+}
+
+// cDeathArrestWatcher::Process (cPlayer::ProcessAlways, every frame its timer is running): the timer counts two a
+// frame and starts again at each state. 0: the PDA's death app (0x11), the frame shattering. 1: the death camera and
+// HUDImpl::DisplayBustedWasted(0x62 / 0x63, font 5, 125 frames, now, the objectives cleared): "WASTED!" / "BUSTED!".
+// 2: until the timer reaches 0x76. 3, then 4: six hours pass and the player is reborn at the nearest hospital for
+// $200, or the nearest police station for $100 (the stats count what he could pay). 5: the HUD app (0x10) back.
+// 6: once the timer reaches 0x15, cScreenFade::FadeIn(12) on the player's fades (it also clears a fade a script or a
+// minigame left on the screen, the sinking car's drowning). 7, then 8: the timer stops (-1).
+// (State 5's death help, once IsMissionPassed(0x3B1), is for later in the story.)
+void Game::processDeathWatcher() {
+    if (deathTimer_ < 0) return;
+    const int old = deathTimer_;
+    deathTimer_ += 2;
+    auto next = [this] { ++deathState_; deathTimer_ = 0; };
+    switch (deathState_) {
+        case 0:
+            if (deathScreen.ok()) deathScreen.open(!bustedDisplay_);
+            next();
+            break;
+        case 1:
+            hudText.displayBustedWasted(mainText(bustedDisplay_ ? 0x63 : 0x62), 5, 0x7D, true, true);
+            next();
+            break;
+        case 2:
+            if (old >= 0x76) { deathState_ = 3; deathTimer_ = 0; }
+            break;
+        case 3:
+            deathState_ = 4;
+            deathTimer_ = 0;
+            break;
+        case 4: {
+            deathStarted_ = false;
         const RestartTables::Point* closest = nullptr;
         int64_t best = 0;
         for (const auto& p : arrested_ ? restart_.police : restart_.hospitals) {
@@ -1374,6 +1379,22 @@ void Game::updateDeath() {
         const uint32_t before = world.timeCycle().time();
         world.timeCycle().setTime(before + (6u << 12));
         if (world.timeCycle().time() < before) stats.incDaysPassedInGame();   // cTimeCycle::AdvanceTime past midnight
+            next();
+            break;
+        }
+        case 5:
+            deathScreen.close();
+            next();
+            break;
+        case 6:
+            if (old + 2 >= 0x15) { screenFade.in(12); next(); }
+            break;
+        case 7:
+            next();
+            break;
+        default:
+            deathTimer_ = -1;
+            break;
     }
 }
 
@@ -1399,8 +1420,6 @@ void Game::tick() {
     radio.update(*this);
     ++frame;
     muzzleFlashes.beginTick();
-    if (!player.dead && !arrested_ && deathFrames_ >= respawnFrame() && deathFrames_ < respawnFrame() + 12) ++deathFrames_;
-    if (wastedFrames_ > 0) --wastedFrames_;
     localArea.update(*this);   // cPlayer::Think
     player.speedScale = speedScale;
     Plugins_BeginFrameInput();
@@ -1652,8 +1671,12 @@ void Game::tick() {
     updateWorldObjects();
     TheParticles().update(frame,world.timeCycle().time(),playerCar >= 0 ? cars[playerCar].pos : player.pos);
     TheSkidmarks().process();
-    if (player.dead || arrested_) updateDeath();
-    else if (playerCar >= 0) {
+    if (player.dead || arrested_) updateDeath();   // (the death camera)
+    processDeathWatcher();
+    deathScreen.tick();
+    if (player.dead || arrested_) {
+        // the death camera above
+    } else if (playerCar >= 0) {
         const Vehicle& c = cars[playerCar];
         std::copy(c.pos, c.pos + 3, player.pos);
         if (minigameCam.active()) { int32_t at[3]; playerFollowPoint(at); minigameCam.update(at, &collision); }
@@ -1818,21 +1841,6 @@ void Game::render(int W, int H) {
     if (showDebug) drawDebug(W, H);
     if (hudShown) WeaponHud_Render(*this, W, H);   // the game's HUD, under the mods' windows
     Plugins_DrawHud(W, H);
-    const int reborn = respawnFrame();
-    if (deathScreen.ok() && deathFrames_ >= reborn && deathFrames_ < reborn + 12) {   // cScreenFade::FadeIn(12)
-        Hud_Rect(0, 0, (float)W, (float)H, (uint32_t)((reborn + 12 - deathFrames_) * 255 / 12));
-    } else if (!deathScreen.ok() && deathFrames_ >= 60 && deathFrames_ < 84) {   // no shard tables: fade through black
-        int alpha = deathFrames_ < 72 ? (deathFrames_ - 60) * 255 / 12 : (84 - deathFrames_) * 255 / 12;
-        Hud_Rect(0, 0, (float)W, (float)H, (uint32_t)alpha);   // RRGGBBAA: black with the fade alpha
-    }
-    const std::string& deathText = bustedDisplay_ ? bustedText_ : wastedText_;
-    if (wastedFrames_ > 0 && !deathText.empty()) {
-        // HUDText::DisplayBustedWasted: centred on the 1024 x 768 HUD frame with the phone text scale at 1.5. Its
-        // font 5 is the game's large one; the port has only the HUD font, drawn at twice that scale for it.
-        const float k = H / 768.f, scale = 3.f * k;
-        const float w = Hud_TextWidth(deathText, scale), h = Hud_LineHeight(scale);
-        Hud_Text((W - w) * 0.5f, (H - h) * 0.5f, scale, 0xFFFFFFFFu, deathText);
-    }
     radio.renderApp(W, H, *this);
     renderPause(W, H);
     Hud_End();

@@ -288,6 +288,8 @@ public:
                     int32_t size = 0x2000);
     void removeBlip(int id);
     std::u16string mainText(int id) const;   // e_main.gxt
+    // ScriptPlayer::HasDeathArrestBeenExecuted: wasted or busted until the death watcher is done
+    bool deathArrestExecuted() const { return deathTimer_ >= 0; }
     // WorldImpl::CreateDynamicProp for scripts: a prop model (ePropModel = the prop definition) placed by the
     // mission, turned by SimpleMover::SetHeading / SetPitch (65536 = a full turn), drawn with the world
     struct ScriptProp { int id, prop; int32_t pos[3]; uint16_t heading; int16_t pitch; };
@@ -381,16 +383,16 @@ private:
     void updateDeath();
     bool arrested_ = false;
     bool bustedDisplay_ = false;
+    // cDeathArrestWatcher (cPlayer +0x1104): its state and its timer (+4, -1 when idle)
+    int deathState_ = 0, deathTimer_ = -1;
+    void processDeathWatcher();
     bool seqTap_ = false, seqSkip_ = false;   // cutscene input since the last frame
     // sequences that ended, freed at the start of the next frame (their callbacks may still be running)
     std::vector<std::unique_ptr<Sequence>> retiredSequences_;
     void retireSequence();
     int deathFrames_ = -1;          // frames since the player died (the death paths set it to 0 with the camera)
     bool deathStarted_ = false;     // updateDeath has seen this death
-    int wastedFrames_ = 0;          // HUDText's busted / wasted text: frames left
-    std::string wastedText_, bustedText_;   // e_main.gxt 0x62 / 0x63
     std::vector<std::u16string> mainText_;   // e_main.gxt
-    int respawnFrame() const { return deathScreen.ok() ? 62 : 72; }   // the frame the player is reborn on
     int32_t deathEye_[3] = {}, restartFallback_[3] = {};
     uint16_t deathYaw_ = 0, deathPitch_ = 0;
     bool deathCameraSettled_ = false;
