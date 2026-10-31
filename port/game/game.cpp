@@ -57,6 +57,9 @@ bool Game::init(const std::string& data, const std::string& mods) {
     if (!comic.load(dataDir)) fprintf(stderr, "sequence image tables missing: no comic cutscenes\n");
     if (!pauseScreen.init(dataDir)) fprintf(stderr, "SS_Hud missing: pause-screen artwork unavailable\n");
     if (!gameplayHud.init(dataDir)) fprintf(stderr, "radar map / SS_AlwaysLoaded missing: no radar HUD\n");
+    else HudText::SetAlwaysLoaded(&gameplayHud.alwaysLoaded().sprites(), gameplayHud.alwaysLoadedTexture(),
+                                  gameplayHud.alwaysLoadedWidth(), gameplayHud.alwaysLoadedHeight());
+    hudText.help().playHudSfx = [](int sample, int volume) { TheSound().playHud(sample, volume); };
     if (!loadingFrame()) return false;
     if (props.load()) collision.setPropLibrary(&props);   // before any collision cell loads
     else fprintf(stderr, "prop definitions not found: no street furniture\n");
@@ -1380,6 +1383,7 @@ void Game::tick() {
     multiplayerWorld.advanceVehicles(*this, OS_TimeAccurate());
     updateSequence();
     screenFade.tick();
+    contextHelp.tick(*this);
     hudText.update(false);   // HUDText::UpdateText: g_DynamicHud's UpdateAndLayout
     if (winLose.frames > 0) --winLose.frames;   // cScriptText::Update
     sinkingCar.process(frame);

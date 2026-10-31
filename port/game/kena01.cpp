@@ -4,9 +4,9 @@
 // kena01::cKEN_A01, the first mission ("Arrival in Liberty"): the prologue on the plane, the landing, the ambush
 // at the port and the intro movie, then Huang on the jetty, a car, Uncle Kenny's restaurant and the apartment.
 //
-// Not ported yet, and passed over here: the plane's sound, the GPS route, the help texts (cInWaterHelpText,
-// cFindCarHelpText, the handbrake help: HUDText's help queue is not ported), the markers' sprites and chevrons, the
-// safehouse's building swap and purchase, and Vehicle::SetStop on the player's car. At the port and the pier the people
+// Not ported yet, and passed over here: the plane's sound, the GPS route, the on-screen buttons' flashing
+// (cIPhonePad::FlashButton) with the help texts, the safehouse's building swap and purchase, and Vehicle::SetStop on
+// the player's car. At the port and the pier the people
 // are puppets the scene moves (getting in and out of cars without the door animations, Ped::SetDive as a step out
 // and a walk) and only the bodyguards' deaths are decided, as the story has them.
 #include "mission.h"
@@ -40,7 +40,135 @@ private:
     DoorHandler door_;                      // cCutscene_AtKennys +0x340
     static constexpr int32_t kKennysDoor[3] = {0x145A14, -0x3B999, 0};   // qword_47B508: (325.63, -59.60)
 
-    void onFrame(Game& game) override { door_.tick(game); }
+    void onFrame(Game& game) override {
+        door_.tick(game);
+        inWaterHelp_.tick();
+        findCarHelp_.tick();
+        secondHelp_.tick();
+        safehouseWatch_.tick();
+    }
+
+    bool inVehicle() const { return g_->playerCar >= 0; }   // Ped::GetVehicle().IsValid()
+    // cContextHelp::DisplayMissionHelpKey(id, true, frames, true) on gpContextHelp; ids below 0x52F are E_MAIN.gxt's
+    bool missionHelp(int id, unsigned frames) {
+        return g_->contextHelp.displayMissionHelpKey(*g_, id < 0x52F ? g_->mainText(id) : text(id), true, frames, true);
+    }
+
+    // cInWaterHelpText (GetToShore's Init): 30 frames on, the swimming help and then the run help, each for 210 frames
+    // when the box is free (else another 30), until both are shown or the player is in a vehicle (CleanUp)
+    ScriptProcess inWaterHelp_;
+    int inWaterCount_ = 0;   // +0xE8
+    void inWaterHelpInit() {
+        inWaterCount_ = 0;
+        inWaterHelp_.stop();
+        inWaterHelp_.wait(0x1E, [this] { inWaterHelpProcess(); });
+    }
+    void inWaterHelpProcess() {
+        if (inVehicle() || inWaterCount_ >= 2) { inWaterHelpCleanUp(); return; }
+        const bool shown = missionHelp(inWaterCount_ == 0 ? 0x52F : 0x17A, 0xD2);
+        if (shown) ++inWaterCount_;
+        inWaterHelp_.stop();
+        inWaterHelp_.wait(shown ? 0xD2 : 0x1E, [this] { inWaterHelpProcess(); });
+    }
+    void inWaterHelpCleanUp() {
+        inWaterHelp_.stop();
+        g_->hudText.clearHelp();
+    }
+
+    // cFindCarHelpText (FindACar's Init): 210 frames on, the hotwiring help with no time limit once the box is free
+    // (else another 30); in a vehicle first: CleanUp
+    ScriptProcess findCarHelp_;
+    int findCarCount_ = 0;   // +0xE8
+    void findCarHelpInit() {
+        findCarCount_ = 0;
+        findCarHelp_.stop();
+        findCarHelp_.wait(0xD2, [this] { findCarHelpProcess(); });
+    }
+    void findCarHelpProcess() {
+        if (inVehicle() || findCarCount_ >= 1) { findCarHelp_.stop(); g_->hudText.clearHelp(); return; }
+        if (missionHelp(0x531, 0)) { ++findCarCount_; return; }
+        findCarHelp_.stop();
+        findCarHelp_.wait(0x1E, [this] { findCarHelpProcess(); });
+    }
+
+    // cSecondHelpText (GetToKennys: Pause(210)): the driving helps in turn (0x533, 0x534, 0x535, then E_MAIN's
+    // 0x14E) while in a vehicle, 180 frames each; within 25 of the restaurant (qword_47C1B0) the chevron help instead
+    // (0x537 in a vehicle, else 0x536), until 40 away
+    ScriptProcess secondHelp_;
+    int secondCount_ = 0;          // +0xE8
+    bool inChevronArea_ = false;   // +0xED
+    static constexpr int32_t kRestaurant[3] = {0x145DC2, -0x39970, 0};   // (325.86, -57.59)
+    void secondHelpPause(int frames) {
+        secondHelp_.stop();
+        secondHelp_.wait(frames, [this] { secondHelpProcess(); });
+        if (!inChevronArea_) secondHelp_.when([this] { return near(kRestaurant, 25.f); }, [this] { giveChevronHelp(); });
+    }
+    void secondHelpProcess() {
+        secondHelp_.stop();
+        if (inChevronArea_)
+            secondHelp_.when([this] { return !near(kRestaurant, 40.f); }, [this] { leftChevronArea(); });
+        else
+            secondHelp_.when([this] { return near(kRestaurant, 25.f); }, [this] { giveChevronHelp(); });
+        if (secondCount_ > 3) return;
+        if (!inVehicle()) {   // WhenEntersVehicle(DefaultPause)
+            secondHelp_.when([this] { return inVehicle(); }, [this] { secondHelpPause(0x1E); });
+            return;
+        }
+        static const int kIds[4] = {0x533, 0x534, 0x535, 0x14E};
+        if (missionHelp(kIds[secondCount_], 0xB4)) {
+            ++secondCount_;
+            secondHelpPause(0xD2);
+        } else {
+            secondHelpPause(0x1E);
+        }
+    }
+    void giveChevronHelp() {
+        secondHelp_.stop();
+        inChevronArea_ = true;
+        if (inVehicle()) {
+            missionHelp(0x537, 0);   // "Touch the vehicle button to exit..."
+            secondHelp_.when([this] { return !inVehicle(); }, [this] { secondHelpPause(0x1E); });
+        } else {
+            missionHelp(0x536, 0);
+        }
+        secondHelp_.when([this] { return !near(kRestaurant, 40.f); }, [this] { leftChevronArea(); });
+    }
+    void leftChevronArea() {
+        secondHelp_.stop();
+        inChevronArea_ = false;
+        g_->contextHelp.clearHelp(*g_);
+        secondHelpPause(0x1E);
+    }
+
+    // GoToSafehouse's watches: the apartment's area (ParkAtSafehouseComplete) and, in a vehicle, the handbrake help
+    // within 50 of (310.52, 23.67) (qword_47E350); on foot, the help's check again once in a vehicle
+    ScriptProcess safehouseWatch_;
+    static constexpr int32_t kHandbrakeArea[3] = {0x136851, 0x17AB8, 0};
+    void goToSafehouse() {
+        safehouseWatch_.stop();
+        safehouseWatch_.when([this] {
+            const int32_t home[3] = {fx(364.08f), fx(25.02f), 0};
+            return near(home, 5.f);
+        }, [this] {
+            safehouseWatch_.stop();
+            parkAtSafehouseComplete();
+        });
+        if (inVehicle())
+            safehouseWatch_.when([this] { return near(kHandbrakeArea, 50.f); }, [this] { doHandbrakeHelp(); });
+        else
+            safehouseWatch_.when([this] { return inVehicle(); }, [this] {   // DoHandbrakeEnteredVehicle
+                if (near(kHandbrakeArea, 50.f)) doHandbrakeHelp();
+                else goToSafehouse();
+            });
+    }
+    // DoHandbrakeHelp: once a game (SaveGameImpl::HelpDisplayed(0x35)), in a vehicle, E_MAIN's 0x14F for 180 frames
+    void doHandbrakeHelp() {
+        if (!g_->helpDisplayed(0x35) && inVehicle()) {
+            g_->setHelpDisplayed(0x35);
+            missionHelp(0x14F, 0xB4);
+        }
+        goToSafehouse();
+    }
 
     void placePlayer(float x, float y, float z) {   // Ped::SetPosition
         const int32_t at[3] = {fx(x), fx(y), fx(z)};
@@ -639,6 +767,7 @@ private:
         const int32_t shore[3] = {fx(-307.74f), fx(-40.05f), fx(-6.5f)};
         g_->addBlip(shore, 0xFFE000FF, 4, 1);
         if (g_->player.inWater) g_->showObjective(text(0x53A));
+        inWaterHelpInit();
         when([this, shore] {
             if (g_->playerCar >= 0) return true;
             int32_t p[3];
@@ -651,13 +780,16 @@ private:
     // PlayedWaterSequence -> WaitBeforeGetToShoreComplete: 30 frames -> GetToShoreComplete
     void playLeftWaterSequence() {
         g_->removeBlip(4);
-        g_->hudText.deleteQueue();   // cLeaveWater::Begin: HUDImpl::DeleteQueue
+        g_->hudText.deleteCurrentHelp();   // LeftWater: HUDImpl::DeleteCurrentHelp
+        g_->hudText.clearHelp();           // PlayLeftWaterSequence: HUDImpl::ClearHelp
+        g_->hudText.deleteQueue();         // cLeaveWater::Begin: HUDImpl::DeleteQueue
         g_->cutscene = g_->scriptCutscene = true;
         play("CSS_KEN_A01_LeaveWater.seq", [this] { wait(0x1E, [this] { getToShoreComplete(); }); }, false);
     }
     // GetToShoreComplete: the brief's "Meet with your Uncle Kenny to explain what happened.", the police chase set up
     // (FindACar does that), then FindACar
     void getToShoreComplete() {
+        inWaterHelpCleanUp();   // (WaitBeforeGetToShoreComplete: HUDImpl::ClearHelp)
         g_->cutscene = g_->scriptCutscene = false;
         g_->seqCamera.active = false;
         // (SetPrimaryObjective(0x543): the mission brief, not on screen)
@@ -764,6 +896,7 @@ private:
         if (const Vehicle* c = car()) g_->addBlip(c->pos, 0x4080FFFF, 1);
         g_->suppressHotwireTimer = true;   // ScriptPlayer::SuppressHotwireTimelimit (and EnableMoreTextForEasyHotwire)
         g_->showObjective(text(hotwireFailed_ ? 0x53D : 0x53B));   // "Get back in the car." / "Get a car."
+        findCarHelpInit();
         when([this] { return g_->playerCar >= 0; }, [this] { checkForHotwiring(); });
     }
 
@@ -805,11 +938,13 @@ private:
     void findACarComplete() {
         g_->removeBlip(1);
         g_->hudText.deleteQueue();
+        findCarHelp_.stop();
+        g_->hudText.clearHelp();
         const int32_t kenny[3] = {fx(325.86f), fx(-57.59f), 0};
         g_->addChevron(kenny, 0xFFE000FF, 2, 180, 2, 7, 0);   // CreateChevron(.., 180, two, palette 7, style 0)
         g_->showObjective(text(0x53E));   // "Meet Uncle Kenny at his restaurant."
-        when([this, kenny] { return g_->playerCar >= 0 && near(kenny, 8.f); },
-             [this] { g_->showObjective(text(0x537), 150); });   // "Touch the vehicle button to exit..."
+        secondCount_ = 0;                 // GetToKennys: cSecondHelpText::Pause(210)
+        secondHelpPause(0xD2);
         // GetToKennysCheckCar: on foot in the chevrons
         when([this, kenny] { return g_->playerCar < 0 && near(kenny, 1.5f); }, [this] { getToKennysComplete(); });
     }
@@ -826,6 +961,8 @@ private:
     // restaurant (cDoorHandler::CreateDoor at heading 0, DoMainStuff(enter, true)), then IntroSetup
     void getToKennysComplete() {
         g_->removeBlip(2);
+        secondHelp_.stop();
+        g_->contextHelp.clearHelp(*g_);
         g_->hudText.deleteQueue();
         g_->cutscene = g_->scriptCutscene = true;
         door_.start(*g_, kKennysDoor, 0, DoorHandler::kEnter, [this] { atKennysIntroSetup(); }, true);
@@ -853,7 +990,7 @@ private:
         const int32_t home[3] = {fx(364.08f), fx(25.02f), 0};
         g_->addBlip(home, 0xFFE000FF, 3, 1);
         g_->showObjective(text(0x53F));   // "Go to your apartment."
-        when([this, home] { return near(home, 5.f); }, [this] { parkAtSafehouseComplete(); });
+        goToSafehouse();                  // (CutsceneAtKennysComplete)
     }
 
     // ParkAtSafehouseComplete: the area, blip and route go, StartCutscene(false); to black over 15 frames unless it
@@ -861,6 +998,7 @@ private:
     void parkAtSafehouseComplete() {
         g_->removeBlip(3);
         g_->hudText.deleteQueue();
+        g_->hudText.clearHelp();
         g_->cutscene = g_->scriptCutscene = true;
         if (brightness() != 0) fadeToBlack(15);
         wait(0x3C, [this] { startSafehouseCutscene(); });

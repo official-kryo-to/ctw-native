@@ -39,6 +39,35 @@ void Mission::tick(Game& game) {
     }
 }
 
+void ScriptProcess::wait(int frames, std::function<void()> fn) { waits_.push_back({frames, std::move(fn)}); }
+
+void ScriptProcess::when(std::function<bool()> test, std::function<void()> fn) {
+    whens_.push_back({std::move(test), std::move(fn)});
+}
+
+void ScriptProcess::stop() {
+    waits_.clear();
+    whens_.clear();
+    ++generation_;
+}
+
+void ScriptProcess::tick() {   // as Mission::tick: the due callbacks from copies, until one stops the process
+    const unsigned gen = generation_;
+    std::vector<std::function<void()>> due;
+    for (size_t i = 0; i < waits_.size();) {
+        if (--waits_[i].frames <= 0) { due.push_back(std::move(waits_[i].fn)); waits_.erase(waits_.begin() + i); }
+        else ++i;
+    }
+    for (size_t i = 0; i < whens_.size();) {
+        if (whens_[i].test()) { due.push_back(std::move(whens_[i].fn)); whens_.erase(whens_.begin() + i); }
+        else ++i;
+    }
+    for (auto& fn : due) {
+        if (generation_ != gen) break;
+        fn();
+    }
+}
+
 bool Mission::loadText(const std::string& dataDir, const std::string& name) {
     GxtFile gxt;
     std::string file = name;

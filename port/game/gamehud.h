@@ -42,6 +42,11 @@ public:
     void render(const Game& game, int width, int height) const;
     void setRotation(bool enabled) { rotation_ = enabled; }
     bool rotation() const { return rotation_; }
+    // SS_AlwaysLoaded (cTaskBar's always-loaded sheet): its definitions, texture and the PNG's size
+    const SpriteSet& alwaysLoaded() const { return sprites_; }
+    unsigned alwaysLoadedTexture() const { return texture_; }
+    int alwaysLoadedWidth() const { return textureWidth_; }
+    int alwaysLoadedHeight() const { return textureHeight_; }
 private:
     void sprite(int index, float x, float y, float scale, float angle = 0.f, float alpha = 1.f,
                 uint32_t tint = 0xFFFFFFFFu) const;   // tint 0xRRGGBBAA (cSprite +0x74)

@@ -14,6 +14,22 @@
 
 class Game;
 
+// cScriptProcessBase for a mission's helper scripts (cInWaterHelpText, ...): their own waits and watches, which
+// Stop drops
+class ScriptProcess {
+public:
+    void wait(int frames, std::function<void()> fn);                    // TimerImpl::Wait
+    void when(std::function<bool()> test, std::function<void()> fn);    // polled every frame until true
+    void stop();                                                        // cScriptProcessBase::Stop
+    void tick();                                                        // once per 30 Hz frame
+private:
+    struct Wait { int frames; std::function<void()> fn; };
+    struct When { std::function<bool()> test; std::function<void()> fn; };
+    std::vector<Wait> waits_;
+    std::vector<When> whens_;
+    unsigned generation_ = 0;
+};
+
 class Mission {
 public:
     virtual ~Mission() = default;

@@ -2,52 +2,110 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 #include "hudtext.h"
+#include "gfx/spriteset.h"
 #include <glad/gl.h>
 #include <algorithm>
+#include <cmath>
 
 namespace HudText {
 
 namespace {
-std::vector<std::shared_ptr<Sprite>>& sprites() {   // cGlobalSpriteManager's render lists
-    static std::vector<std::shared_ptr<Sprite>> list;
-    return list;
+constexpr int kLists = 7;   // cPda::Render draws ProcessSprites(6) .. ProcessSprites(0)
+
+// cGlobalSpriteManager's render lists: each in the order its sprites were added (or moved to it), oldest first
+std::vector<std::shared_ptr<Sprite>>& list(unsigned priority) {
+    static std::vector<std::shared_ptr<Sprite>> lists[kLists];
+    return lists[std::min(priority, (unsigned)kLists - 1)];
 }
 
-std::shared_ptr<Sprite> addSprite(const std::shared_ptr<GameText::TextSprite>& text, int x, int y, unsigned layer) {
-    auto s = std::make_shared<Sprite>();
-    s->text = text;
-    s->x = (int16_t)x;
-    s->y = (int16_t)y;
-    s->layer = (uint8_t)layer;
-    sprites().push_back(s);
-    return s;
+void unlist(Sprite* p) {
+    auto& l = list(p->priority);
+    l.erase(std::remove_if(l.begin(), l.end(), [p](const std::shared_ptr<Sprite>& q) { return q.get() == p; }), l.end());
+}
+
+struct Sheet {
+    const std::vector<SpriteDef>* defs = nullptr;
+    unsigned texture = 0;
+    int shiftU = 0, shiftV = 0;   // 11 - the log2 of the game's own sheet (the PNG at twice its size)
+} g_sheet;
+
+int log2Up(int w) {
+    int n = 0;
+    while ((1 << n) < w) ++n;
+    return n;
+}
+
+int roundQ12(int v) {   // cSprite::CalculateVerts' rounding: to the nearest, halves away from zero
+    if (v >= 1) return (v >> 12) + (v >> 11 & 1);
+    const int n = -v;
+    return -((n >> 12) + (n >> 11 & 1));
+}
+
+uint32_t premultiplied(uint32_t rgb, unsigned a) {
+    auto k = [a](unsigned v) { return ((v * a & 0xFFFF) * 0x8081u) >> 23; };
+    return k(rgb & 0xFF) | k(rgb >> 8 & 0xFF) << 8 | k(rgb >> 16 & 0xFF) << 16 | a << 24;
 }
 
 // cPdaApp::OrthoCorrectionBeforeRender: mode 8 is SetAspectCorrectOrthoMatrix, the 1024 x 768 space widened to the
-// screen's aspect about its middle (y up); mode 4 is the plain 1024 x 768
+// screen's aspect about its middle; bit 0 keeps it on the screen's left edge, bit 1 on its right; 4 is the plain
+// 1024 x 768. y is up.
 void ortho(unsigned mode, int width, int height) {
+    const int vw = (int)((unsigned)(width * 3 * 256) / (unsigned)(height ? height : 1));
+    int t = vw - 0x400;
+    if (t < 0) t = vw - 0x3FF;
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    if (mode & 8) {
-        const int vw = (int)((unsigned)(width * 3 * 256) / (unsigned)(height ? height : 1));
-        int t = vw - 0x400;
-        if (t < 0) t = vw - 0x3FF;
-        glOrtho((float)(-(t >> 1)), (float)((t >> 1) + 0x400), 0.0, 768.0, 0.0, 1.0);
-    } else {
-        glOrtho(0.0, 1024.0, 0.0, 768.0, 0.0, 1.0);
-    }
+    if (mode & 2) glOrtho((double)(-(t >> 1) * 2), 1024.0, 0.0, 768.0, 0.0, 1.0);
+    else if (mode & 1) glOrtho(0.0, (double)((t >> 1) * 2 + 0x400), 0.0, 768.0, 0.0, 1.0);
+    else if (mode & 8) glOrtho((double)(-(t >> 1)), (double)((t >> 1) + 0x400), 0.0, 768.0, 0.0, 1.0);
+    else glOrtho(0.0, 1024.0, 0.0, 768.0, 0.0, 1.0);
     glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
 }
 
-// cSprite::RefreshSprite for a text sprite: drawn at (x, 768 - y), the shadow layer black, an outline layer black
+// cSprite::CalculateVerts (unrotated) and RefreshSprite's quad: two triangles, the colour white at the alpha
+void refreshImage(const Sprite& s, float alpha) {
+    const SpriteDef& d = *s.image;
+    const unsigned scaled = (unsigned)(std::min(alpha, s.alpha) * 255.f);
+    const unsigned a = scaled < 0xFF ? scaled : 0xFF;
+    if (a < 0xF || !g_sheet.texture) return;
+    const int cx = (0x1000 * s.scaleX) >> 8, cy = (0x1000 * s.scaleY) >> 8;
+    const int w1 = d.w + 1, h1 = d.h + 1;
+    const int left = roundQ12(-d.offX * cx) + s.x, right = roundQ12((w1 - d.offX) * cx) + s.x;
+    const int base = 0x300 - s.y;
+    const int top = roundQ12(d.offY * cy) + base, bottom = roundQ12((d.offY - h1) * cy) + base;
+    const int u0 = d.x << g_sheet.shiftU, u1 = u0 + (w1 << g_sheet.shiftU);
+    const int v0 = d.y << g_sheet.shiftV, v1 = v0 + (h1 << g_sheet.shiftV);
+    const float k = 1.f / 2048.f;
+    const float U0 = (int16_t)(u0 + s.uvAdd[0]) * k, U1 = (int16_t)(u1 + s.uvAdd[2]) * k;
+    const float V0 = (int16_t)(v0 + s.uvAdd[1]) * k, V1 = (int16_t)(v1 + s.uvAdd[3]) * k;
+    const uint32_t c = premultiplied(0xFFFFFF, a);
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, g_sheet.texture);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4ub((GLubyte)c, (GLubyte)(c >> 8), (GLubyte)(c >> 16), (GLubyte)(c >> 24));
+    const float X0 = (float)(int16_t)left, X1 = (float)(int16_t)right, Y0 = (float)(int16_t)top,
+                Y1 = (float)(int16_t)bottom;
+    glBegin(GL_TRIANGLES);
+    glTexCoord2f(U0, V0); glVertex2f(X0, Y0);
+    glTexCoord2f(U1, V0); glVertex2f(X1, Y0);
+    glTexCoord2f(U0, V1); glVertex2f(X0, Y1);
+    glTexCoord2f(U1, V0); glVertex2f(X1, Y0);
+    glTexCoord2f(U1, V1); glVertex2f(X1, Y1);
+    glTexCoord2f(U0, V1); glVertex2f(X0, Y1);
+    glEnd();
+    glColor4f(1, 1, 1, 1);
+}
+
+// cSprite::RefreshSprite for a text sprite: drawn at (x, 768 - y), the shadow style black, the outline style black
 // at the four diagonals first (at 0.9 of the alpha)
-void refresh(const Sprite& s, float alpha, int width, int height) {
-    if (!s.visible || !s.text) return;
+void refreshText(const Sprite& s, float alpha) {
     const float a = std::min(alpha, s.alpha);
     if (a < 0.08f) return;
-    ortho(s.ortho, width, height);
     const float x = (float)s.x, y = (float)(0x300 - s.y);
-    if (s.layer == 0x11) {
+    if (s.style == 0x11) {
         static const float d[4][2] = {{1, 1}, {-1, 1}, {1, -1}, {-1, -1}};
         for (const auto& o : d) {
             glLoadIdentity();
@@ -57,8 +115,30 @@ void refresh(const Sprite& s, float alpha, int width, int height) {
     }
     glLoadIdentity();
     glTranslatef(x, y, 0.f);
-    s.text->render(s.layer == 0xE, a);
+    s.text->render(s.style == 0xE, a);
 }
+
+std::shared_ptr<Sprite> addSprite(const std::shared_ptr<GameText::TextSprite>& text, int x, int y, unsigned style) {
+    auto s = std::make_shared<Sprite>();
+    s->text = text;
+    s->x = (int16_t)x;
+    s->y = (int16_t)y;
+    s->style = (uint8_t)style;
+    list(0).push_back(s);
+    return s;
+}
+}
+
+void SetAlwaysLoaded(const std::vector<SpriteDef>* defs, unsigned texture, int pngWidth, int pngHeight) {
+    g_sheet.defs = defs;
+    g_sheet.texture = texture;
+    g_sheet.shiftU = 11 - log2Up(pngWidth / 2);
+    g_sheet.shiftV = 11 - log2Up(pngHeight / 2);
+}
+
+const SpriteDef* AlwaysLoaded(int index) {
+    if (!g_sheet.defs || index < 0 || index >= (int)g_sheet.defs->size()) return nullptr;
+    return &(*g_sheet.defs)[(size_t)index];
 }
 
 void Sprite::setPos(int px, int py) {
@@ -71,7 +151,25 @@ void Sprite::show(bool on) {
     for (Sprite* s = this; s; s = s->shadow.get()) s->visible = on;
 }
 
-std::shared_ptr<Sprite> AddText(const std::u16string& text, int font, int x, int y, unsigned layer, unsigned width,
+void Sprite::setScale(int32_t sx, int32_t sy) {
+    scaleX = (uint16_t)((uint32_t)sx >> 4);
+    scaleY = (uint16_t)((uint32_t)sy >> 4);
+    if (shadow) shadow->setScale(sx, sy);
+}
+
+void Sprite::setImage(const SpriteDef* d) {
+    image = d;
+    if (shadow) shadow->setImage(d);
+}
+
+int Sprite::width() const {
+    if (image) return image->w;
+    return 0;
+}
+
+int Sprite::height() const { return image ? image->h : 0; }
+
+std::shared_ptr<Sprite> AddText(const std::u16string& text, int font, int x, int y, unsigned style, unsigned width,
                                 int justification, uint16_t firstLine, uint16_t maxLines) {
     GameText::FontManager& m = GameText::Fonts();
     if (!m.ok()) return nullptr;
@@ -92,30 +190,46 @@ std::shared_ptr<Sprite> AddText(const std::u16string& text, int font, int x, int
     auto sprite = std::make_shared<GameText::TextSprite>((uint16_t)width, (uint16_t)((int32_t)size >> 16), font);
     sprite->alignment(m.justification);
     sprite->print(src.data(), firstLine, maxLines);
-    auto s = addSprite(sprite, x, y, layer);
+    auto s = addSprite(sprite, x, y, style);
     // FontWantsDropShadow's fonts (not the icons) get the shadow sprite unless the text is black: one down and
-    // right, on layer 0xE, in colour 6
+    // right, style 0xE, in colour 6, listed just before the string so that it is drawn under it
     if ((font < 4 || font == 5) && m.colourTop != 7) {
         const uint8_t c = m.colourTop;
         m.colourTop = m.colourBottom = 6;
-        s->shadow = addSprite(sprite, x + 1, y + 1, 0xE);
+        auto shadow = std::make_shared<Sprite>();
+        shadow->text = sprite;
+        shadow->x = (int16_t)(x + 1);
+        shadow->y = (int16_t)(y + 1);
+        shadow->style = 0xE;
+        auto& l = list(0);
+        l.insert(l.end() - 1, shadow);
+        s->shadow = shadow;
         m.colourTop = m.colourBottom = c;
     }
     m.justification = 0;
     return s;
 }
 
+std::shared_ptr<Sprite> AddImage(const SpriteDef* image) {
+    auto s = std::make_shared<Sprite>();
+    s->image = image;
+    list(0).push_back(s);
+    return s;
+}
+
+void SetPriority(const std::shared_ptr<Sprite>& s, unsigned priority) {
+    if (!s || s->priority == priority) return;
+    if (s->shadow) SetPriority(s->shadow, priority);   // ChangeRenderList: the newest in its new list
+    unlist(s.get());
+    s->priority = (uint8_t)priority;
+    list(priority).push_back(s);
+}
+
 void RemoveSprite(const std::shared_ptr<Sprite>& s) {
-    if (!s) return;
-    auto& list = sprites();
-    for (Sprite* p = s.get(); p; p = p->shadow.get())
-        list.erase(std::remove_if(list.begin(), list.end(), [p](const std::shared_ptr<Sprite>& q) { return q.get() == p; }),
-                   list.end());
+    for (Sprite* p = s.get(); p; p = p->shadow.get()) unlist(p);
 }
 
 void RenderSprites(int width, int height) {
-    auto& list = sprites();
-    if (list.empty()) return;
     glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_TEXTURE_BIT | GL_CURRENT_BIT);
     glMatrixMode(GL_PROJECTION);
     glPushMatrix();
@@ -125,10 +239,15 @@ void RenderSprites(int width, int height) {
     glDisable(GL_CULL_FACE);
     glDisable(GL_LIGHTING);
     glDisable(GL_ALPHA_TEST);
-    std::vector<const Sprite*> order;   // the layers in turn, each in the order its sprites were added
-    for (const auto& s : list) order.push_back(s.get());
-    std::stable_sort(order.begin(), order.end(), [](const Sprite* a, const Sprite* b) { return a->layer < b->layer; });
-    for (const Sprite* s : order) refresh(*s, 1.f, width, height);
+    for (int p = kLists - 1; p >= 0; --p) {
+        const std::vector<std::shared_ptr<Sprite>> sprites = list((unsigned)p);   // (a copy: drawing changes nothing)
+        for (const auto& s : sprites) {
+            if (!s->visible) continue;
+            ortho(s->ortho, width, height);
+            if (s->text) refreshText(*s, 1.f);
+            else if (s->image) refreshImage(*s, 1.f);
+        }
+    }
     glMatrixMode(GL_PROJECTION);
     glPopMatrix();
     glMatrixMode(GL_MODELVIEW);
@@ -136,7 +255,7 @@ void RenderSprites(int width, int height) {
     glPopAttrib();
 }
 
-// ---- cHudString<uint> ----
+// ---- cHudString ----
 
 HudString::HudString(const std::u16string& s, int f, unsigned n, int h, int v, bool flg, int printWidth)
     : text(s), font(f), frames(n), total(n), hjust(h), vjust(v), flag(flg) {
@@ -160,9 +279,18 @@ std::shared_ptr<Sprite> HudString::print(int width, unsigned justification) cons
     return s;
 }
 
-// ---- cObjectiveText / cTextWithBox<uint> ----
+// ---- cTextWithBox ----
 
-void ObjectiveText::clearQueue() {
+void TextWithBox::add(std::unique_ptr<HudString> s, bool showNow) {
+    if (showNow) {   // at the head, and the string showing goes at the next update (ShowNowEncountered)
+        queue_.push_front(std::move(s));
+        if (current_) current_->frames = 1;
+    } else {
+        queue_.push_back(std::move(s));
+    }
+}
+
+void TextWithBox::clearQueue() {
     for (auto it = queue_.begin(); it != queue_.end();) {
         if ((*it)->keep) { (*it)->keep = false; ++it; }
         else it = queue_.erase(it);
@@ -173,36 +301,23 @@ void ObjectiveText::clearQueue() {
     }
 }
 
-HudString* ObjectiveText::commitToNextText() {
-    if (collapsing_) return nullptr;
-    if (current_) return current_.get();
-    if (queue_.empty()) return nullptr;
+HudString* TextWithBox::findInQueue(const std::u16string& text) {
+    if (current_ && current_->text == text) return current_.get();
+    for (auto& s : queue_) if (s->text == text) return s.get();
+    return nullptr;
+}
+
+void TextWithBox::commitToNextText() {
+    if (collapsing_ || current_ || queue_.empty()) return;
     current_ = std::move(queue_.front());
     queue_.pop_front();
-    return current_.get();
 }
 
-unsigned ObjectiveText::printJustification(int globalJustify) const {
-    switch (current_->vjust) {
-        case 0: return globalJustify == 2 ? 0x8000 : globalJustify != 1 ? 0x4000 : 0;
-        case 2: return 0x8000;
-        case 3: case 4: return 0x4000;
-        default: return 0;
-    }
+void TextWithBox::printCurrent(int globalJustify) {
+    sprite_ = current_->print(printWidth_, printJustification(globalJustify, *current_));
 }
 
-void ObjectiveText::printCurrent(int globalJustify) {
-    sprite_ = current_->print(printWidth_, printJustification(globalJustify));
-    if (sprite_) sprite_->show(false);
-}
-
-void ObjectiveText::dropCurrent() {
-    RemoveSprite(sprite_);
-    sprite_.reset();
-    current_.reset();
-}
-
-void ObjectiveText::updateDimensions(int& w, int& h, int globalJustify, bool paused) {
+void TextWithBox::updateDimensions(int& w, int& h, int globalJustify, bool paused) {
     // the string to show next: the current one unless it has run out, else the queue's head
     auto next = [this]() -> HudString* {
         if (current_ && current_->frames == 1) {
@@ -212,11 +327,19 @@ void ObjectiveText::updateDimensions(int& w, int& h, int globalJustify, bool pau
         if (current_) return current_.get();
         return queue_.empty() ? nullptr : queue_.front().get();
     };
+    auto commitAndPrint = [this, globalJustify] {
+        commitToNextText();
+        hAlign_ = current_->hjust;
+        printCurrent(globalJustify);
+        if (sprite_) sprite_->show(false);
+        beginBoxFadeOn(*current_);
+        state_ = 3;
+    };
     switch (state_) {
         case 0:
             if (collapsing_) break;
             if (HudString* s = next()) {
-                target_ = (float)boxHeight(*s);
+                target_ = (float)computeBoxHeight(*s);
                 vAlign_ = s->vjust;
                 hAlign_ = s->hjust;
                 state_ = 1;
@@ -226,34 +349,26 @@ void ObjectiveText::updateDimensions(int& w, int& h, int globalJustify, bool pau
             HudString* s = collapsing_ ? nullptr : next();
             if (collapseRequested_) { state_ = 7; break; }
             if (!s || vAlign_ != s->vjust) { target_ = 0.f; state_ = 2; break; }
-            const float want = (float)boxHeight(*s);
+            const float want = (float)computeBoxHeight(*s);
             if (target_ > want) { target_ = want; state_ = 2; break; }
             if (target_ < want) { target_ = want; break; }
             height_ += speed_;
             if (height_ < target_) break;
             height_ = target_;
-            commitToNextText();
-            hAlign_ = current_->hjust;
-            printCurrent(globalJustify);
-            if (sprite_) sprite_->show(true);   // BeginBoxFadeOn
-            state_ = 3;
+            commitAndPrint();
             break;
         }
         case 2: {   // the box shrinks to the next string's height (or away)
             HudString* s = collapsing_ ? nullptr : next();
             if (collapseRequested_) { state_ = 7; break; }
             if (s && vAlign_ == s->vjust) {
-                const float want = (float)boxHeight(*s);
+                const float want = (float)computeBoxHeight(*s);
                 target_ = want;
                 if (height_ < want) { state_ = 1; break; }
                 height_ -= speed_;
                 if (height_ > want) break;
                 height_ = want;
-                commitToNextText();
-                hAlign_ = current_->hjust;
-                printCurrent(globalJustify);
-                if (sprite_) sprite_->show(true);
-                state_ = 3;
+                commitAndPrint();
             } else {
                 target_ = 0.f;
                 height_ -= speed_;
@@ -263,17 +378,17 @@ void ObjectiveText::updateDimensions(int& w, int& h, int globalJustify, bool pau
             }
             break;
         }
-        case 3:   // BoxFadeOn: at once
-            state_ = 4;
+        case 3:
+            if (boxFadeOn()) { endBoxFadeOn(); state_ = 4; }
             break;
         case 4: {   // shown: the frames count down unless paused
             if (current_->frames >= 2 && !paused) --current_->frames;
             if (current_->frames == 1) {
-                if (collapseRequested_) { if (sprite_) sprite_->show(false); state_ = 6; break; }
+                if (collapseRequested_) { beginBoxFadeOff(); state_ = 6; break; }
                 if (!queue_.empty() && !collapsing_) {
                     HudString* s = queue_.front().get();
-                    if ((float)boxHeight(*s) == height_ && s->vjust == vAlign_ && s->hjust == hAlign_) {
-                        dropCurrent();   // the same box: the next string replaces this one straight away
+                    if ((float)computeBoxHeight(*s) == height_ && s->vjust == vAlign_ && s->hjust == hAlign_) {
+                        RemoveSprite(sprite_);   // the same box: the next string replaces this one straight away
                         current_ = std::move(queue_.front());
                         queue_.pop_front();
                         printCurrent(globalJustify);
@@ -281,23 +396,31 @@ void ObjectiveText::updateDimensions(int& w, int& h, int globalJustify, bool pau
                         break;
                     }
                 }
-                if (sprite_) sprite_->show(false);   // BeginBoxFadeOff
+                beginBoxFadeOff();
                 state_ = 5;
             } else if (collapseRequested_) {
-                if (sprite_) sprite_->show(false);
+                beginBoxFadeOff();
                 state_ = 6;
             }
             break;
         }
-        case 5:   // BoxFadeOff: at once, the string goes
-            dropCurrent();
-            target_ = 0.f;
-            state_ = 2;
+        case 5:   // faded off: the string goes
+            if (boxFadeOff()) {
+                endBoxFadeOff();
+                RemoveSprite(sprite_);
+                sprite_.reset();
+                current_.reset();
+                target_ = 0.f;
+                state_ = 2;
+            }
             break;
         case 6:
-            RemoveSprite(sprite_);
-            sprite_.reset();
-            state_ = 7;
+            if (boxFadeOff()) {
+                endBoxFadeOff();
+                RemoveSprite(sprite_);
+                sprite_.reset();
+                state_ = 7;
+            }
             break;
         case 7:   // collapsed for a change of global alignment
             target_ = 0.f;
@@ -313,12 +436,120 @@ void ObjectiveText::updateDimensions(int& w, int& h, int globalJustify, bool pau
     h = (int)height_;
 }
 
+void TextWithBox::reposition(int x, int y, int w, int h) {
+    if (state_ < 3 || state_ > 6 || !current_) return;
+    repositionBox(*current_, x, y, w, h);
+}
+
+// ---- cObjectiveText ----
+
+unsigned ObjectiveText::printJustification(int globalJustify, const HudString&) {
+    switch (current_->vjust) {
+        case 0: return globalJustify == 2 ? 0x8000 : globalJustify != 1 ? 0x4000 : 0;
+        case 2: return 0x8000;
+        case 3: case 4: return 0x4000;
+        default: return 0;
+    }
+}
+
 // RepositionBox: the string in the middle of the box's height; low on the screen it moves 100 right
-void ObjectiveText::reposition(int x, int y, int w, int h) {
+void ObjectiveText::repositionBox(HudString& s, int x, int y, int w, int h) {
     (void)w;
-    if (state_ < 3 || state_ > 6 || !sprite_ || !current_) return;
-    const int ty = y + ((h - current_->height + 4) >> 1);
+    if (!sprite_) return;
+    const int ty = y + ((h - s.height + 4) >> 1);
     sprite_->setPos(ty > 0x180 ? (int)((float)x + 100.f) : x, ty);   // (HasIOSIdiotBar is false here)
+}
+
+// ---- cHelpText_DynamicHudElement ----
+
+int HelpText::middleSections(const HudString& s) {
+    const int n = s.height / 16 - 1;
+    return n > 1 ? n : 1;
+}
+
+void HelpText::initializeForFirstUse() {
+    static const int16_t kInset[4] = {0, 4, 0, -4};   // xmmword_46A680: the pieces' v half a texel in
+    auto piece = [](int index, bool inset) {
+        auto s = AddImage(AlwaysLoaded(index));
+        SetPriority(s, 1);
+        s->show(false);
+        if (inset) std::copy(kInset, kInset + 4, s->uvAdd);
+        return s;
+    };
+    bottom_ = piece(0x25, true);
+    for (auto& m : middle_) m = piece(0x26, true);
+    top_ = piece(0x27, true);
+    icon_ = piece(0x4E, false);
+}
+
+void HelpText::updateDimensions(int& w, int& h, int globalJustify, bool paused) {
+    TextWithBox::updateDimensions(w, h, globalJustify, paused);
+    touched_ = false;
+}
+
+void HelpText::showBoxSprites(bool on) {
+    if (bottom_) bottom_->show(on);
+    for (int i = 0; i < middles_ && i < 15; ++i) middle_[i]->show(on);
+    if (top_) top_->show(on);
+    if (icon_) icon_->show(on);
+}
+
+void HelpText::beginBoxFadeOn(HudString& s) {
+    boxAlpha_ = 0.05f;
+    middles_ = middleSections(*current_);
+    if (icon_) icon_->setImage(AlwaysLoaded((int)s.icon));
+    showBoxSprites(true);   // (SetAlphaModifiable(!s.iconLeft) only matters to the HUD's fade)
+    if (playHudSfx) playHudSfx(0x1E6, 0x7F);
+}
+
+bool HelpText::boxFadeOn() {
+    const float a = boxAlpha_ * 1.5f;
+    boxAlpha_ = a > 1.f ? 1.f : a;
+    return a > 1.f;
+}
+
+bool HelpText::boxFadeOff() {
+    const float a = boxAlpha_ / 1.5f;
+    boxAlpha_ = a < 0.05f ? 0.05f : a;
+    return a < 0.05f;
+}
+
+void HelpText::repositionBox(HudString& s, int x, int y, int w, int h) {
+    (void)h;
+    const int boxH = computeBoxHeight(*current_);
+    // the pieces open by their height: the box's alpha as their y scale
+    const int open = (int)std::fmaf(boxAlpha_, 4096.f, boxAlpha_ < 0.f ? -0.5f : 0.5f);
+    int py = y + 0x10;
+    top_->setPos(x, py);
+    top_->setScale(0x1000, open);
+    for (int i = 0; i < middles_ && i < 15; ++i) {
+        py += 0x10;
+        middle_[i]->setPos(x, py);
+        middle_[i]->setScale(0x1000, open);
+    }
+    bottom_->setPos(x, py + 0x10);
+    bottom_->setScale(0x1000, open);
+    const int ty = y + ((boxH - current_->height + 2) >> 1);
+    const int mid = y + (boxH >> 1);
+    if (s.iconLeft) {   // the icon left of the text, centred on its middle
+        if (sprite_) { sprite_->setPos(x + 0x30, ty); SetPriority(sprite_, 1); }
+        icon_->setPos(x - (icon_->width() >> 1) + 0x1C, mid - (int)((unsigned)icon_->height() >> 1));
+    } else {
+        if (sprite_) { sprite_->setPos(x + 0xC, ty); SetPriority(sprite_, 1); }
+        icon_->setPos(x + 0x23B, mid);
+    }
+    icon_->setScale(open, open);
+    // near the screen's sides the pieces keep to that edge as the aspect changes
+    unsigned mode = w + x > 0x39C ? 0x802 : 8;
+    if (x < 100) mode = 0x801;
+    auto setMode = [mode](const std::shared_ptr<Sprite>& p) {
+        for (Sprite* q = p.get(); q; q = q->shadow.get()) q->ortho = mode;
+    };
+    setMode(top_);
+    setMode(bottom_);
+    for (int i = 0; i < middles_ && i < 15; ++i) setMode(middle_[i]);
+    setMode(icon_);
+    setMode(sprite_);
 }
 
 // ---- cDynamicHudLayout ----
@@ -397,8 +628,46 @@ void Layout::updateAndLayout(bool paused) {
 
 void Hud::displayObjective(const std::u16string& text, unsigned frames, bool clear) {
     if (clear) objective_.clearQueue();
-    // the player's +0x118A (never set here) would centre it in the cutscene border instead
+    // (in a cutscene, +0x118A, with the widescreen bars up it would be centred in the bottom border: the missions
+    // here show their objectives outside cutscenes)
     objective_.add(std::make_unique<HudString>(text, 2, frames, 0, 0, false, objective_.printWidth()));
+}
+
+void Hud::displayHelp(const std::u16string& text, unsigned frames, bool showNow, bool clear,
+                      std::function<void()> callback) {
+    // (with the HUD app running, SwitchGlobalAlignment(0, 0): a change only after the global StartCutscene, which
+    // the missions here never make)
+    if (clear) {   // the same text (its first queued copy, and the string showing) is kept through the clear
+        help_.markForNotClear(text);
+        help_.clearQueue();
+    }
+    if (HudString* s = help_.findInQueue(text)) {   // already there: its frames, icon and callback anew
+        s->frames = frames;
+        s->icon = 0x4E;
+        s->iconLeft = false;
+        s->callback = std::move(callback);
+        return;
+    }
+    auto s = std::make_unique<HudString>(text, 2, frames, 0, 0, false, help_.printWidth());
+    s->callback = std::move(callback);
+    help_.add(std::move(s), showNow);
+}
+
+void Hud::clearHelp() { help_.clearQueue(); }
+
+void Hud::deleteCurrentHelp() {
+    if (HudString* s = help_.current()) s->frames = 1;
+    else help_.dropHead();
+}
+
+const std::u16string* Hud::currentHelp() const {
+    if (const HudString* s = help_.current()) return &s->text;
+    if (const HudString* s = help_.head()) return &s->text;
+    return nullptr;
+}
+
+void Hud::resetCurrentHelpTimer() {
+    if (HudString* s = help_.current()) s->frames = s->total;
 }
 
 }

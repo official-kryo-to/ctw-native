@@ -1,48 +1,71 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
-// HUDText's on-screen strings: the Gfx2d text sprites (cGlobalSpriteManager::AddSpriteImpl's text path and
-// cSprite::RefreshSprite), cHudString, the objective line g_ObjectiveText (cObjectiveText on cTextWithBox<uint>) and
-// g_DynamicHud (cDynamicHudLayout), which lays its elements out in the 1024 x 768 HUD space every frame.
+// HUDText's on-screen strings: the Gfx2d sprites they are made of (cGlobalSpriteManager's render lists,
+// cSprite::CalculateVerts and RefreshSprite, AddSpriteImpl's text path), cHudString, the text-and-box elements
+// cTextWithBox (g_ObjectiveText's cObjectiveText and g_HelpText's cHelpText_DynamicHudElement) and g_DynamicHud
+// (cDynamicHudLayout), which lays them out in the 1024 x 768 HUD space every frame.
 #pragma once
 #include "gfx/gametext.h"
 #include <cstdint>
+#include <functional>
 #include <list>
 #include <memory>
 #include <string>
 #include <vector>
 
+struct SpriteDef;
+
 namespace HudText {
 
-// Gfx2d::cSprite carrying a cTextSprite
+// Gfx2d::cSprite: a cTextSprite, or an image from a sprite sheet
 struct Sprite {
     std::shared_ptr<GameText::TextSprite> text;
-    int16_t x = 0, y = 0;                 // +0x28, +0x2A: the HUD space, y down
-    bool visible = true;                  // +0x18 (ShowSprite)
-    uint8_t layer = 0x10;                 // +0x1F: 0xE draws the black shadow, 0x11 an outline
-    unsigned ortho = 0;                   // +0x9C: cPdaApp::OrthoCorrectionBeforeRender's mode
-    float alpha = 1.f;                    // +0x64
-    std::shared_ptr<Sprite> shadow;       // +0x10, moved and shown with it
-    void setPos(int px, int py);          // SetSpritePos
-    void show(bool on);                   // ShowSprite
+    const SpriteDef* image = nullptr;      // +0x88 (cSpriteData)
+    int16_t x = 0, y = 0;                  // +0x28, +0x2A: the HUD space, y down
+    bool visible = true;                   // +0x18 (ShowSprite)
+    uint8_t priority = 0;                  // +0x1E: its render list (lists 6 down to 0 are drawn)
+    uint8_t style = 0x10;                  // +0x1F: 0xE draws the black shadow, 0x11 an outline
+    unsigned ortho = 0;                    // +0x9C: cPdaApp::OrthoCorrectionBeforeRender's mode
+    float alpha = 1.f;                     // +0x64
+    uint16_t scaleX = 0x100, scaleY = 0x100;   // +0x30, +0x32 (8.8)
+    int16_t uvAdd[4] = {0, 0, 0, 0};       // +0x50 u0, +0x54 v0, +0x58 u1, +0x5C v1 (the sheet's 2048ths)
+    std::shared_ptr<Sprite> shadow;        // +0x10, moved, shown and re-listed with it
+    void setPos(int px, int py);           // SetSpritePos
+    void show(bool on);                    // ShowSprite
+    void setScale(int32_t sx, int32_t sy); // SetSpriteScale (cFixed 20.12)
+    void setImage(const SpriteDef* d);     // SetSpriteData
+    int width() const;                     // GetSpriteWidth
+    int height() const;                    // +0x24
 };
 
-// cGlobalSpriteManager::AddSpriteImpl(text, font, x, y, restriction, layer, width, justification, first, max, ..):
-// nothing when the text has no height
-std::shared_ptr<Sprite> AddText(const std::u16string& text, int font, int x, int y, unsigned layer, unsigned width,
-                                int justification, uint16_t firstLine, uint16_t maxLines);
-void RemoveSprite(const std::shared_ptr<Sprite>& s);   // RemoveSprite(s, true): it and its shadow
-void RenderSprites(int width, int height);           // cGlobalSpriteManager::ProcessSprites over the HUD layers
+// the sheet cTaskBar::GetSpriteDataAllwaysLoaded draws from (SS_AlwaysLoaded): its definitions and texture
+void SetAlwaysLoaded(const std::vector<SpriteDef>* defs, unsigned texture, int pngWidth, int pngHeight);
+const SpriteDef* AlwaysLoaded(int index);
 
-// cHudString<uint>
+// cGlobalSpriteManager::AddSpriteImpl(text, font, x, y, restriction, style, width, justification, first, max, ..):
+// nothing when the text has no height
+std::shared_ptr<Sprite> AddText(const std::u16string& text, int font, int x, int y, unsigned style, unsigned width,
+                                int justification, uint16_t firstLine, uint16_t maxLines);
+std::shared_ptr<Sprite> AddImage(const SpriteDef* image);   // AddSpriteImpl(data, .., 0, 0, 0, 0, style 0x10)
+void SetPriority(const std::shared_ptr<Sprite>& s, unsigned priority);   // SetPriority(p, true): re-listed as newest
+void RemoveSprite(const std::shared_ptr<Sprite>& s);   // RemoveSprite(s, true): it and its shadow
+void RenderSprites(int width, int height);           // cPda::Render's ProcessSprites over the lists
+
+// cHudString<uint> and cHudString<HELP_TEXT_PARAMS>
 struct HudString {
     std::u16string text;
     int font = 2;
-    unsigned frames = 0, total = 0;       // +0xC counts down to 1 (0 stays), +0x10
-    int hjust = 0, vjust = 0;             // +0x14, +0x18 (eDynamicHudJustify)
-    int height = 0;                       // +0x1C: TextSize's at the phone text scale 1.5
-    bool keep = false;                    // +0x24: MarkForNotClear
-    bool flag = false;                    // +0x25 (SetAlphaModifiable(!flag))
+    unsigned frames = 0, total = 0;        // +0xC counts down to 1 (0 stays), +0x10
+    int hjust = 0, vjust = 0;              // +0x14, +0x18 (eDynamicHudJustify)
+    int height = 0;                        // +0x1C: TextSize's at the phone text scale 1.5
+    bool keep = false;                     // MarkForNotClear (+0x24, the help's +0x50)
+    bool flag = false;                     // +0x25 / +0x51: SetAlphaModifiable(!flag)
+    // HELP_TEXT_PARAMS: the icon (an SS_AlwaysLoaded sprite), whether it sits left of the text, the callback a touch
+    // on the box invokes
+    unsigned icon = 0x4E;
+    bool iconLeft = false;
+    std::function<void()> callback;
     HudString(const std::u16string& s, int font, unsigned frames, int hjust, int vjust, bool flag, int printWidth);
     std::shared_ptr<Sprite> print(int width, unsigned justification) const;   // cHudString::Print(int, int)
 };
@@ -63,14 +86,23 @@ public:
     virtual int leftRightAlignBorder() { return 8; }
 };
 
-// cTextWithBox<uint> as cObjectiveText has it (no box drawn: its fades are the sprite shown and hidden)
-class ObjectiveText : public Element {
+// cTextWithBox<T> on cEasyClearAndRemoveTextQueue<T>: a queue of strings shown one at a time in a box that grows to
+// each string's height; the box's own look is the subclass's
+class TextWithBox : public Element {
 public:
-    ObjectiveText(int x, int printWidth, int width, float speed)
+    TextWithBox(int x, int printWidth, int width, float speed)
         : printWidth_(printWidth), x_(x), width_(width), speed_(speed) {}
-    void add(std::unique_ptr<HudString> s) { queue_.push_back(std::move(s)); }   // onto the queue's tail
-    void clearQueue();                    // cEasyClearAndRemoveTextQueue<uint>::ClearQueue
-    bool shown() const { return current_ != nullptr; }
+    void add(std::unique_ptr<HudString> s, bool showNow = false);   // cHudTextQueue::Add (onto the tail, or the head)
+    void clearQueue();                     // cEasyClearAndRemoveTextQueue::ClearQueue
+    HudString* findInQueue(const std::u16string& text);   // the current string or a queued one
+    HudString* current() const { return current_.get(); }
+    HudString* head() const { return queue_.empty() ? nullptr : queue_.front().get(); }
+    void dropHead() { if (!collapsing_ && !queue_.empty()) queue_.pop_front(); }   // PluckQueueHead and delete
+    void markForNotClear(const std::u16string& text) {
+        for (auto& s : queue_) if (s->text == text) { s->keep = true; break; }
+        if (current_ && current_->text == text) current_->keep = true;
+    }
+    int state() const { return state_; }
     int printWidth() const { return printWidth_; }
 
     void updateDimensions(int& w, int& h, int globalJustify, bool paused) override;
@@ -81,17 +113,23 @@ public:
     int horizontalAlignment() override { return hAlign_; }
     int verticalAlignment() override { return vAlign_; }
     int xCoordWhenNotAligned() override { return x_; }
-    int leftRightAlignBorder() override { return 0xB; }
 
-private:
-    HudString* commitToNextText();
-    int boxHeight(const HudString& s) const { return s.height + 6; }   // ComputeBoxHeight
-    unsigned printJustification(int globalJustify) const;            // GetTextPrintJustification
-    void printCurrent(int globalJustify);
-    void dropCurrent();
-    std::list<std::unique_ptr<HudString>> queue_;
+protected:
+    virtual int computeBoxHeight(const HudString& s) = 0;
+    virtual void beginBoxFadeOn(HudString& s) = 0;
+    virtual bool boxFadeOn() = 0;
+    virtual void endBoxFadeOn() = 0;
+    virtual void beginBoxFadeOff() = 0;
+    virtual bool boxFadeOff() = 0;
+    virtual void endBoxFadeOff() = 0;
+    virtual void repositionBox(HudString& s, int x, int y, int w, int h) = 0;
+    virtual unsigned printJustification(int globalJustify, const HudString& s) = 0;
+    std::shared_ptr<Sprite> sprite_;       // +0x68: the printed string
     std::unique_ptr<HudString> current_;   // +0x40
-    std::shared_ptr<Sprite> sprite_;       // +0x68
+private:
+    void commitToNextText();
+    void printCurrent(int globalJustify);
+    std::list<std::unique_ptr<HudString>> queue_;
     int printWidth_;                       // +0x38
     bool collapsing_ = false;              // +0x3C
     int state_ = 0;                        // +0x50
@@ -100,6 +138,51 @@ private:
     float speed_;                          // +0x64
     int hAlign_ = 0, vAlign_ = 0;          // +0x70, +0x74
     bool collapseRequested_ = false;       // +0x78
+};
+
+// cObjectiveText: no box drawn, its fades are the string shown and hidden
+class ObjectiveText : public TextWithBox {
+public:
+    ObjectiveText() : TextWithBox(0xD5, 0x257, 0x32B, 5.f) {}
+    int leftRightAlignBorder() override { return 0xB; }
+protected:
+    int computeBoxHeight(const HudString& s) override { return s.height + 6; }
+    void beginBoxFadeOn(HudString&) override { if (sprite_) sprite_->show(true); }
+    bool boxFadeOn() override { return true; }
+    void endBoxFadeOn() override {}
+    void beginBoxFadeOff() override { if (sprite_) sprite_->show(false); }
+    bool boxFadeOff() override { return true; }
+    void endBoxFadeOff() override {}
+    void repositionBox(HudString& s, int x, int y, int w, int h) override;
+    unsigned printJustification(int globalJustify, const HudString& s) override;
+};
+
+// cHelpText_DynamicHudElement: the box is a column of SS_AlwaysLoaded pieces (0x27 on top, 0x26 in sixteens, 0x25
+// below) that opens and closes by its height, with the string's icon beside the text
+class HelpText : public TextWithBox {
+public:
+    HelpText() : TextWithBox(0xD5, 0x21B, 0x257, 5.f) {}
+    void initializeForFirstUse() override;
+    void updateDimensions(int& w, int& h, int globalJustify, bool paused) override;
+    bool wasTouched() const { return touched_; }
+    std::function<void(int sfx, int volume)> playHudSfx;   // cAudioManager::PlayHudSfx
+protected:
+    int computeBoxHeight(const HudString& s) override { return middleSections(s) * 16 + 32; }
+    void beginBoxFadeOn(HudString& s) override;
+    bool boxFadeOn() override;
+    void endBoxFadeOn() override { if (sprite_) sprite_->show(true); }
+    void beginBoxFadeOff() override { if (sprite_) sprite_->show(false); }
+    bool boxFadeOff() override;
+    void endBoxFadeOff() override { showBoxSprites(false); }
+    void repositionBox(HudString& s, int x, int y, int w, int h) override;
+    unsigned printJustification(int, const HudString&) override { return 0x4000; }
+private:
+    static int middleSections(const HudString& s);   // CalculateMiddleSections
+    void showBoxSprites(bool on);
+    std::shared_ptr<Sprite> top_, bottom_, icon_, middle_[15];   // +0x80, +0x100, +0x108, +0x88..
+    int middles_ = 0;                      // +0x7C
+    float boxAlpha_ = 0.f;                 // +0x110
+    bool touched_ = false;                 // +0x114
 };
 
 // cDynamicHudLayout
@@ -125,14 +208,25 @@ private:
 // HUDText
 class Hud {
 public:
-    Hud() : objective_(0xD5, 0x257, 0x32B, 5.f), layout_({&objective_}, 0x28) {}
+    Hud() : layout_({&objective_, &help_}, 0x28) {}
     // HUDText::DisplayObjective(text, font, frames, .., clear, ..): font 2, the queue cleared first if asked
     void displayObjective(const std::u16string& text, unsigned frames, bool clear);
     void deleteQueue() { objective_.clearQueue(); }   // HUDText::DeleteQueue
-    bool objectiveShown() const { return objective_.shown(); }
+    bool objectiveShown() const { return objective_.current() != nullptr; }
+    bool isObjectiveBeingDisplayed() const { return objective_.state() == 4; }
+    // HUDText::DisplayHelp(text, font, frames, showNow, clear, .., callback, 0, 0): font 2; the same text again
+    // only refreshes it
+    void displayHelp(const std::u16string& text, unsigned frames, bool showNow, bool clear,
+                     std::function<void()> callback = nullptr);
+    void clearHelp();                      // HUDText::ClearHelp
+    void deleteCurrentHelp();              // HUDText::DeleteCurrentHelp
+    const std::u16string* currentHelp() const;   // HUDText::GetCurrentHelp
+    void resetCurrentHelpTimer();          // HUDText::ResetCurrentHelpTimer
+    HelpText& help() { return help_; }
     void update(bool paused) { layout_.updateAndLayout(paused); }   // HUDText::UpdateText's g_DynamicHud
 private:
     ObjectiveText objective_;
+    HelpText help_;
     Layout layout_;
 };
 

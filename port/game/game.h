@@ -42,6 +42,7 @@
 #include "garages.h"
 #include "markers.h"
 #include "hudtext.h"
+#include "contexthelp.h"
 #include "minigamecam.h"
 #include "multiplayerworld.h"
 #include "mission.h"
@@ -243,11 +244,16 @@ public:
     std::unique_ptr<Mission> mission;
     bool startMission(const std::string& name);   // false: no such mission
     ScreenFade screenFade;
-    HudText::Hud hudText;                // HUDText: g_ObjectiveText in g_DynamicHud
+    HudText::Hud hudText;                // HUDText: g_ObjectiveText and g_HelpText in g_DynamicHud
+    ContextHelp contextHelp;             // gpContextHelp: the help box's owner
+    // SaveGameImpl::HelpDisplayed: the helps shown once a game (not saved here)
+    bool helpDisplayed(int id) const { return id >= 0 && id < 128 && (helpShown_[id >> 6] >> (id & 63) & 1); }
+    void setHelpDisplayed(int id) { if (id >= 0 && id < 128) helpShown_[id >> 6] |= 1ull << (id & 63); }
     // HUDText::DisplayWinLose ("MISSION PASSED" / "MISSION FAILED"): the objective queue is cleared and the text is
     // centred on the screen in font 5 (Osaka_30x30) at the phone text scale 1.5 for `frames` frames
     Objective winLose;
     void showWinLose(const std::u16string& text, int frames);
+    uint64_t helpShown_[2] = {0, 0};
     SinkingCar sinkingCar;               // the sinking-car minigame (cSinkingCarApp), over everything while it runs
     // cGenericPlayerMiniGameTask for the sinking car: the app with the game's sound, fade and splash; drowned, the
     // player dies (cSinkingCarApp::Process state 5). done(escaped) runs after SetFinished.
