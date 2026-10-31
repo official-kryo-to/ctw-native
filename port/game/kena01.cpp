@@ -607,6 +607,7 @@ private:
         g_->removeScriptProp(kShadow);
         g_->stopSequence();
         g_->cutscene = g_->scriptCutscene = true;
+        g_->widescreen.set(true);   // StartIntro: CameraImpl::StartCutscene(true)
         wait(0xF, [this] {
             if (g_->startupScreens && !IntroMovie::play(g_->dataDir, [this](double s, int w, int h) { driveText(s, w, h); }))
                 g_->quitRequested = true;
@@ -741,6 +742,7 @@ private:
         g_->player.setHeading((int16_t)deg(0x69));
         g_->camera.reset(g_->player.pos, g_->player.heading());
         g_->cutscene = true;   // (StartCutscene: no HUD while the minigame runs)
+        g_->widescreen.set(false);   // EscapeCarPause: CameraImpl::StartCutscene(false)
         // (SetPrimaryObjective(0x542) "Survive the kidnapping.": the mission brief, not on screen)
         g_->startSinkingCar(0, [this](bool escaped) {
             if (escaped) playerSurfaces();
@@ -756,6 +758,7 @@ private:
     // EscapeCarComplete: a splash (type 8) where Huang comes up, the screen fades in; 30 frames on GetToShore
     void escapeCarComplete() {
         g_->restoreCam();   // EndCutscene(1, true): cCamera::RestoreCam over one frame
+        g_->widescreen.set(false);
         const int32_t still[3] = {0, 0, 0};
         g_->addWaterSplash(g_->player.pos, 8, still, -1);
         g_->screenFade.in(15);
@@ -965,6 +968,7 @@ private:
         g_->contextHelp.clearHelp(*g_);
         g_->hudText.deleteQueue();
         g_->cutscene = g_->scriptCutscene = true;
+        g_->widescreen.set(true);   // cCutscene_AtKennys::Begin: StartCutscene(true)
         door_.start(*g_, kKennysDoor, 0, DoorHandler::kEnter, [this] { atKennysIntroSetup(); }, true);
     }
 
@@ -1000,6 +1004,7 @@ private:
         g_->hudText.deleteQueue();
         g_->hudText.clearHelp();
         g_->cutscene = g_->scriptCutscene = true;
+        g_->widescreen.set(false);   // StartCutscene(false)
         if (brightness() != 0) fadeToBlack(15);
         wait(0x3C, [this] { startSafehouseCutscene(); });
     }
@@ -1053,6 +1058,7 @@ private:
         if (garageOpened_) g_->garages.close(garage_);
         g_->removeBlip(4);
         g_->cutscene = g_->scriptCutscene = false;
+        g_->widescreen.set(false);   // EndCutscene
         g_->seqCamera.active = false;
         wait(0x3C, [this] { passed(); });
     }

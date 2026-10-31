@@ -13,7 +13,7 @@
 #include <algorithm>
 #include <cstdio>
 
-Sequence* Game::startSequence(const std::string& name, bool loop) {
+Sequence* Game::startSequence(const std::string& name, bool loop, bool bars) {
     GameFs fs;
     auto seq = std::make_unique<Sequence>();
     if (!fs.open(dataDir) || !seq->load(fs, name)) {
@@ -36,6 +36,7 @@ Sequence* Game::startSequence(const std::string& name, bool loop) {
     seq->fastForward = [this] { seqCamera.tick(); };
     sequence = std::move(seq);
     cutscene = true;   // cSequence::Play: MakeSafeForCutscene, EnableControls(false), StartCutscene
+    widescreen.set(bars);
     comic.end();   // (loading a sequence unloads the last one: cSequence::UnLoad)
     if (sequence->hasOverlay()) comic.begin(*sequence, world.timeCycle());
     sequence->play(loop);
@@ -48,6 +49,7 @@ void Game::retireSequence() {   // cSequence::Stop's end: EndCutscene, the playe
     const bool keepComic = sequence->restoreComic;
     retiredSequences_.push_back(std::move(sequence));
     cutscene = scriptCutscene;
+    widescreen.set(false);   // (CameraImpl::EndCutscene)
     if (!scriptCutscene) seqCamera.active = false;
     comic.stop(keepComic);
 }
@@ -223,12 +225,49 @@ std::u16string Game::mainText(int id) const {
     return s;
 }
 
+// cCamera::DrawWideScreenBars: two 1024 x 133 quads, at y 0 and 643, in OrthoCorrectionBeforeRender's mode 0x20 (the
+// 1024 x 768 space at the screen's width a unit, about the screen's middle; y up)
+void Game::renderWidescreenBars(int W, int H) const {
+    if (widescreen.amount <= 0.f || W <= 0 || H <= 0) return;
+    const double s = W / 1024.0;
+    glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_CURRENT_BIT | GL_VIEWPORT_BIT);
+    glViewport(0, 0, W, H);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_ALPHA_TEST);
+    glDisable(GL_FOG);
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(0.0, 1024.0, 384.0 - H / (2 * s), 384.0 + H / (2 * s), 0.0, 1.0);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4f(0.f, 0.f, 0.f, widescreen.amount);
+    for (float y : {0.f, 643.f}) {
+        glBegin(GL_TRIANGLE_STRIP);
+        glVertex2f(0.f, y); glVertex2f(1024.f, y); glVertex2f(0.f, y + 133.f); glVertex2f(1024.f, y + 133.f);
+        glEnd();
+    }
+    glColor4f(1, 1, 1, 1);
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glPopMatrix();
+    glPopAttrib();
+}
+
 void Game::renderMissionHud(int W, int H) {
     if (screenFade.alpha > 0.f) {   // cScreenFade: black over the picture
         Hud_Begin(W, H);
         Hud_Rect(0, 0, (float)W, (float)H, (uint32_t)(screenFade.alpha * 255.f));
         Hud_End();
     }
+    renderWidescreenBars(W, H);   // (cPda::Render: under every sprite list)
     HudText::RenderSprites(W, H);   // the Gfx2d sprites: the objective line, the help box, the win/lose line
 }
 

@@ -1404,6 +1404,7 @@ void Game::tick() {
     multiplayerWorld.advanceVehicles(*this, OS_TimeAccurate());
     updateSequence();
     screenFade.tick();
+    widescreen.update();   // cCamera::Update
     contextHelp.tick(*this);
     {   // HUDText::UpdateText: g_DynamicHud's UpdateAndLayout, with this frame's press (cTouchScreen) for the boxes
         int touch[2], mx, my;

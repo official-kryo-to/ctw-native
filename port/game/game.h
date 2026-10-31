@@ -232,7 +232,8 @@ public:
     bool scriptCutscene = false;
     // cScriptSequenceBase::LoadSequence + cSequence::Play: null when the file is missing. The callbacks set on it
     // before the first tick fire from frame 0 on.
-    Sequence* startSequence(const std::string& name, bool loop = false);
+    // cScriptSequenceBase::PlaySequence -> cSequence::Play: bars is CameraImpl::StartCutscene's (1 in every kena01 call)
+    Sequence* startSequence(const std::string& name, bool loop = false, bool bars = true);
     void stopSequence();
     void updateSequence();               // cSequenceManager::Update, at the start of each game frame
     void unloadSequence();   // a stopped 2D sequence's app goes (cSequence::UnLoad): the city renders again
@@ -244,6 +245,21 @@ public:
     std::unique_ptr<Mission> mission;
     bool startMission(const std::string& name);   // false: no such mission
     ScreenFade screenFade;
+    // cCamera's widescreen bars (+0xD the way they are going, +0x10 how far): cCamera::SetWideScreeneffect from
+    // CameraImpl::StartCutscene (bars on when asked) and EndCutscene (off); cCamera::Update moves them a tenth a
+    // frame, and cCamera::DrawWideScreenBars draws them while they are out at all, black at that alpha
+    struct Widescreen {
+        int8_t dir = 0;
+        float amount = 0.f;
+        void set(bool on) { dir = on ? 1 : -1; }
+        void update() {
+            if (!dir) return;
+            amount = std::fmaf((float)dir, 0.1f, amount);
+            if (amount <= 0.f) { amount = 0.f; dir = 0; }
+            else if (amount >= 1.f) { amount = 1.f; dir = 0; }
+        }
+    } widescreen;
+    void renderWidescreenBars(int width, int height) const;
     HudText::Hud hudText;                // HUDText: g_ObjectiveText and g_HelpText in g_DynamicHud
     ContextHelp contextHelp;             // gpContextHelp: the help box's owner
     // SaveGameImpl::HelpDisplayed(id[, set]): the bit for each help shown once a game, in 32-bit words (the save
