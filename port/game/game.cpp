@@ -1385,7 +1385,6 @@ void Game::tick() {
     screenFade.tick();
     contextHelp.tick(*this);
     hudText.update(false);   // HUDText::UpdateText: g_DynamicHud's UpdateAndLayout
-    if (winLose.frames > 0) --winLose.frames;   // cScriptText::Update
     sinkingCar.process(frame);
     updateHotwire();
     hotwiring.process(frame, world.timeCycle().time() / 4096.f);

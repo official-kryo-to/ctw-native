@@ -95,11 +95,6 @@ struct RadarBlip {
     int16_t spriteScale = 0x1000;   // the sprite's current scale
 };
 
-// a string shown for a number of frames (HUDText::DisplayWinLose's)
-struct Objective {
-    std::u16string text;
-    int frames = 0;
-};
 
 // the missions the port can start (kena01.cpp, ...)
 std::unique_ptr<Mission> Mission_Create(const std::string& name);

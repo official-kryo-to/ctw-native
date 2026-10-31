@@ -624,7 +624,96 @@ void Layout::updateAndLayout(bool paused) {
     lastBottom_ = y;
 }
 
+// ---- cScriptText ----
+
+void ScriptText::init(const std::u16string& s, int px, int py, unsigned n, int f, bool flash, bool centre) {
+    text = s;
+    frames = total = (uint16_t)n;
+    x = (int16_t)px;
+    y = (int16_t)py;
+    font = f;
+    flashing = flash;
+    centred = centre;
+    GameText::FontManager& m = GameText::Fonts();
+    if (!text.empty() && m.ok()) {
+        const uint32_t size = m.textSize(text.c_str(), width, font, 0, 0xFFFF);
+        width = (uint16_t)size;
+        height = (uint8_t)(size >> 16);
+    } else {
+        width = 0;
+        height = 0;
+    }
+}
+
+// cScriptText::Print: the sprite at its place, centred in its width if asked, style 0, in the 1024 x 768 HUD
+// (cScriptText::bUseZonesHack is false)
+void ScriptText::print() {
+    if (text.empty() || sprite) return;
+    GameText::FontManager& m = GameText::Fonts();
+    if (centred) m.justification = 0x4000;
+    sprite = AddText(text, font, x, y, 0x10, width, 0, 0, 0xFFFF);
+    if (sprite) {
+        for (Sprite* q = sprite.get(); q; q = q->shadow.get()) q->ortho = 8;
+        sprite->style = 0;   // (SetFlashing(flashing) at speed 10: no text here flashes)
+    }
+    if (centred) m.justification = 0;
+}
+
+void ScriptText::remove() {
+    RemoveSprite(sprite);
+    sprite.reset();
+}
+
+void ScriptTextQueue::add(std::unique_ptr<ScriptText> t, bool now) {
+    if (!now && !list_.empty()) {
+        list_.push_back(std::move(t));
+        return;
+    }
+    if (!list_.empty()) list_.front()->remove();
+    list_.push_front(std::move(t));
+    list_.front()->print();
+}
+
+void ScriptTextQueue::update(bool paused) {
+    for (auto it = list_.begin(); it != list_.end();) {
+        ScriptText& t = **it;
+        if (!paused) --t.frames;
+        if (t.total && !t.frames) {   // run out: it goes, and the next is printed
+            t.remove();
+            it = list_.erase(it);
+            if (it != list_.end()) (*it)->print();
+            continue;
+        }
+        ++it;
+    }
+}
+
+void ScriptTextQueue::clear() {
+    for (auto& t : list_) t->remove();
+    list_.clear();
+}
+
 // ---- HUDText ----
+
+void Hud::displayWinLose(const std::u16string& text, int font, unsigned frames, bool now, bool clearObjectives) {
+    GameText::FontManager& m = GameText::Fonts();
+    m.textScale = 1.5f;   // SetPhoneTextScale(1.5, 1.5)
+    if (clearObjectives) objective_.clearQueue();
+    if (m.ok()) {
+        const uint32_t size = m.textSize(text.c_str(), 0x3F8, font, 0, 0xFFFF);
+        const int h = (int32_t)size >> 16, w = (int16_t)size;
+        int dy = 0x300 - h;
+        if (dy < 0) dy = 0x301 - h;
+        int dx = 0x400 - w;
+        if (dx < 0) dx = 0x401 - w;
+        auto t = std::make_unique<ScriptText>();
+        t->width = 0x400;
+        // (with the busted / wasted line up, it would sit above it)
+        t->init(text, dx >> 1, dy >> 1, frames, font, false, true);
+        winLose_.add(std::move(t), now);
+    }
+    m.textScale = 1.f;    // RestorePhoneTextScale(1.0)
+}
 
 void Hud::displayObjective(const std::u16string& text, unsigned frames, bool clear) {
     if (clear) objective_.clearQueue();

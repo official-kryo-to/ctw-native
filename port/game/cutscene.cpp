@@ -5,9 +5,6 @@
 #include "game.h"
 #include "hud.h"
 #include "os/gamefs.h"
-#include "os/pak.h"
-#include "gfx/assets.h"
-#include "gfx/font.h"
 #include <cstring>
 #include "sound.h"
 #include <SDL.h>
@@ -161,34 +158,9 @@ bool Game::startMission(const std::string& name) {
     return true;
 }
 
+// cActStructure::UnloadCurrentMission's HUDImpl::DisplayWinLose(id, 0, font 5, frames, true, true, false)
 void Game::showWinLose(const std::u16string& text, int frames) {
-    hudText.deleteQueue();   // (its first flag: g_ObjectiveText's queue cleared)
-    winLose.text = text;
-    winLose.frames = text.empty() ? 0 : frames;
-}
-
-namespace {
-// cFontManager font 5: Osaka_30x30.bin (the WAD) on font asset 7, the eighth texture of gGameDir[10]
-// (cAssetManager::LoadAssets: +0xD8 count, +0xDA ids; only assets 3..5 are swapped for loose IPhone_Hel atlases)
-const BitmapFont* winLoseFont(const std::string& dataDir) {
-    static BitmapFont font;
-    static int state = 0;   // 0 not tried, 1 loaded, -1 missing
-    if (state) return state > 0 ? &font : nullptr;
-    state = -1;
-    GameFs fs;
-    std::vector<uint8_t> bin, gd, assets;
-    uint16_t dir[28];
-    if (!fs.open(dataDir) || !fs.read("Osaka_30x30.bin", bin) || !Assets_Pak().read(0, gd) || gd.size() < sizeof dir)
-        return nullptr;
-    std::memcpy(dir, gd.data(), sizeof dir);
-    if (!Assets_Pak().read(dir[10], assets) || assets.size() < 2 + 8 * 2) return nullptr;
-    const int texture = assets[16] | assets[17] << 8;
-    int w = 0, h = 0;
-    const unsigned gl = Assets_Texture(texture);
-    if (!gl || !Assets_TextureSize(texture, &w, &h) || !font.loadWithTexture(bin, gl, w, h)) return nullptr;
-    state = 1;
-    return &font;
-}
+    hudText.displayWinLose(text, 5, (unsigned)frames, true, true);
 }
 
 void Game::showObjective(const std::u16string& text, int frames) {
@@ -257,17 +229,7 @@ void Game::renderMissionHud(int W, int H) {
         Hud_Rect(0, 0, (float)W, (float)H, (uint32_t)(screenFade.alpha * 255.f));
         Hud_End();
     }
-    if (winLose.frames > 0 && !winLose.text.empty()) {   // HUDText::DisplayWinLose: centred in the 1024 x 768 HUD
-        if (const BitmapFont* font = winLoseFont(dataDir)) {
-            Hud_Begin(W, H);
-            const float scale = 1.5f * H / 768.f;
-            const float w = font->textWidth(winLose.text) * scale, h = font->lineHeight() * scale;
-            glColor4f(1, 1, 1, 1);
-            font->draw(winLose.text, (W - w) * 0.5f, (H - h) * 0.5f, scale);
-            Hud_End();
-        }
-    }
-    HudText::RenderSprites(W, H);   // the Gfx2d text sprites: the objective line
+    HudText::RenderSprites(W, H);   // the Gfx2d sprites: the objective line, the help box, the win/lose line
 }
 
 // ---- script props ----

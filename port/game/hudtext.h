@@ -205,6 +205,33 @@ private:
     bool firstUse_ = true;                 // +0x38
 };
 
+// cScriptText in a cScriptTextQueue (the win/lose line, ...): a string printed at its place for a number of frames,
+// the queue's head on screen
+struct ScriptText {
+    std::u16string text;                   // +0x20
+    int16_t x = 0, y = 0;                  // +0x30, +0x32
+    uint16_t frames = 0, total = 0;        // +0x34, +0x36 (0: until removed)
+    uint16_t width = 0x3F8;                // +0x38: TextSize's (with the wrap given before Init)
+    uint8_t height = 0;                    // +0x3A
+    bool flashing = false;                 // +0x3B
+    int font = 0;                          // +0x3C
+    bool centred = false;                  // +0x3E
+    std::shared_ptr<Sprite> sprite;        // +0x28
+    // cScriptText::Init(.., text, x, y, frames, font, flashing, centred): its width and height at this text scale
+    void init(const std::u16string& s, int px, int py, unsigned n, int f, bool flash, bool centre);
+    void print();                          // cScriptText::Print
+    void remove();                         // cScriptText::Remove
+};
+
+class ScriptTextQueue {
+public:
+    void add(std::unique_ptr<ScriptText> t, bool now);   // cScriptTextQueue::Add: now (or into an empty queue) shown
+    void update(bool paused);              // cScriptTextQueue::Update
+    void clear();
+private:
+    std::list<std::unique_ptr<ScriptText>> list_;
+};
+
 // HUDText
 class Hud {
 public:
@@ -223,11 +250,19 @@ public:
     const std::u16string* currentHelp() const;   // HUDText::GetCurrentHelp
     void resetCurrentHelpTimer();          // HUDText::ResetCurrentHelpTimer
     HelpText& help() { return help_; }
-    void update(bool paused) { layout_.updateAndLayout(paused); }   // HUDText::UpdateText's g_DynamicHud
+    // HUDText::DisplayWinLose(text, reason, font, frames, now, clearObjectives, ..): centred on the screen at the
+    // phone text scale 1.5 (the reason line under it: no mission here gives one)
+    void displayWinLose(const std::u16string& text, int font, unsigned frames, bool now, bool clearObjectives);
+    // HUDText::UpdateText: the script-text queues, then g_DynamicHud
+    void update(bool paused) {
+        winLose_.update(paused);
+        layout_.updateAndLayout(paused);
+    }
 private:
     ObjectiveText objective_;
     HelpText help_;
     Layout layout_;
+    ScriptTextQueue winLose_;              // m_WinLoseTextQueue
 };
 
 }

@@ -249,9 +249,7 @@ public:
     // SaveGameImpl::HelpDisplayed: the helps shown once a game (not saved here)
     bool helpDisplayed(int id) const { return id >= 0 && id < 128 && (helpShown_[id >> 6] >> (id & 63) & 1); }
     void setHelpDisplayed(int id) { if (id >= 0 && id < 128) helpShown_[id >> 6] |= 1ull << (id & 63); }
-    // HUDText::DisplayWinLose ("MISSION PASSED" / "MISSION FAILED"): the objective queue is cleared and the text is
-    // centred on the screen in font 5 (Osaka_30x30) at the phone text scale 1.5 for `frames` frames
-    Objective winLose;
+    // HUDText::DisplayWinLose ("MISSION PASSED" / "MISSION FAILED") as the mission's end shows it
     void showWinLose(const std::u16string& text, int frames);
     uint64_t helpShown_[2] = {0, 0};
     SinkingCar sinkingCar;               // the sinking-car minigame (cSinkingCarApp), over everything while it runs
