@@ -851,11 +851,11 @@ void Hud::displayWinLose(const std::u16string& text, int font, unsigned frames, 
     m.textScale = 1.f;    // RestorePhoneTextScale(1.0)
 }
 
-void Hud::displayObjective(const std::u16string& text, unsigned frames, bool clear) {
+void Hud::displayObjective(const std::u16string& text, unsigned frames, bool clear, bool inBorder,
+                           bool inCutscene) {
     if (clear) objective_.clearQueue();
-    // (in a cutscene, +0x118A, with the widescreen bars up it would be centred in the bottom border: the missions
-    // here show their objectives outside cutscenes)
-    objective_.add(std::make_unique<HudString>(text, 2, frames, 0, 0, false, objective_.printWidth()));
+    const int h = inBorder ? 3 : 0, v = inBorder ? 4 : 0;
+    objective_.add(std::make_unique<HudString>(text, 2, frames, h, v, inCutscene, objective_.printWidth()));
 }
 
 void Hud::displayHelp(const std::u16string& text, unsigned frames, bool showNow, bool clear,

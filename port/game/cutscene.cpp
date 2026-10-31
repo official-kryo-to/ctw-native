@@ -166,7 +166,9 @@ void Game::showWinLose(const std::u16string& text, int frames) {
 }
 
 void Game::showObjective(const std::u16string& text, int frames) {
-    hudText.displayObjective(text, (unsigned)frames, true);
+    // (the player's +0x118A, a cutscene running, with the camera's bars +0x108D coming in or +0x1090 out in full)
+    const bool inBorder = cutscene && (widescreen.dir > 0 || widescreen.amount == 1.f);
+    hudText.displayObjective(text, (unsigned)frames, true, inBorder, cutscene);
 }
 
 void Game::addBlip(const int32_t pos[3], uint32_t rgba, int id, int marker) {

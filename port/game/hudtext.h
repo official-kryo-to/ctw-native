@@ -263,7 +263,10 @@ class Hud {
 public:
     Hud() : layout_({&objective_, &help_}, 0x28) {}
     // HUDText::DisplayObjective(text, font, frames, .., clear, ..): font 2, the queue cleared first if asked
-    void displayObjective(const std::u16string& text, unsigned frames, bool clear);
+    // inBorder: a cutscene running with its widescreen bars coming in or out in full: centred in the bottom bar
+    // (inCutscene is the string's +0x25 flag)
+    void displayObjective(const std::u16string& text, unsigned frames, bool clear, bool inBorder = false,
+                          bool inCutscene = false);
     void deleteQueue() { objective_.clearQueue(); }   // HUDText::DeleteQueue
     bool objectiveShown() const { return objective_.current() != nullptr; }
     bool isObjectiveBeingDisplayed() const { return objective_.state() == 4; }
