@@ -3,11 +3,26 @@
 What changed in each release of CTW-Native. A release is the Porter exe with the game inside, so every entry
 covers both. The newest is on top; the release workflow publishes the entry of the version it builds.
 
-## 0.4.0
+## 0.5.0
 
+0.4.0 was never published; its changes are in this release too (the second half of the list).
+
+- Saving: after the first mission the apartment is yours. Walk into the green marker at its door to go in and save;
+  you come out six hours later, healed and no longer wanted. The game loads your newest save when it starts. Saves
+  use the original's slot files (`saves/savegame0`, `savegame1`). The PDA's save screen is not there yet.
+- Linux: a Linux download (x86-64) next to the Porter. Unpack it, run `./port-apk.sh your.apk`, then `./GTACTW`.
+  It also fixes a Linux build break.
+- The first mission plays as the original from start to finish: the prologue on the plane (with its sound), the
+  landing, the ambush at the port with the cars' own stops and handbrake turn, the intro movie, the escape off the
+  pier with the sinking car and the swim to shore, hotwiring, the police chase, Kenny's restaurant, the apartment,
+  its garage, and the safehouse tour.
+- Cutscenes: the game's sequences with their camera paths, comic panels, typed subtitles and widescreen bars.
+- The HUD's text as the game draws it: the objective line, help boxes (tap them to dismiss), MISSION PASSED, and
+  WASTED / BUSTED with the original's timing; radar blips, chevrons and mission markers as the original's sprites.
 - Play together: the new Multiplayer mod puts up to eight players in one city (F9 to host or join, T to chat).
   Players see each other walk, drive, ride and shoot, with names and health over them; hits are taken by the
-  victim's own game, and joiners share the host's time and weather. Mod API version 13 adds the puppets it uses.
+  victim's own game, and joiners share the host's time and weather. CTW Online lists public games; LAN games show
+  in the pause screen's browser. Mod API version 13 adds the puppets it uses and pause-screen buttons.
 - Money: the HUD's cash counter, the hospital's $200 and the police's $100 when you are reborn.
 - Pickups: the map's health, armour and weapon pickups with their five-minute respawns, and dead pedestrians drop
   their money or their gun.
