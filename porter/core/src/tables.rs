@@ -443,6 +443,15 @@ impl<'a> GameBinary<'a> {
         Ok(out)
     }
 
+    /// cSaveGameMgr::ClearCurrentSaveData's two 26-entry tables of 10-bit values, packed three a word into the save
+    /// game's code section (+0x134 and +0x158).
+    pub fn saves(&self) -> Result<Vec<u8>, TableError> {
+        let mut out = b"CTWSAVE1".to_vec();
+        out.extend(self.read(0x486b7c, 104)?);
+        out.extend(self.read(0x486be4, 104)?);
+        Ok(out)
+    }
+
     pub fn ped_comments(&self) -> Result<Vec<u8>, TableError> {
         let mut out = b"CTWPEDV1".to_vec();
         out.extend(self.read(0x480370, 2 * 26 * 8)?);
@@ -682,6 +691,7 @@ pub fn extract_tables(binary: &[u8]) -> Result<Vec<(&'static str, Vec<u8>)>, Tab
         ("ped_comments.bin", game.ped_comments()?),
         ("marker_tables.bin", game.markers()?),
         ("font_tables.bin", game.fonts()?),
+        ("save_tables.bin", game.saves()?),
     ])
 }
 

@@ -1094,6 +1094,8 @@ private:
         g_->hudText.deleteQueue();
         if (garageOpened_) g_->garages.close(garage_);
         g_->removeBlip(4);
+        // WorldImpl::PurchaseSafehouse((377.63, 22.86), true): the first safehouse, free (cSafehouseManager::Purchase)
+        g_->saveGame.setSafehouseOwned(0, true);
         g_->cutscene = g_->scriptCutscene = false;
         g_->widescreen.set(false);   // EndCutscene
         g_->seqCamera.active = false;
@@ -1106,6 +1108,7 @@ private:
 
     void passed() {   // Passed: the markers go (the safehouse's chevrons), then WorldImpl::MissionFinished
         g_->removeBlip(5);
+        g_->saveGame.setMissionPassed(SaveGame::kKenA01, SaveGame::kPassed);   // (cActStructure::PassMission)
         g_->cutscene = g_->scriptCutscene = false;
         g_->seqCamera.active = false;
         g_->showWinLose(g_->mainText(0x5D), 0x5A);   // "MISSION PASSED" (UnloadCurrentMission, no reward to show)

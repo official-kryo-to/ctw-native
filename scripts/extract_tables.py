@@ -250,6 +250,11 @@ class GameBinary:
         # user colours).
         return b'CTWFONT1' + self.symbol_data('TextColours', 92)
 
+    def saves(self):
+        # cSaveGameMgr::ClearCurrentSaveData's two 26-entry tables of 10-bit values, packed three a word into the
+        # save game's code section (+0x134 and +0x158).
+        return b'CTWSAVE1' + self.read(0x486b7c, 104) + self.read(0x486be4, 104)
+
     def ped_comments(self):
         # Gender/sample ranges, timing records and initial repeat histories from this verified build.
         return (b'CTWPEDV1' + self.read(0x480370, 2 * 26 * 8) + self.read(0xe00670, 26 * 32) +
@@ -339,4 +344,5 @@ def extract_tables(binary):
             'weather_tables.bin': game.weather(), 'weapon_tables.bin': game.weapons(),
             'wanted_tables.bin': game.wanted(), 'shard_tables.bin': game.shards(),
             'driving_props.bin': game.driving(), 'ped_comments.bin': game.ped_comments(),
-            'marker_tables.bin': game.markers(), 'font_tables.bin': game.fonts()}
+            'marker_tables.bin': game.markers(), 'font_tables.bin': game.fonts(),
+            'save_tables.bin': game.saves()}

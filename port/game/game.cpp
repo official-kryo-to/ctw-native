@@ -54,6 +54,7 @@ bool Game::init(const std::string& data, const std::string& mods) {
     if (!loadingFrame()) return false;
     Hud_Init(dataDir);
     if (!GameText::Fonts().load(dataDir)) fprintf(stderr, "game fonts or font_tables.bin missing: no HUD text\n");
+    if (!saveGame.init(dataDir)) fprintf(stderr, "save_tables.bin missing or invalid: run scripts/setup_game.py\n");
     if (!comic.load(dataDir)) fprintf(stderr, "sequence image tables missing: no comic cutscenes\n");
     if (!pauseScreen.init(dataDir)) fprintf(stderr, "SS_Hud missing: pause-screen artwork unavailable\n");
     if (!gameplayHud.init(dataDir)) fprintf(stderr, "radar map / SS_AlwaysLoaded missing: no radar HUD\n");
@@ -1242,7 +1243,10 @@ void Game::processTimeCycle() {   // cTimeCycle::Process: the clock, the weather
         if (now >> 12 != before >> 12) {   // the end of an hour
             weather.hourChanged(*this);
             stats.processEndOfHour(wanted.level());   // cStatsManager::ProcessEndOfHour
-            if (now < before) stats.incDaysPassedInGame();   // past midnight
+            if (now < before) {   // past midnight: cTimeCycle::ProcessEndOfDay
+                tc.day = tc.day + 1 == 7 ? 0 : tc.day + 1;
+                stats.incDaysPassedInGame();
+            }
         }
         // the minute changed: cStatsManager::UpdateTime by the minutes passed
         const uint32_t m0 = (before & 0xFFF) * 60 >> 12, m1 = (now & 0xFFF) * 60 >> 12;
@@ -1406,6 +1410,7 @@ void Game::tick() {
     screenFade.tick();
     widescreen.update();   // cCamera::Update
     contextHelp.tick(*this);
+    safehouses.tick(*this);
     {   // HUDText::UpdateText: g_DynamicHud's UpdateAndLayout, with this frame's press (cTouchScreen) for the boxes
         int touch[2], mx, my;
         const bool pressed = Plugins_HostApi().mouse_clicked(0) != 0;
@@ -1862,8 +1867,19 @@ void Game::render(int W, int H) {
     restoreInterpolation();
 }
 
+void Game::newGameOrLoad() {
+    saveGame.tryAutoLoad(*this);
+    if (saveGame.hasSaveGameLoaded() && saveGame.isMissionPassed(SaveGame::kKenA01)) {
+        saveGame.loadComplete();             // SaveGameImpl::LoadComplete
+        safehouses.forcePlayerStart(*this);  // (cSafehouseManager::LoadSaveInfo: the current safehouse)
+        return;
+    }
+    saveGame.loadComplete();
+    startMission("kena01");   // WorldImpl::LaunchMission: the first mission and its intro
+}
+
 void Game::run() {
-    startMission("kena01");   // a new game (the port starts one every time): the first mission and its intro
+    newGameOrLoad();
     const double step = 1.0 / 30.0;   // OS_ApplicationTick: the game logic runs at 30 fps
     double acc = 0, last = OS_TimeAccurate();
     bool running = true;

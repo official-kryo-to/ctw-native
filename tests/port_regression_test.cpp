@@ -1673,6 +1673,76 @@ static void vehicleEntry() {
     tables = saved;
 }
 
+
+// cSaveGameMgr: a slot is the 0xDB0-byte data as the original lays it out; the newer of slots 0 and 1 loads at the start
+static void saveGames() {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "ctw_save_test";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    OS_SetDocumentsRoot(dir.string().c_str());
+    {
+        Game game;
+        SaveGame& save = game.saveGame;
+        save.init("no-such-dir");   // (no tables: their words stay 0)
+        save.tryAutoLoad(game);
+        check(!save.hasSaveGameLoaded() && save.data()[0xF4] == 0x7F && save.currentSafehouse() == 0,
+              "without a save the game starts new, with the cleared data");
+        game.money = 1234;
+        game.player.armour = 50;
+        game.playerWeapons.give(5, 40, false);
+        game.world.timeCycle().setTime(20u << 12);
+        game.world.timeCycle().day = 6;
+        save.setMissionPassed(SaveGame::kKenA01, SaveGame::kPassed);
+        save.setSafehouseOwned(0, true);
+        save.setHelpDisplayed(0x35, true);
+        check(save.saveCurrent(game, 0, false, false) && save.slot() == 0, "saving writes slot 0");
+        std::ifstream in(dir / "savegame0", std::ios::binary);
+        std::vector<uint8_t> file((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        auto u16 = [&](int at) { return (unsigned)(file[at] | file[at + 1] << 8); };
+        auto i32 = [&](int at) { int32_t v; std::memcpy(&v, &file[at], 4); return v; };
+        check(file.size() == 0xDB0 && u16(0) == 0x1D && u16(2) == 0xDB0 && u16(4) == 0x52E && u16(6) == 0x5CE &&
+              !std::memcmp(&file[8], " 3.0 (11:11:11 02/10/15)", 25), "the slot's header");
+        check(i32(0x4C) == 1234 && file[0xF5] == 50 && file[0xF4] == 0x7F && i32(0x44) == (2 << 12) && i32(0x48) == 0,
+              "the code section: money, armour, full health and the clock six hours on into the next day");
+        const bool pistol = game.playerWeapons.inSlot(1) || game.playerWeapons.inSlot(2) || game.playerWeapons.inSlot(3);
+        bool saved = false;
+        for (int i = 0; i < 11; ++i) saved |= file[0xF6 + i] == 5 && (int16_t)u16(0x62 + 2 * i) == 40;
+        check(!pistol || saved, "the weapons go into the slots' types and ammo");
+        check((file[SaveGame::kScript + 0x2C + (0x35 >> 3)] >> (0x35 & 7) & 1) &&
+              (file[SaveGame::kScript + 0x34] & 1) && (i32(SaveGame::kScript + 8) >> 10 & 3) == 3,
+              "the script section: the help shown, the safehouse owned and KEN_A01 passed");
+        check(game.stats.timesSaved() == 1, "saving counts in the stats");
+    }
+    {
+        Game game;
+        game.saveGame.init("no-such-dir");
+        game.saveGame.tryAutoLoad(game);
+        check(game.saveGame.hasSaveGameLoaded() && game.saveGame.isMissionPassed(SaveGame::kKenA01) &&
+              game.money == 1234 && game.player.armour == 50 && game.player.health == 0x7F &&
+              game.world.timeCycle().time() == (2u << 12) && game.world.timeCycle().day == 0 &&
+              game.helpDisplayed(0x35) && game.saveGame.safehouseOwned(0) && game.stats.timesSaved() == 1,
+              "the start loads the save back");
+    }
+    {   // a second, later save in slot 1 is the one loaded
+        std::vector<uint8_t> b;
+        {
+            std::ifstream in(dir / "savegame0", std::ios::binary);
+            b.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        }
+        const int32_t money = 777, later = 3000;
+        std::memcpy(&b[0x4C], &money, 4);
+        std::memcpy(&b[0x28], &later, 4);   // a later year
+        std::ofstream(dir / "savegame1", std::ios::binary).write((const char*)b.data(), (std::streamsize)b.size());
+        Game game;
+        game.saveGame.init("no-such-dir");
+        game.saveGame.tryAutoLoad(game);
+        check(game.saveGame.slot() == 1 && game.money == 777, "the newer of the two slots loads");
+    }
+    fs::remove_all(dir, ec);
+    OS_SetDocumentsRoot("saves");
+}
+
 int main() {
     SDL_setenv("SDL_AUDIODRIVER", "dummy", 1);
     check(Audio_Init() && Audio_Init(), "audio initialization is idempotent");
@@ -1694,7 +1764,7 @@ int main() {
     check(!Audio_SfxPlaying(voice), "resumed sound effect finishes normally");
     playerFrameIntegration(); vehicleEntry();
     PlayerTestAccess::fightIdle(); SoundTestAccess::run(); CollisionTestAccess::run(); CollisionTestAccess::cameraTests(); CollisionTestAccess::minigameCamTests(); PropTestAccess::run(); PropDynamicsTestAccess::run();
-    slats(); garbage(); VehicleTestAccess::flaps(); VehicleTestAccess::burnouts(); VehicleTestAccess::directControl(); VehicleTestAccess::knockOff(); VehicleTestAccess::debris(); WaterTestAccess::run(); randomStreams(); explosionsAndShake(); fireAndCamera(); RadioTestAccess::run();
+    slats(); garbage(); VehicleTestAccess::flaps(); VehicleTestAccess::burnouts(); VehicleTestAccess::directControl(); saveGames(); VehicleTestAccess::knockOff(); VehicleTestAccess::debris(); WaterTestAccess::run(); randomStreams(); explosionsAndShake(); fireAndCamera(); RadioTestAccess::run();
     Audio_Shutdown();
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }

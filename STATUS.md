@@ -164,6 +164,12 @@ compatibility with the original.
   damage, and full vehicle poses. See the [modding guide](ctw-modkit/README.md).
 - **Stats:** cStatsManager's counters (kills, explosions, playing time, days, distances, time in a vehicle and more)
   are kept as in the original save section; there is no stats screen yet.
+- **Saving:** after the first mission the apartment is yours: walk into the green marker at its door, facing the
+  door, and you go in, save and come out six hours later, healed and no longer wanted. Saves are the original's
+  slot files (`savegame0` / `savegame1` in the `saves` folder, the same 3504-byte layout: money, health, armour,
+  weapons, the clock, the stats, the missions passed, the safehouses owned and the help already shown). The game
+  loads the newer save when it starts and you come out of the apartment. The PDA's save screen, where the original
+  lets you pick the slot, is not there yet: the port saves to the slot it loaded (slot 0 for a new game).
 - **Pause:** the original free-play HUD overlay, using local HUD artwork and GXT text, darkening, touch bounds
   and input delay. **Esc** / **Start** open it; mission/replay confirmations require the missing mission host.
 - **PC extras:** game controllers (any SDL controller: sticks, triggers and buttons for every action) and Linux
@@ -176,7 +182,7 @@ compatibility with the original.
 
 ## Not there yet
 
-- Missions after the first, save games, full combat, the rest of the police response (road blocks, helicopters, SWAT and the
+- Missions after the first, the PDA (its save screen among its apps), full combat, the rest of the police response (road blocks, helicopters, SWAT and the
   higher levels' units, route-finding pursuit) and the rest of the original gameplay HUD.
 - Radar GPS routes, mission/location blips, a control for the rotating-map setting (the rotation itself is ported), HUD fades,
   the stats screen and the full pause/PDA layout. The radar work is a subset of the HUD, not complete UI parity.

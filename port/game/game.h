@@ -16,6 +16,8 @@
 #include "roads.h"
 #include "traffic.h"
 #include "driving.h"
+#include "savegame.h"
+#include "safehouse.h"
 #include "vehicle.h"
 #include "gfx/model.h"
 #include "gfx/pedsprites.h"
@@ -263,20 +265,16 @@ public:
     void renderWidescreenBars(int width, int height) const;
     HudText::Hud hudText;                // HUDText: g_ObjectiveText and g_HelpText in g_DynamicHud
     ContextHelp contextHelp;             // gpContextHelp: the help box's owner
-    // SaveGameImpl::HelpDisplayed(id[, set]): the bit for each help shown once a game, in 32-bit words (the save
-    // game's script section +0x2C on). The port saves no games, so they last as long as the game does.
-    bool helpDisplayed(int id) const {
-        return id >= 0 && (size_t)(id >> 5) < helpWords_.size() && (helpWords_[(size_t)(id >> 5)] >> (id & 31) & 1);
-    }
-    void setHelpDisplayed(int id, bool shown = true) {
-        if (id < 0) return;
-        if ((size_t)(id >> 5) >= helpWords_.size()) helpWords_.resize((size_t)(id >> 5) + 1, 0);
-        uint32_t& w = helpWords_[(size_t)(id >> 5)];
-        w = (w & ~(1u << (id & 31))) | (uint32_t)shown << (id & 31);
-    }
+    SaveGame saveGame;                   // cSaveGameMgr / SaveGameImpl
+    Safehouses safehouses;               // cSafehouseManager and its handler (the save at the safehouse)
+    // SaveGameImpl::HelpDisplayed(id[, set]): the bit for each help shown once a game (the save's script section)
+    bool helpDisplayed(int id) const { return saveGame.helpDisplayed(id); }
+    void setHelpDisplayed(int id, bool shown = true) { saveGame.setHelpDisplayed(id, shown); }
+    // CScriptMain::Setup: the newer save (SaveGameImpl::TryAutoLoad) where KEN_A01 is passed starts at its
+    // safehouse; otherwise a new game, with the first mission
+    void newGameOrLoad();
     // HUDText::DisplayWinLose ("MISSION PASSED" / "MISSION FAILED") as the mission's end shows it
     void showWinLose(const std::u16string& text, int frames);
-    std::vector<uint32_t> helpWords_;
     SinkingCar sinkingCar;               // the sinking-car minigame (cSinkingCarApp), over everything while it runs
     // cGenericPlayerMiniGameTask for the sinking car: the app with the game's sound, fade and splash; drowned, the
     // player dies (cSinkingCarApp::Process state 5). done(escaped) runs after SetFinished.

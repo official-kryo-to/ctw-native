@@ -28,6 +28,7 @@ public:
     bool extraColours() const { return extra_; }
     int32_t brightness = 4096;                        // +0x130: lightning brightens ColourLightning, 4096 = none
     void setTime(uint32_t hours20_12) { time_ = hours20_12 % (24u << 12); }
+    int32_t day = 0;   // +0x1DB8 (eDay, 0..6): ProcessEndOfDay moves it on at midnight, SetDay
     uint32_t time() const { return time_; }
     void advanceFrames(int frames) { setTime(time_ + 2u * (uint32_t)frames); }   // cTimeCycle::Process: +2 per frame
     void evaluate();                                  // recompute v[] for the current time

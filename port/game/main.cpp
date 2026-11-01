@@ -90,6 +90,7 @@ int main(int argc, char** argv) {
     int startMoney = -1;   // --money N: start with this much money (testing the HUD's cash)
     // --play-movie: shot mode plays the intro movie as a new game does (first, or where a mission plays it)
     bool playMovie = false;
+    bool newGame = false;   // --newgame: the newer save, else a new game (Game::newGameOrLoad)
     int teleportFrame = -1;   // --teleport F:X:Y
     float teleportX = 0, teleportY = 0;
     const char* missionName = nullptr;   // --mission NAME: start this mission (kena01) at the start
@@ -100,6 +101,7 @@ int main(int argc, char** argv) {
         if (!strcmp(argv[i], "--collision")) { TheGame().showDebug = TheGame().showCollision = true; continue; }
         if (!strcmp(argv[i], "--trace")) { trace = true; continue; }
         if (!strcmp(argv[i], "--play-movie")) { playMovie = true; continue; }
+        if (!strcmp(argv[i], "--newgame")) { newGame = true; continue; }   // shot mode: start as Game::run does
         const char* option = argv[i];
         int values = 1;
         if (!strcmp(option, "--walk") || !strcmp(option, "--drive") || !strcmp(option, "--pos")) values = 2;
@@ -248,6 +250,7 @@ int main(int argc, char** argv) {
     if (startMoney >= 0) game.giveMoney((uint32_t)startMoney);
     if (sequenceName) game.startSequence(sequenceName);
     if (missionName) game.startMission(missionName);   // (it reports a missing file itself)
+    else if (newGame) game.newGameOrLoad();
     for (const char* p = giveWeapons; p && *p;) {
         const int type = atoi(p);
         game.playerWeapons.give(type, Weapons_DefaultAmmo(type), true);
