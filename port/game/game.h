@@ -50,6 +50,7 @@
 #include "multiplayerworld.h"
 #include "mission.h"
 #include "world/worldrenderer.h"
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <memory>

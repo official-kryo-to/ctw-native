@@ -79,7 +79,8 @@ static void settle() { for (int i = 0; i < 30; ++i) frameHud(); }
 static void key(int k) { for (auto& h : keys) if (h.first(k, h.second)) return; }
 static bool click(const std::string& label) {
     for (auto it = lastTexts.rbegin(); it != lastTexts.rend(); ++it) {
-        if (it->text != label) continue;
+        // (or the label with an ellipsis after it: arguments stay ASCII, which Windows passes on unchanged)
+        if (it->text != label && it->text != label + "\xE2\x80\xA6") continue;
         mx = it->x + it->w * 0.5f;
         my = it->y + it->h * 0.5f;
         clicked = down = 1;

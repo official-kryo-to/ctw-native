@@ -30,7 +30,7 @@ SCENARIOS = {
     'menu': [F4],
     'menu-expanded': [F4, 'click:Cheat Example', 'click:Broken Mod'],
     'menu-enhancements': [F4, 'click:Enhancements'],
-    'menu-search': [F4, 'click:Search mods...'],
+    'menu-search': [F4, 'click:Search mods'],
     'menu-spawner': [F4, 'click:Cheat Example', F7],
     'freecam': [F8],
     'spawner-freecam': [F7, F8],

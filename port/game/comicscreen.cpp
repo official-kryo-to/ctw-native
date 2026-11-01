@@ -9,6 +9,7 @@
 #include "text/gxt.h"
 #include "world/timecycle.h"
 #include <glad/gl.h>
+#include <cmath>
 #include <algorithm>
 #include <cctype>
 #include <cstring>

@@ -305,7 +305,11 @@ static inline void ctw_ui_text_fit(const CtwUi* ui, float x, float y, float scal
  * draw is set; returns its height either way, so a layout can measure first. */
 static inline float ctw_ui_type_wrap(const CtwUi* ui, float x, float y, float px, float leading, uint32_t rgba,
                                      const char* text, float max_w, int draw) {
-    const float lh = px * leading;
+    float lh = px * leading;
+    if (!CTW_MOD_HAS(ui->api, draw_ui_text)) {   /* an older game's own font: its lines never closer than it is tall */
+        const float own = ui->api->line_height(px / 12.f);
+        if (own > lh) lh = own;
+    }
     float h = 0.f;
     char line[256];
     while (text && *text) {
