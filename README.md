@@ -2,7 +2,7 @@
 
 # CTW-Native
 
-GTA: Chinatown Wars as a native Windows game, rebuilt in C++ with SDL2 and OpenGL. It runs from the game files of
+GTA: Chinatown Wars as a native Windows and Linux game, rebuilt in C++ with SDL2 and OpenGL. It runs from the game files of
 your own Android **4.4.243** copy; none are included here. A fan project, not affiliated with Rockstar Games or
 Take-Two. [STATUS.md](STATUS.md) says what works.
 
@@ -32,7 +32,10 @@ GTA Chinatown Wars PC/
   mods/           the mod menu (F4) and the example mods
 ```
 
-The folder can be moved anywhere. Windows 10 or 11, 64-bit.
+The folder can be moved anywhere. Windows 10 or 11, 64-bit. Saves go into `saves/` in the same folder.
+
+On **Linux** (x86-64), download **CTW-Native-Linux-x86_64.tar.gz** instead, unpack it and run
+`./port-apk.sh path/to/your.apk` (it needs Python 3.10+ with venv), then `./GTACTW`.
 
 See [CONTROLS.md](CONTROLS.md) for the keys.
 

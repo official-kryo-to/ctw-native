@@ -9,6 +9,8 @@ name: Release
 #
 # What it publishes, as release v<version>:
 #   CTW-Native-Porter.exe   the Porter, with GTACTW.exe, the mod menu and the example mods inside
+#   CTW-Native-Linux-x86_64.tar.gz   the Linux game, the mod menu and the examples, and port-apk.sh, which makes
+#                           the data from the APK with the Python setup (built on Ubuntu 22.04 for older glibcs)
 # plus GitHub's source archives of the tagged commit, which are the corresponding source for the GPL.
 # There is no auto-update: the Porter shows its version, and people download a new one from Releases.
 on:
@@ -50,8 +52,41 @@ jobs:
             echo "needed=true" >> "$GITHUB_OUTPUT"
           fi
 
-  build:
+  linux:
     needs: check
+    if: needs.check.outputs.needed == 'true'
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dependencies (SDL2's video and audio backends, OpenGL)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev             libxi-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libgl1-mesa-dev libegl1-mesa-dev             libasound2-dev libpulse-dev libudev-dev libdbus-1-dev
+      - name: Build the game and the mod kit
+        run: |
+          cmake -S . -B port/build-release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCTW_RELEASE=ON             -DCTW_BUILD_MODKIT=ON -DBUILD_TESTING=OFF -DCTW_VERSION="$VERSION"
+          cmake --build port/build-release
+      - name: Pack the Linux folder
+        run: |
+          pkg=CTW-Native-Linux-x86_64
+          mkdir -p "$pkg/setup" "$pkg/mods"
+          cp port/build-release/GTACTW "$pkg/"
+          strip "$pkg/GTACTW"
+          (cd port/build-release/mods && find . -name log.txt -prune -o -name enabled.ini -prune -o -type f -print             | while read -r f; do mkdir -p "../../../$pkg/mods/$(dirname "$f")"; cp "$f" "../../../$pkg/mods/$f"; done)
+          cp scripts/setup_game.py scripts/apk_manifest.py scripts/extract_tables.py requirements-setup.txt "$pkg/setup/"
+          cp scripts/linux/port-apk.sh scripts/linux/README.txt LICENSE THIRD_PARTY.md CONTROLS.md "$pkg/"
+          chmod +x "$pkg/GTACTW" "$pkg/port-apk.sh"
+          tar -czf "$pkg.tar.gz" "$pkg"
+          ls -la "$pkg.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: CTW-Native-Linux-x86_64.tar.gz
+
+  build:
+    needs: [check, linux]
     if: needs.check.outputs.needed == 'true'
     runs-on: windows-latest
     env:
@@ -115,12 +150,18 @@ jobs:
 
           Windows may warn about an unknown publisher the first time: choose *More info*, then *Run anyway*.
           The Porter contains no game files; it reads them from your APK.
+
+          **Linux (x86-64):** download **CTW-Native-Linux-x86_64.tar.gz**, unpack it, run
+          `./port-apk.sh path/to/your.apk` (needs Python 3.10+ with venv) and then `./GTACTW`.
           NOTES
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
       - name: Publish the release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "v$VERSION" CTW-Native-Porter.exe \
+          gh release create "v$VERSION" CTW-Native-Porter.exe CTW-Native-Linux-x86_64.tar.gz \
             --target "$GITHUB_SHA" --title "CTW-Native v$VERSION" --notes-file notes.md
