@@ -21,6 +21,7 @@
 //
 // Not ported yet: the burnt colours, style 5's smoke and the scripted fire styles.
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 

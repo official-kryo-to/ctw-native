@@ -3,6 +3,7 @@
 // See LICENSE in the repository root.
 #include "hudtext.h"
 #include "gfx/spriteset.h"
+#include <cstddef>
 #include <glad/gl.h>
 #include <algorithm>
 #include <cmath>

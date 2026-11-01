@@ -7,6 +7,7 @@
 #include "particles.h"
 #include "sound.h"
 #include "gfx/assets.h"
+#include <cstddef>
 #include <glad/gl.h>
 #include <cmath>
 

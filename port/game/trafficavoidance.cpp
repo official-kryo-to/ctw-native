@@ -4,6 +4,7 @@
 #include "trafficavoidance.h"
 #include "fixedmath.h"
 #include "game.h"
+#include <cstddef>
 #include <algorithm>
 #include <cmath>
 

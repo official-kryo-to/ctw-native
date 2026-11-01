@@ -17,6 +17,7 @@
 #include "hud.h"
 #include "sound.h"
 #include "text/gxt.h"
+#include <cstddef>
 #include <cmath>
 
 namespace {

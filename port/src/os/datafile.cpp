@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 #include "datafile.h"
+#include <cstddef>
 #include <algorithm>
 #include <filesystem>
 #ifdef _WIN32

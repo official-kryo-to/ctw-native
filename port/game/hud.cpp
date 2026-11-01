@@ -5,6 +5,7 @@
 #include "gfx/font.h"
 #include "gfx/uifont.h"
 #include "os/gamefs.h"
+#include <cstddef>
 #include <glad/gl.h>
 #include <vector>
 

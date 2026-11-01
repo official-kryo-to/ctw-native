@@ -8,6 +8,7 @@
 #include "cargens.h"   // Rand32Critical
 #include "gfx/assets.h"
 #include "world/worldrenderer.h"
+#include <cstddef>
 #include <glad/gl.h>
 #include <algorithm>
 #include <cmath>

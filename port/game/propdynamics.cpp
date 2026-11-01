@@ -9,6 +9,7 @@
 #include "sound.h"
 #include "cargens.h"
 #include "fire.h"
+#include <cstddef>
 #include <algorithm>
 #include <cmath>
 

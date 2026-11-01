@@ -30,6 +30,7 @@
 //   +0x148 global road-node references: u16 count, count x u16 node indices
 // All values are 20.12 fixed point; the queries below take and return floats in world units.
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>

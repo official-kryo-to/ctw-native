@@ -4,6 +4,7 @@
 #include "movie.h"
 #include "audio/audio.h"
 #include "os/datafile.h"
+#include <cstddef>
 #include <algorithm>
 
 #ifdef _WIN32

@@ -9,6 +9,7 @@
 #include "random.h"
 #include "sound.h"
 #include "text/gxt.h"
+#include <cstddef>
 #include <glad/gl.h>
 #include <algorithm>
 #include <cmath>

@@ -7,6 +7,7 @@
 #pragma once
 #include "world/timecycle.h"
 #include "world/worldmap.h"
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <memory>

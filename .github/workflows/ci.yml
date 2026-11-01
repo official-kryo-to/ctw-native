@@ -55,7 +55,8 @@ jobs:
           core/tests/parity.sh
   linux:
     name: Linux (game, showcase, mod kit, tests)
-    runs-on: ubuntu-latest
+    # the release's Linux build runs here too (its glibc reaches older distributions), so GCC 11 is checked
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - name: Build dependencies (SDL2's video and audio backends, OpenGL)

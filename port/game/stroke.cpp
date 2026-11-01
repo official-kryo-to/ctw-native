@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 #include "stroke.h"
+#include <cstddef>
 #include <cmath>
 
 float StrokeOneWay::modifyChange(float d) {   // cStrokeVariable_OneWay::ModifyChange

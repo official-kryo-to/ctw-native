@@ -10,6 +10,7 @@
 #include "os/gamefs.h"
 #include "os/os.h"
 #include "text/gxt.h"
+#include <cstddef>
 #include <glad/gl.h>
 #include <stb_image.h>
 

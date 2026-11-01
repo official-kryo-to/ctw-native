@@ -6,6 +6,7 @@
 #include "fixedmath.h"
 #include "random.h"
 #include "sound.h"
+#include <cstddef>
 #include <algorithm>
 #include <cmath>
 

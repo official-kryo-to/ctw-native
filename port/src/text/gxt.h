@@ -4,6 +4,7 @@
 // .gxt string table: "DS_GXT", u16 count, then count * { u16 length, u16 chars[length] } (UTF-16LE).
 // Strings may contain in-band tags: 0xFEFE = insert number, 0xFEFF = insert string (script arguments).
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>

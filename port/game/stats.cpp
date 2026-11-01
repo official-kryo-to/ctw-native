@@ -3,6 +3,7 @@
 // See LICENSE in the repository root.
 #include "stats.h"
 #include "game.h"
+#include <cstddef>
 #include <cmath>
 
 namespace {

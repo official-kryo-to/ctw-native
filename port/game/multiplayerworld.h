@@ -4,6 +4,7 @@
 #pragma once
 #include "ctw_types.h"
 #include "localarea.h"
+#include <cstddef>
 #include <deque>
 #include <map>
 #include <array>
