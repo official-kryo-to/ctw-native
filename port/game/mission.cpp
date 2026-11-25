@@ -89,6 +89,7 @@ std::u16string Mission::text(int id) const {
 
 void ScreenFade::toBlack(int frames, std::function<void()> done) {
     done_ = std::move(done);
+    white = false;   // a fade to black (the flash bang re-sets white after priming the fade)
     target_ = 0x10;
     const int32_t rest = 0x10000 - level_, step = rest / std::max(frames, 1);
     step_ = step ? step : rest;

@@ -224,6 +224,8 @@ public:
     // entity that fell in (scale 4 x mass, at most 3), or -1 for none (scale 2 for type 8, 1 for type 9). Nothing
     // happens while ten splash emitters are alive.
     void addWaterSplash(const int32_t pos[3], int type, const int32_t velocity[3], int32_t sourceMass);
+    // Explosion::AddExplosion for type 10: a cExplosionWaterExplosion, made when a grenade sinks (cGrenade::Destroy)
+    void addWaterExplosion(const int32_t pos[3]);
     void enableExplosionRadiusCheck(bool enable) { explosionRadiusCheck_ = enable; } // native script switch; off at Reset
     struct FreeCamera { bool on = false; WorldCamera cam; } freeCam;   // mods: replaces the game camera
     // cutscenes (cutscene.cpp): the playing sequence (cSequenceManager), its camera and the comic overlay
@@ -408,6 +410,7 @@ public:
     void vehicleReaction(Vehicle& car, int type, int damage, uint32_t sourceCar, const int32_t at[3]);
 private:
     void processSplashExplosion(Explosion& explosion);      // cExplosionWaterSplashPed::Process
+    void processWaterExplosion(Explosion& explosion);       // cExplosionWaterExplosion::Process
     unsigned explosionParticleCount(const int32_t pos[3]) const;
     void finishShortFrame();             // the effects, sound and plugin updates of a frame that ends early
     void processTimeCycle();

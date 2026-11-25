@@ -3,6 +3,7 @@
 // See LICENSE in the repository root.
 #include "pickups.h"
 #include "game.h"
+#include "random.h"
 #include "sound.h"
 #include "gfx/assets.h"
 #include "world/worldrenderer.h"
@@ -27,10 +28,15 @@ TypeInfo typeInfo(int type) {
     case 22: return {0x1F, 0x7FFF};  case 23: return {0x20, 0x7FFF}; case 24: return {0x10, 0x7FFF};
     case Pickups::NiteStick: return {0x10, 0x7FFF};
     case Pickups::Tazer: return {0x21, 0x7FFF};
+    case Pickups::RandomStuff: return {0xF, 0x7FFF};    // cPickupRandomStuff::cPickupRandomStuff (AddPickup type 33)
+    case Pickups::Generic: return {3, 0x440E};          // AddPickup type 35 / AddGenericPickup's default sprite
+    // LuckLion (type 34) is handled by its own, unported class (prop, particles, ManagedRender); it is not created here.
     default: return {-1, 0};
     }
 }
-// the weapon each weapon pickup gives (its cPickupX::Collect -> cBaseWeaponPickup::GiveStuff)
+// the weapon each weapon pickup gives. In the original each weapon pickup is its own class whose 8-byte Collect
+// tail-calls cBaseWeaponPickup::GiveStuff with a fixed eWeaponType; the port folds all of them into this table and
+// the single GiveStuff reconstruction in collect() below.
 constexpr int8_t kPickupWeapon[32] = {0, 0, 0, 0, 2, 3, 4, 5, 7, 6, 8, 9, 10, 11, 12, 13,
                                       14, 15, 16, 17, 20, 21, 22, 23, 18, 0, 0, 0, 0, 0, 1, 19};
 int cellKey(const int32_t pos[3]) {
@@ -48,6 +54,10 @@ int Pickups::typeFromWeapon(int weapon) {   // cPickupManager::AddDroppedWeapon'
     return -1;
 }
 
+Pickups::Pickups() {   // cPickupManager::cPickupManager
+    reset();
+}
+
 void Pickups::reset() {   // cPickupManager::Reset (and the pickups of the old game going away)
     pickups_.clear();
     cells_.clear();
@@ -55,7 +65,8 @@ void Pickups::reset() {   // cPickupManager::Reset (and the pickups of the old g
     allowMelee = allowMoney = true;
 }
 
-Pickups::Pickup* Pickups::add(int type, const int32_t pos[3], int amount, int16_t lifetime) {
+// cPickupManager::AddPickup: allocate the pickup and run its cBasePickup / subclass constructor
+Pickups::Pickup* Pickups::add(int type, const int32_t pos[3], int amount, int16_t lifetime, bool mission0x3B3Passed) {
     if (freeSlots() <= 4) forceFree();   // (it goes once it has faded; the port never exceeds the pool)
     if (freeSlots() <= 0) return nullptr;
     // without melee pickups (AllowMeleePickups(false)) the second jump table leaves out the four melee weapons
@@ -66,29 +77,50 @@ Pickups::Pickup* Pickups::add(int type, const int32_t pos[3], int amount, int16_
         p.colour = 0x3E0;
     } else {
         const TypeInfo info = typeInfo(type);
-        if (info.texture < 0) return nullptr;   // dumpsters, random stuff, luck lions and script pickups
+        if (info.texture < 0) return nullptr;
         p.texture = info.texture;
         p.colour = info.colour;
+        // only cPickupBribe's constructor sets +0xCD; RandomStuff and Generic keep cBasePickup's default (false)
         p.inVehicle = type == Bribe;
     }
     p.uid = nextUid_++;
     p.type = type;
     std::copy(pos, pos + 3, p.pos);
     p.amount = amount;
-    p.timer = lifetime;
+    p.timer = (type == Bribe || type == RandomStuff || type == Generic) ? -1 : lifetime;
+    p.cell = cellKey(pos);
+    if (type == RandomStuff) {   // cPickupRandomStuff::cPickupRandomStuff: GetRandomPickupType 0..9, re-rolling 9 until mission 0x3B3
+        do {
+            p.randomType = (int)Rand32NonCritical(10);
+        } while (p.randomType == 9 && !mission0x3B3Passed);
+    }
+    pickups_.push_back(p);
+    return &pickups_.back();
+}
+
+Pickups::Pickup* Pickups::addGeneric(const int32_t pos[3], uint16_t colour, int texture, int amount) {   // cPickupManager::AddGenericPickup
+    if (freeSlots() <= 0) return nullptr;
+    Pickup p;
+    p.uid = nextUid_++;
+    p.type = Generic;   // cBasePickup::cBasePickup(pos, 0x23, colour, texture, amount): no +0xCD, so inVehicle stays false
+    p.texture = texture;
+    p.colour = colour;
+    std::copy(pos, pos + 3, p.pos);
+    p.amount = amount;
+    p.timer = -1;
     p.cell = cellKey(pos);
     pickups_.push_back(p);
     return &pickups_.back();
 }
 
 Pickups::Pickup* Pickups::addDroppedMoney(int amount, const int32_t pos[3]) {   // cPickupManager::AddDroppedMoney
-    if (freeSlots() < 5) return nullptr;
+    if (isRunningLow()) return nullptr;   // cPickupManager::IsRunningLowOnPickups
     const int32_t at[3] = {pos[0], pos[1], pos[2] + 0x1800};
     return add(Money, at, amount, 0x3E8);
 }
 
 Pickups::Pickup* Pickups::addDroppedWeapon(int weapon, const int32_t pos[3]) {   // cPickupManager::AddDroppedWeapon
-    if (freeSlots() < 5) return nullptr;
+    if (isRunningLow()) return nullptr;   // cPickupManager::IsRunningLowOnPickups
     const int type = typeFromWeapon(weapon);
     if (type < 0 || (!allowMelee && weapon >= 1 && weapon <= 4)) return nullptr;
     const int32_t at[3] = {pos[0], pos[1], pos[2] + 0x1000};
@@ -109,7 +141,8 @@ void Pickups::setState(Pickup& p, uint8_t state) {   // cBasePickup::SetState
     if ((state == 4 || state == 1) && !p.fade) p.fade = 1;
 }
 
-bool Pickups::addToCollected(const Pickup& p) {   // cCollectedAmbientPickupStore::AddToList
+// cPickupManager::AddToAmbientCollectedList -> cCollectedAmbientPickupStore::AddToList
+bool Pickups::addToCollected(const Pickup& p) {
     Collected* slot = nullptr;
     for (Collected& c : collected_) if (!c.active) { slot = &c; break; }
     if (!slot) {   // full: the entry with the least time left makes way
@@ -126,7 +159,9 @@ void Pickups::loadCell(Game& g, int cx, int cy) {   // cPickupManager::LoadPicku
     for (const Collision::PickupPlacement& d : *placements) {
         if (d.flags & 0x40) continue;   // needs the story flag (save game +0x64 & 0x3000), not set in a new game
         const int type = d.flags & 0x3F;
-        if (d.flags & 0x80 || type == Dumpster) continue;   // dumpsters are not ported
+        // a map type-33 placement is always turned into a dumpster (cBasePickup::SetAsDumpster), which is not ported;
+        // the 0x80 flag marks the dumpster/dynamic-prop placements the same way
+        if (d.flags & 0x80 || type == RandomStuff) continue;
         bool taken = false;
         for (const Collected& c : collected_)
             taken |= c.active && c.x == d.x && c.y == d.y && c.type == type;
@@ -150,7 +185,7 @@ int Pickups::touching(const Game& g, const Pickup& p) const {   // cBasePickup::
     return 0;
 }
 
-bool Pickups::collect(Game& g, Pickup& p) {
+bool Pickups::collect(Game& g, Pickup& p) {   // cBasePickup::Collect
     auto chime = [] { TheSound().playResident(0x26B, 0x7F); };
     switch (p.type) {
     case Money:   // cPickupMoney::Collect
@@ -178,6 +213,14 @@ bool Pickups::collect(Game& g, Pickup& p) {
         p.timer = 0x4650;   // GetPickupRespawnTime(0)
         return true;
     }
+    case RandomStuff:   // cPickupRandomStuff::Collect: hide and respawn after GetPickupRespawnTime(4)
+        setState(p, 1);
+        p.timer = 0x4650;   // GetPickupRespawnTime(4)
+        return true;
+    case Generic:   // cPickupGeneric::Collect: hide with a zero respawn timer
+        setState(p, 1);
+        p.timer = 0;
+        return true;
     default: break;
     }
     // cBaseWeaponPickup::GiveStuff
@@ -212,6 +255,7 @@ bool Pickups::eligible(const Game& g, const Pickup& p) const {
     if (p.type == Health) return g.player.health <= 126;
     if (p.type == Armour) return g.player.armour <= 126;
     if (p.type == Bribe) return g.wanted.level() != 0;
+    if (p.type == RandomStuff || p.type == Generic) return true;
     const int weapon = weaponFromType(p.type);
     if (!weapon || !Weapons_Ok()) return false;
     const WeaponManager& w = g.playerWeapons;

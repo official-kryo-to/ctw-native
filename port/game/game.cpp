@@ -1027,9 +1027,10 @@ void Game::processVehicleDeaths() {
     const size_t count = explosions_.size();
     for (size_t i = 0; i < count; ++i) {
         const int kind = explosions_[i].type;
-        if ((kind == 6 || kind == 7 || kind == 8 || kind == 9 || kind == 11) && !explosions_[i].fired) {
+        if ((kind == 6 || kind == 7 || kind == 8 || kind == 9 || kind == 10 || kind == 11) && !explosions_[i].fired) {
             Explosion special = explosions_[i];   // its blast may queue more explosions
             if (special.type == 11) processHotDogExplosion(special);
+            else if (special.type == 10) processWaterExplosion(special);
             else if (special.type == 8 || special.type == 9) processSplashExplosion(special);
             else processBigExplosion(special);
             explosions_[i] = special;
@@ -1052,9 +1053,9 @@ void Game::processVehicleDeaths() {
         else TheSound().explosion(*this, explosion.pos);
         TheParticles().add<ExplosionFlash>(explosion.pos,explosion.type,explosion.scale);
         if (explosion.type == 2) fires.molotov(*this, explosion.pos, true);   // the player threw it
-        // cExplosionMolotov's blast is the next Process (above); the flash bang's DazeEntities is not ported
-        if (explosion.type == 2 || explosion.type == 5) continue;
-        affectExplosion(explosion);
+        if (explosion.type == 2) continue;   // cExplosionMolotov's blast is its next Process (above)
+        affectExplosion(explosion);   // cExplosionFlashBang::Process state 0 dazes the player (type 5); else the blast
+        if (explosion.type == 5) continue;   // the flash bang adds no debris or cloud, only the flash above
         if (explosion.type == 4) ExplosionDebris::create(explosion.pos, 4);
         TheParticles().add<ExplosionCloud>(explosion.pos,explosion.type,1,explosion.scale,0,0,explosionParticleCount(explosion.pos));
     }
@@ -1128,6 +1129,25 @@ void Game::addWaterSplash(const int32_t at[3], int type, const int32_t velocity[
     } else e.scale = type == 8 ? 0x2000 : 0x1000;
     for (int k = 0; k < 3; ++k) e.dir[k] = (int16_t)d[k];
     queueExplosion(e);
+}
+
+void Game::addWaterExplosion(const int32_t at[3]) {   // Explosion::AddExplosion type 10 (cExplosionWaterExplosion)
+    // cGrenade::Destroy (0x0085cca8) makes this when a grenade sinks. A stationary class, so the normal duplicate
+    // check applies (its ClassId 16 is not among the 12/15/17 the suppression skips).
+    queueExplosion({{at[0],at[1],at[2]},0,10,false,0x1000});
+}
+
+void Game::processWaterExplosion(Explosion& e) {   // cExplosionWaterExplosion::Process (0x00740894)
+    e.counter += 2;
+    if (e.state == 0) { e.counter = 0; e.state = 1; return; }   // settle for one Process, then the surface effects
+    if (e.state == 1) { affectExplosion(e); e.counter = 0; e.state = 2; return; }   // SFX 0x1D5, surface splash, smoke
+    if (e.state == 2) {   // once counter >= 0x15, the underwater force pulse, SFX 0x1D6 and the two rising splashes
+        if (e.counter < 0x15) return;
+        affectExplosion(e);
+        e.counter = 0; e.state = 3;
+        return;
+    }
+    if (e.counter >= 0x15) { e.fired = true; e.delay = 11; }   // Destroy
 }
 
 void Game::processSplashExplosion(Explosion& e) {   // cExplosionWaterSplashPed::Process

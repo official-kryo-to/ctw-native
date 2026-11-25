@@ -2,7 +2,9 @@
 // Copyright (C) 2026 Kryo.to
 // See LICENSE in the repository root.
 // Pickups: a port of cPickupManager, cBasePickup and the pickups the free-roaming game uses (cPickupMoney,
-// cPickupHealth, cPickupArmour, cPickupBribe and the weapons' cBaseWeaponPickup::GiveStuff).
+// cPickupHealth, cPickupArmour, cPickupBribe, cPickupRandomStuff, cPickupGeneric and the weapons'
+// cBaseWeaponPickup::GiveStuff). cPickupRandomStuff and cPickupGeneric are only created by the mission script
+// (not ported), so they are reached in free roam only as multiplayer replicas, but their logic is ported here.
 //
 // The map places pickups in every 50-unit sector (world.bin section +0x110, see world/collision.h). When a sector
 // streams in, LoadPickupGridCell creates its pickups unless the cCollectedAmbientPickupStore remembers taking one of
@@ -16,9 +18,10 @@
 // ManagedRender draws it as a camera-facing sprite of the pickup sheet (gGameDir[12]) one unit above its position,
 // pulsing between dark and light grey, white while it fades.
 //
-// Not ported: dumpsters (sSectorPickupData flag 0x80 and type 33), cPickupRandomStuff, cPickupLuckLion,
-// cPickupGeneric and the script's pickups; a weapon that would replace a different one in its slot waits for the
-// phone's "touch to swap" box, which the port does not have, so it stays where it is.
+// Not ported: dumpsters (every map type-33 placement is turned into one by cBasePickup::SetAsDumpster; the 0x80
+// flag marks them too), the whole luck lion (cPickupLuckLion: its dynamic prop, particle emitter, trails and the
+// 1752-byte ManagedRender that runs the collection), and the script's pickup callbacks; a weapon that would replace a
+// different one in its slot waits for the phone's "touch to swap" box, which the port does not have, so it stays put.
 #pragma once
 #include <cstdint>
 #include "ctw_types.h"
@@ -30,9 +33,10 @@ struct WorldCamera;
 
 class Pickups {
 public:
-    // cPickupManager::AddPickup's types
+    // cPickupManager::AddPickup's types (verified against the switch at 0x8967d0): type 33 is RandomStuff (a map
+    // placement of it becomes a dumpster), 34 LuckLion, 35 Generic (also AddGenericPickup).
     enum Type { Money = 0, Health = 1, Armour = 2, Bribe = 3, Bat = 4, Pistol = 7, NiteStick = 30, Tazer = 31,
-                Dumpster = 33 };
+                RandomStuff = 33, LuckLion = 34, Generic = 35 };
     struct Pickup {
         uint32_t uid = 0;
         int type = 0;                 // +0xCB
@@ -41,6 +45,7 @@ public:
         int32_t pos[3]{};
         int16_t timer = -1;           // +0xC2: lifetime, or the respawn countdown; -1 = none
         int amount = 0;               // +0xD2: ammo or money
+        int randomType = 0;           // +0xD4: cPickupRandomStuff::GetRandomPickupType (0..9)
         uint8_t state = 0;            // +0xC0: 0 active, 1 collected (respawning), 4 gone
         int8_t fade = 0;              // +0xCF: 1..31 while fading out, -1 = done
         uint8_t hidden = 0;           // +0x38
@@ -49,14 +54,20 @@ public:
         int cell = -1;                // the 50-unit sector it belongs to (x * 100 + y)
     };
 
+    Pickups();                                      // cPickupManager::cPickupManager
     void setShared(bool shared) { shared_ = shared; }
     void reset();                                   // cPickupManager::Reset
     void update(Game& g);                           // streaming, cPickupManager::Process and each pickup's Process
     void render(const Game& g, const WorldCamera& cam) const;   // cBasePickup::ManagedRender
     // cPickupManager::AddPickup (lifetime -1: none). nullptr when there is no such pickup or it is not ported.
-    Pickup* add(int type, const int32_t pos[3], int amount, int16_t lifetime);
+    Pickup* add(int type, const int32_t pos[3], int amount, int16_t lifetime, bool mission0x3B3Passed = true);
+    // cPickupManager::AddGenericPickup
+    Pickup* addGeneric(const int32_t pos[3], uint16_t colour, int texture, int amount = 0);
     Pickup* addDroppedMoney(int amount, const int32_t pos[3]);       // AddDroppedMoney
     Pickup* addDroppedWeapon(int weaponType, const int32_t pos[3]);  // AddDroppedWeapon
+    bool isRunningLow() const { return freeSlots() < 5; }            // cPickupManager::IsRunningLowOnPickups
+    static int randomPickupType(const Pickup& p) { return p.randomType; }   // cPickupRandomStuff::GetRandomPickupType
+    static int moneyAmmo(const Pickup& p) { return (uint16_t)p.amount; }    // cPickupMoney::Ammo
     // cPickupManager::GetWeaponFromPickUpType: the weapon a pickup type gives (0: none)
     static int weaponFromType(int type);
     static int typeFromWeapon(int weapon);           // AddDroppedWeapon's switch (-1: none)

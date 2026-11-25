@@ -113,6 +113,68 @@ void Vehicle::explosionHit(const ExplosionBlast& blast, bool occupiedByPlayer) {
 }
 
 void Game::affectExplosion(const Explosion& explosion) {
+    // The per-state effects of the specialised explosions: cExplosionFlashBang::Process (the daze) and
+    // cExplosionWaterExplosion::Process (the surface splash and the underwater pulse). The generic and molotov
+    // blast is below. cBaseExplosion::DazeEntities and cPlayer::Daze are modelled inline for the flash bang.
+    if (explosion.type == 5) {
+        // cExplosionFlashBang::Process state 0 (0x0073fb4c) runs cBaseExplosion::DazeEntities(30.0, 900.0, 250)
+        // (0x0073e57c): a 31-unit world query dazing each entity (flag bit 2 at +0x77) within squared distance 900.0
+        // (Q12). Only the player is handled here; peds get a stumble (cDazed) task and vehicles are never dazed,
+        // neither of which is ported. The daze strength falls off linearly from 250 at the centre, but DazeEntities'
+        // 2^45 base over a masked 2^44 reciprocal keeps it above 127 everywhere in range. The player's type-4 damage
+        // passes through unchanged (no health loss, no knockdown) to cPlayer::Daze(damage, owner, false) =
+        // cScreenFade::FadeIn(min(damage, 127), reset) (0x0088b920/0x006c2ecc): snap to full (0x10000), then fade in.
+        int minX, minY, maxX, maxY;
+        Collision::cellOfPos(explosion.pos[0] - 31 * 4096, explosion.pos[1] - 31 * 4096, minX, minY);
+        Collision::cellOfPos(explosion.pos[0] + 31 * 4096, explosion.pos[1] + 31 * 4096, maxX, maxY);
+        auto inDazeCells = [&](const int32_t at[3]) {
+            int x, y; Collision::cellOfPos(at[0], at[1], x, y);
+            return x >= minX && x <= maxX && y >= minY && y <= maxY;
+        };
+        if (playerCar < 0 && !player.dead && !player.hidden && !player.attached && inDazeCells(player.pos)) {
+            const int64_t distanceQ12 = ExplosionBlast::distanceSquared(player.pos, explosion.pos) >> 12;
+            if (distanceQ12 <= 900 * 4096) {
+                const int64_t reciprocal = (0x100000000000LL / (900 * 4096)) & ~0xFFFFFLL;   // masked 2^44 / radius^2
+                const int32_t factor = (int32_t)((0x200000000000LL - reciprocal * distanceQ12) >> 32);
+                const int32_t damage = (int32_t)(((int64_t)factor * ((250 << 11) & ~0xFFF)) >> 24);
+                // The port's cScreenFade has no FadeIn reset flag, so drive one FadeOut step to full before fading in.
+                // cPlayer::Daze's FadeIn passes b=0, which cScreenFade::Render draws white (not the camera's black).
+                screenFade.toBlack(1);
+                screenFade.tick();
+                screenFade.in(std::min<int>(damage, 0x7F));
+                screenFade.white = true;
+            }
+        }
+        return;
+    }
+    if (explosion.type == 10) {
+        // cExplosionWaterExplosion::Process (0x00740894): state 0 advances to state 1; state 1 shakes the cameras,
+        // plays script SFX 0x1D5 (volume 127, range 0x2BC), spawns a scale-4.0 type-0 WaterSplashEmitter ring at pos
+        // and a puff of dark smoke (colour 3, from the engine's smoke pool); state 2 waits until counter >= 0x15, applies
+        // AffectEntities(0, 7, 320, 0, 0, 0) at (pos.x, pos.y, -7.5), plays script SFX 0x1D6 and spawns scale-1.5
+        // type-1 and type-2 WaterSplashEmitters with direction (0, 0, 0.4).
+        if (explosion.state == 1) {
+            shakeNearExplosion(explosion.pos);
+            TheSound().scriptSfx(explosion.pos, 0x1D5, 0x7F, 0x2BC);
+            const int16_t zeroDir[3] = {0, 0, 0};
+            TheParticles().add<WaterSplashEmitter>(explosion.pos, zeroDir, (int16_t)0x4000, 0, false, (uint16_t)0x7F39);
+            auto* smoke = TheParticles().add<SmokeEmitter>(explosion.pos, 10);
+            const int32_t zeroVel[3] = {0, 0, 0};
+            smoke->addParticle(zeroVel, 3);
+            smoke->dying = true;
+            return;
+        }
+        if (explosion.state != 2) return;   // states 0 and 3 only advance/destroy (driven by processWaterExplosion)
+        // The underwater pulse at z = -7.5 is the only part moved below the surface; the SFX and the two rising
+        // splashes stay at the surface position (the binary reads this->pos for them).
+        const int32_t deepPos[3] = {explosion.pos[0], explosion.pos[1], -0x7800};
+        affectBlast(ExplosionBlast(deepPos, 10, 0, 0x7000, 0, 0));
+        TheSound().scriptSfx(explosion.pos, 0x1D6, 0x7F, 0x2BC);
+        const int16_t upDir[3] = {0, 0, 0x666};
+        TheParticles().add<WaterSplashEmitter>(explosion.pos, upDir, (int16_t)0x1800, 1, true, (uint16_t)0x7F39);
+        TheParticles().add<WaterSplashEmitter>(explosion.pos, upDir, (int16_t)0x1800, 2, true, (uint16_t)0x7F39);
+        return;
+    }
     // cExplosionMolotov::Process: AffectEntities(6, 10, 320, half, whole, 7) with the molotov's damage. Types 0, 1, 3 and
     // 4 are all cExplosionGeneric (Explosion::AddExplosion) and keep the scale-based radii above.
     const int molotov = Weapons_Info(21).damage;
@@ -161,14 +223,15 @@ void Game::affectBlast(const ExplosionBlast& blast) {
 }
 
 bool Game::queueExplosion(const Explosion& explosion) {
-    if (explosionRadiusCheck_) {
+    if (explosionRadiusCheck_ && !explosion.moving && explosion.type != 8 && explosion.type != 9 && explosion.type != 11) {
         // AddExplosion queries a half-unit cell rectangle, then applies this raw Q24 distance cutoff.
-        // Retained final-state explosions still suppress additions. The currently ported types are generic
-        // stationary blasts; the specialised class exclusions / moving input will accompany their ports.
+        // Retained final-state explosions still suppress additions; moving blasts and types 8, 9, 11 (ClassIds 12, 15, 17)
+        // are excluded from the suppression check.
         int minX,minY,maxX,maxY;
         Collision::cellOfPos(explosion.pos[0]-0x800,explosion.pos[1]-0x800,minX,minY);
         Collision::cellOfPos(explosion.pos[0]+0x800,explosion.pos[1]+0x800,maxX,maxY);
         for (const Explosion& existing : explosions_) {
+            if (existing.type == 8 || existing.type == 9 || existing.type == 11) continue;
             int x,y; Collision::cellOfPos(existing.pos[0],existing.pos[1],x,y);
             if (x < minX || x > maxX || y < minY || y > maxY) continue;
             if (ExplosionBlast::distanceSquared(existing.pos,explosion.pos) <= 0x45FFFFFFLL) return false;

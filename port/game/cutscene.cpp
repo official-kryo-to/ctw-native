@@ -264,9 +264,10 @@ void Game::renderWidescreenBars(int W, int H) const {
 }
 
 void Game::renderMissionHud(int W, int H) {
-    if (screenFade.alpha > 0.f) {   // cScreenFade: black over the picture
+    if (screenFade.alpha > 0.f) {   // cScreenFade: black over the picture, or white for the flash bang's daze
         Hud_Begin(W, H);
-        Hud_Rect(0, 0, (float)W, (float)H, (uint32_t)(screenFade.alpha * 255.f));
+        const uint32_t a = (uint32_t)(screenFade.alpha * 255.f);
+        Hud_Rect(0, 0, (float)W, (float)H, (screenFade.white ? 0xFFFFFF00u : 0u) | a);
         Hud_End();
     }
     renderWidescreenBars(W, H);   // (cPda::Render: under every sprite list)

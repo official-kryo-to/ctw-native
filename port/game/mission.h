@@ -63,6 +63,7 @@ private:
 // would pass it (a fade-in once the level is below 0x1000).
 struct ScreenFade {
     float alpha = 0.f;   // level / 0x10000, for drawing
+    bool white = false;  // the flash bang's daze fades white (cPlayer::Daze's FadeIn, b=0); every other fade is black
     void toBlack(int frames, std::function<void()> done = nullptr);   // cScreenFade::FadeOut
     void in(int frames, std::function<void()> done = nullptr);        // cScreenFade::FadeIn
     void tick();                                                      // cScreenFade::Process
