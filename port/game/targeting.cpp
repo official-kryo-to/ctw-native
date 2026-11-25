@@ -108,10 +108,12 @@ int32_t dist2q(const int32_t a[3], const int32_t b[3]) {
     return (int32_t)((uint64_t)len2(d) >> 12);
 }
 
-// cSensorCone::GetSensorPriority (lower is more important)
+// cSensorCone::GetSensorPriority (lower is more important). The ped (5/7), vehicle (6/8/9) and null (100) bands,
+// and the wanted-level gate on cop targets, match the binary; the binary additionally ranks entities that recently
+// damaged or are attacking the player into the higher bands 1-4, which is not modelled here.
 int priority(const Game& g, const Ent* e) {
     if (!e) return 100;
-    const bool wanted = false;   // (the wanted level is not ported)
+    const bool wanted = g.wanted.level() > 0;   // cPlayer::WantedLevel (GetAssociatedPlayer()->WantedLevel() != 0)
     if (e->kind == 1) return e->pedType == 10 && !wanted ? 7 : 5;
     // vehicles: the driver's ped type, or abandoned
     int driverType = -1;

@@ -262,8 +262,9 @@ void Projectiles::destroy(Game& g, Projectile& p) {   // the Destroy of each cla
     if (p.dead) return;
     p.dead = true;
     switch (p.kind) {
-        case Grenade:   // cGrenade::Destroy (water: type 10, not ported)
-            if (!p.inWater) g.addWeaponExplosion(p.pos, 0, 4096);
+        case Grenade:   // cGrenade::Destroy: a sunk grenade bursts as a water explosion (type 10), else a generic blast
+            if (p.inWater) g.addWaterExplosion(p.pos);
+            else g.addWeaponExplosion(p.pos, 0, 4096);
             break;
         case Molotov:   // cMolotov::Destroy
             if (p.inWater) break;
@@ -295,7 +296,8 @@ void Projectiles::onCollision(Game& g, Projectile& p, const int32_t n[3], int en
     };
     switch (p.kind) {
         case Grenade:
-            if (water) {   // explosion type 9 (the splash) is not ported
+            if (water) {   // the grenade's first water contact throws up a type-9 splash, then it sinks and dampens
+                if (!p.inWater) g.addWaterSplash(p.pos, 9, p.vel, -1);
                 p.inWater = true;
                 for (int k = 0; k < 3; ++k) p.vel[k] >>= 5;
                 return;

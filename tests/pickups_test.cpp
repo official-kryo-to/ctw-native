@@ -149,6 +149,22 @@ int main() {
         check(!g.player.dead && g.money == 0, "being reborn at the hospital costs up to $200");
         check(g.stats.data().spentOnHealthCare == spent + 150, "the stats count what could be paid");
     }
+    {   // script pickups: RandomStuff (type 33) and Generic (type 35), verified against AddPickup at 0x8967d0
+        Game& g = TheGame();
+        g.pickups.reset();
+        const int32_t at[3] = {0, 0, 0};
+        Pickups::Pickup* r = g.pickups.add(Pickups::RandomStuff, at, 0, 500);
+        check(r && r->texture == 0xF && r->colour == 0x7FFF, "random stuff uses sprite 0xF and colour 0x7FFF");
+        check(r && !r->inVehicle && r->timer == -1, "random stuff is on-foot only and never times out");
+        check(r && r->randomType >= 0 && r->randomType <= 9, "GetRandomPickupType gives one of ten kinds");
+        Pickups::Pickup* ge = g.pickups.add(Pickups::Generic, at, 0, 500);
+        check(ge && ge->texture == 3 && ge->colour == 0x440E && !ge->inVehicle && ge->timer == -1,
+              "a generic pickup uses sprite 3, colour 0x440E and is not collectible from a vehicle");
+        Pickups::Pickup* ag = g.pickups.addGeneric(at, 0x1234, 7, 42);
+        check(ag && ag->type == Pickups::Generic && ag->colour == 0x1234 && ag->texture == 7 && ag->amount == 42 &&
+              !ag->inVehicle && ag->timer == -1, "AddGenericPickup keeps its colour, sprite and amount");
+        check(g.pickups.add(Pickups::LuckLion, at, 0, 500) == nullptr, "the luck lion is not ported and is never created");
+    }
     if (!failures) std::puts("PASS: money, cash meter, pickups and dropped goodies");
     return failures ? 1 : 0;
 }

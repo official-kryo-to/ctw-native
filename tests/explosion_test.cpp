@@ -28,6 +28,11 @@ struct GameTestAccess {
         check(g.deathFrames_ == 0 && !g.deathCameraSettled_ && std::equal(eye,eye+3,g.deathEye_),
               "fatal on-foot blasts capture the current death camera without waiting for another collision");
     }
+    static void affectType(Game& g, int type, uint8_t state = 0) {
+        Game::Explosion e{{origin[0],origin[1],origin[2]},0,type,false,4096};
+        e.state = state;
+        g.affectExplosion(e);
+    }
 };
 struct PlayerTestAccess {
     static int reaction(const Player& p) { return p.reaction_; }
@@ -331,6 +336,50 @@ static void duplicateSuppression() {
     chain.cars[0].releaseEffects();
 }
 
+static void flashBangAndWaterExplosion() {
+    // cExplosionFlashBang::Process -> cBaseExplosion::DazeEntities(30, 900, 250) -> cPlayer::Daze
+    Game flash; move(flash.player, 0);
+    GameTestAccess::affectType(flash, 5);
+    check(flash.screenFade.level() == 0x10000 && flash.screenFade.fading() && flash.screenFade.white &&
+          flash.player.health == 127 && !flash.player.reacting(),
+          "flashbang daze starts a white screen fade-in from full level without dealing health damage or knockdown");
+    flash.screenFade.tick();
+    check(flash.screenFade.level() == 0x10000 - (0x10000 / 127),
+          "flashbang daze fades in over its 127-frame maximum (DazeEntities' 250-strength point-blank daze, clamped)");
+
+    Game farFlash; move(farFlash.player, 31);
+    GameTestAccess::affectType(farFlash, 5);
+    check(farFlash.screenFade.level() == 0 && !farFlash.screenFade.fading(),
+          "flashbang daze leaves players beyond the 30-unit (900 squared) cutoff untouched");
+
+    // cExplosionWaterExplosion::Process: state 1 emits surface splash + smoke; state 2 applies force at z = -7.5
+    Game water; move(water.player, 0); water.player.pos[2] = -7 * 4096;
+    GameTestAccess::affectType(water, 10, 1);
+    check(water.player.health == 127 && !water.player.reacting(),
+          "water explosion state 1 creates surface effects before the underwater force pulse");
+    GameTestAccess::affectType(water, 10, 2);
+    check(water.player.health == 127 && water.player.reacting(),
+          "water explosion state 2 applies a zero-damage 7-unit force pulse centred at z = -7.5");
+
+    // Explosion::AddExplosion exclusions for water splashes (8, 9) and hotdog blasts (11)
+    Game splashExcl; splashExcl.enableExplosionRadiusCheck(true);
+    const int32_t zeroVel[3] = {0, 0, 0};
+    splashExcl.addPropExplosion(origin);
+    splashExcl.addWaterSplash(origin, 8, zeroVel, -1);
+    splashExcl.addHotDogExplosion(origin, zeroVel);
+    check(GameTestAccess::count(splashExcl) == 3,
+          "water splash and hotdog explosions bypass duplicate-radius suppression");
+
+    // A sunk grenade (cGrenade::Destroy) queues a type-10 water explosion; the special-process loop runs its state
+    // machine (cExplosionWaterExplosion::Process) and destroys it without re-queuing.
+    Game waterFlow; move(waterFlow.player, 1000);
+    waterFlow.addWaterExplosion(origin);
+    check(GameTestAccess::count(waterFlow) == 1, "a sunk grenade queues exactly one water explosion");
+    for (int i = 0; i < 40; ++i) GameTestAccess::process(waterFlow);
+    check(GameTestAccess::count(waterFlow) == 0 && waterFlow.player.health == 127,
+          "the water explosion advances through its states and destroys itself, harming nobody far away");
+}
+
 int main() {
     namespace fs=std::filesystem;
     const fs::path dir=fs::temp_directory_path()/"ctw-explosion-test"; fs::create_directories(dir);
@@ -343,6 +392,7 @@ int main() {
     }
     check(Weapons_Init(dir.string()),"synthetic blast weapon table loads");
     RandInit(0); arithmetic(); pedestrians(); vehicles(); queues(); propHealth(); duplicateSuppression();
+    flashBangAndWaterExplosion();
     fs::remove_all(dir);
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }

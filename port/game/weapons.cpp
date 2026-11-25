@@ -146,6 +146,10 @@ void WeaponManager::switchedTo(Weapon* w) {   // a weapon whose clip is not full
 }
 
 void WeaponManager::create(int slot, int type, int ammo) {   // cWeaponManager::CreateNewWeapon
+    // The original instantiates the type's cWeapon subclass here (the fist, nightstick, bat, sword, chainsaw
+    // and the gun classes). Each such constructor is only a vtable plus one or two zeroed fields, which the
+    // port's single Weapon(type) with its default members already reproduces; no per-class constructor is
+    // ported as its own routine.
     if (slot <= 7) changed = true;
     if (type < 0 || type > 24) return;
     if (type != 0) slots[slot] = std::make_unique<Weapon>(type);
@@ -408,7 +412,7 @@ void weaponSound(Player* shooter, uint32_t uid, int event, int volume, int radiu
     else TheSound().playerEvent(event, volume, radius);
 }
 
-// the sGetClosestHitThing::operator() cylinder test; returns the distance^2 >> 12, or -1
+// sGetClosestHitThing::Distance: the sGetClosestHitThing::operator() cylinder test; returns distance^2 >> 12, or -1
 int64_t cylinderDistance(const int32_t pos[3], int32_t radius, const int32_t start[3], const int16_t dir[2],
                          int32_t reach2) {
     const int32_t dx = pos[0] - start[0], dy = pos[1] - start[1];
@@ -474,7 +478,7 @@ void traceAndFlash(Game& g, Weapon& w, const int32_t origin[3], int32_t dir[3], 
         range = (int32_t)(uint32_t)std::sqrt((double)(uint64_t)((int64_t)vec[0] * vec[0] + (int64_t)vec[1] * vec[1] +
                                                                (int64_t)vec[2] * vec[2]));
     }
-    // sGetClosestHitThing (reach = range + 2 units)
+    // sGetClosestHitThing::sGetClosestHitThing (reach = range + 2 units)
     const int32_t reach = range + 0x2000;
     const int32_t reach2 = (int32_t)((uint64_t)((int64_t)reach * reach) >> 12);
     Hit best;
@@ -557,11 +561,18 @@ void traceAndFlash(Game& g, Weapon& w, const int32_t origin[3], int32_t dir[3], 
     }
 }
 
-const int kFireSfx[19][3] = {   // cAudioManager::AddSoundEvent(event, volume, radius) per FireSfx
+// cAudioManager::AddSoundEvent(event, volume, radius) per FireSfx:
+// cPistol::FireSfx / cDualPistol::FireSfx / cDesertEagle::FireSfx / cUzi::FireSfx / cMp5::FireSfx /
+// cShotgun::FireSfx / cSawnOffShotgun::FireSfx / cDoubleBarreledShotgun::FireSfx / cAK47::FireSfx /
+// cColt::FireSfx / cMinigun::FireSfx / cSniperRifle::FireSfx
+const int kFireSfx[19][3] = {
     {}, {}, {}, {}, {}, {0, 100, 1000}, {0, 100, 1000}, {34, 100, 1000}, {39, 100, 1000}, {39, 100, 1000},
     {1, 40, 200}, {1, 40, 200}, {1, 100, 1000}, {3, 100, 1000}, {3, 100, 1000}, {38, 70, 1000}, {}, {}, {45, 100, 1000}};
 
 // the gun's CreateBullet: FireSfx, then one trace (three for the shotguns)
+// cPistol::CreateBullet / cDualPistol::CreateBullet / cDesertEagle::CreateBullet / cUzi::CreateBullet /
+// cMp5::CreateBullet / cShotgun::CreateBullet / cSawnOffShotgun::CreateBullet / cDoubleBarreledShotgun::CreateBullet /
+// cAK47::CreateBullet / cColt::CreateBullet / cMinigun::CreateBullet
 void createBullet(Game& g, Weapon& w, Player* shooter = nullptr, uint32_t uid = 0) {
     const Player& body = shooter ? *shooter : g.player;
     if (w.type == 17) { g.projectiles.fireRocket(g); return; }   // cRocketLauncher (FireSfx: event 44)
@@ -591,6 +602,20 @@ void createBullet(Game& g, Weapon& w, Player* shooter = nullptr, uint32_t uid = 
     if (w.type == 6) ++w.shots;
 }
 
+// cMeleeBasedWeapon::GetDamageEffect / cBaseballBat::GetDamageEffect /
+// cNiteStick::GetDamageEffect / cChainsaw::GetDamageEffect
+int damageEffect(const Weapon& w, const Player& attacker, const Player& victim, int64_t range2) {
+    if (w.type == 1 && victim.health > 20) return 0;   // cNiteStick::GetDamageEffect: knockdown only at <= 20 health
+    if (w.type == 4) {   // cChainsaw::GetDamageEffect: effect 1 beyond range, else the base effect. The in-range
+                         // blood spray (a per-victim cParticleEmitterBloodSpray) and its 60-hit cap are not reproduced.
+        const int64_t dx = victim.pos[0] - attacker.pos[0];
+        const int64_t dy = victim.pos[1] - attacker.pos[1];
+        const int64_t dz = victim.pos[2] - attacker.pos[2];
+        if (dx * dx + dy * dy + dz * dz > range2) return 1;
+    }
+    return Weapons_Info(w.type).effect;
+}
+
 // cMeleeBasedWeapon::HitStuffHelper for the player: every ped within the weapon's range (and in sight) inside
 // +-angle of the fire direction, measured to a point 2 units in front of it, takes pedDamage; a vehicle whose box
 // holds the point 2 units in front of the player takes vehicleDamage. (Props are not ported here yet.)
@@ -615,13 +640,15 @@ void hitStuff(Game& g, Weapon& w, int16_t angle, int pedDamage, int vehicleDamag
     for (Pedestrians::Ped& p : g.peds.peds) {
         if (&p.body == shooter || (shooter && p.uid == uid) || p.vehicle || p.deadFrames >= 0 || p.body.dead ||
             !inRange(p.body.pos)) continue;
-        g.peds.meleeHit(g, p, pedDamage, type, a, Weapons_Info(w.type).effect, !shooter);
+        const int effect = damageEffect(w, body, p.body, range2);
+        g.peds.meleeHit(g, p, pedDamage, type, a, effect, !shooter);
         if (!shooter) g.pedCrime(p, type);
         hitPed = true;
     }
     if (shooter && g.playerCar < 0 && !g.player.dead && !g.player.hidden && !g.arrested() && inRange(g.player.pos)) {
+        const int effect = damageEffect(w, body, g.player, range2);
         g.player.takeDamage(pedDamage);
-        g.addBlood(g.player.pos, Weapons_Info(w.type).effect == 0x1D ? 0 : 4);
+        g.addBlood(g.player.pos, effect == 0x1D ? 0 : 4);
         hitPed = true;
     }
     for (Vehicle& c : g.cars) {
@@ -641,6 +668,8 @@ void hitStuff(Game& g, Weapon& w, int16_t angle, int pedDamage, int vehicleDamag
         else if (w.type == 4) w.sawHit = true;                  // cChainsaw::HitSfx
     }
     if (hitCar) {
+        // cFistWeapon::HitVehicleSfx / cNiteStick::HitVehicleSfx / cBaseballBat::HitVehicleSfx /
+        // cSword::HitVehicleSfx / cChainsaw::HitVehicleSfx
         static const int kHitVehicleSfx[5][2] = {{85, 127}, {83, 127}, {81, 127}, {84, 127}, {82, 30}};
         if (w.type >= 0 && w.type <= 4) weaponSound(shooter, uid, kHitVehicleSfx[w.type][0], kHitVehicleSfx[w.type][1], 200);
     }
@@ -652,11 +681,11 @@ void fireWeapon(Game& g, Weapon& w, Player* shooter = nullptr, uint32_t uid = 0)
     if (w.state != 0) return;
     if (w.melee()) {   // the weapon's HitStuff, then the swing's timer
         const int dmg = Weapons_Info(w.type).damage;
-        if (w.type == 0) hitStuff(g, w, 0x2000, dmg, 1, 0, shooter, uid);           // cFistWeapon
-        else if (w.type == 1) hitStuff(g, w, 0x2000, dmg, 3, 0, shooter, uid);      // cNiteStick (props 3)
-        else if (w.type == 2) hitStuff(g, w, 0x2000, dmg, 3, 0);      // cBaseballBat (props 12)
-        else if (w.type == 3) w.delayedHit = 7;                     // cSword::HitStuff
-        else if (w.type == 4) hitStuff(g, w, 0x2000, 200, dmg, 12);   // cChainsaw (props 35)
+        if (w.type == 0) hitStuff(g, w, 0x2000, dmg, 1, 0, shooter, uid);           // cFistWeapon::HitStuff
+        else if (w.type == 1) hitStuff(g, w, 0x2000, dmg, 3, 0, shooter, uid);      // cNiteStick::HitStuff (props 3)
+        else if (w.type == 2) hitStuff(g, w, 0x2000, dmg, 3, 0);                    // cBaseballBat::HitStuff (props 12)
+        else if (w.type == 3) w.delayedHit = 7;                                     // cSword::HitStuff
+        else if (w.type == 4) hitStuff(g, w, 0x2000, 200, dmg, 12);                 // cChainsaw::HitStuff (props 35)
         w.flags = 0;
         w.setState(1, 0);
         return;
@@ -736,20 +765,20 @@ void updateWeapon(Game& g, Weapon& w, Player* shooter = nullptr, uint32_t uid = 
             {
                 static const int kReloadSfx[19][3] = {
                     {}, {}, {}, {}, {},
-                    {73, 40, 200},    // cPistol
-                    {73, 40, 200},    // cDualPistol
-                    {73, 40, 200},    // cDesertEagle
-                    {77, 40, 200},    // cUzi
-                    {77, 40, 200},    // cMp5
-                    {78, 40, 200},    // cShotgun
-                    {43, 40, 200},    // cSawnOffShotgun
-                    {43, 100, 1000},  // cDoubleBarreledShotgun
-                    {74, 40, 200},    // cAK47
-                    {74, 40, 200},    // cColt
-                    {72, 100, 200},   // cMinigun
+                    {73, 40, 200},    // cPistol::ReloadSfx
+                    {73, 40, 200},    // cDualPistol::ReloadSfx
+                    {73, 40, 200},    // cDesertEagle::ReloadSfx
+                    {77, 40, 200},    // cUzi::ReloadSfx
+                    {77, 40, 200},    // cMp5::ReloadSfx
+                    {78, 40, 200},    // cShotgun::ReloadSfx
+                    {43, 40, 200},    // cSawnOffShotgun::ReloadSfx
+                    {43, 100, 1000},  // cDoubleBarreledShotgun::ReloadSfx
+                    {74, 40, 200},    // cAK47::ReloadSfx
+                    {74, 40, 200},    // cColt::ReloadSfx
+                    {72, 100, 200},   // cMinigun::ReloadSfx
                     {},
-                    {75, 60, 200},    // cRocketLauncher
-                    {76, 40, 200}};   // cSniperRifle
+                    {75, 60, 200},    // cRocketLauncher::ReloadSfx
+                    {76, 40, 200}};   // cSniperRifle::ReloadSfx
                 if (w.type < 19 && kReloadSfx[w.type][2])
                     weaponSound(shooter, uid, kReloadSfx[w.type][0], kReloadSfx[w.type][1], kReloadSfx[w.type][2]);
             }
@@ -975,17 +1004,17 @@ void Weapons_PlayerFrame(Game& g, bool fireHeld, int cycle, bool throwHeld) {
     // the sprites. Damage uses the current position/facing at contact, so moving away can evade the swing.
     const bool onFootAnimation=g.playerCar<0 && !g.player.dead && !g.player.attached && !g.player.reacting();
     if (c.type==0 && onFootAnimation && (c.state==1 || (c.flags&2)))
-        TheSound().playerEvent(9,50,200); // native unarmed cue 0x902218, animation call 0x87e228
+        TheSound().playerEvent(9,50,200); // cFistWeapon::FireSfx (0x902218, animation call 0x87e228)
     // the nightstick and the bat (cases 1 and 2): their FireSfx when the swing steps from frame 3 to 4 (0x87e180)
     if ((c.type == 1 || c.type == 2) && onFootAnimation &&
         ((c.state && (c.state == 1 || !(c.flags & 1))) || (c.flags & 2)) && g.player.enteredUpperFrame(4))
-        TheSound().playerEvent(7, 127, 200);   // cNiteStick / cBaseballBat::FireSfx
+        TheSound().playerEvent(7, 127, 200);   // cNiteStick::FireSfx / cBaseballBat::FireSfx
     if (c.type == 3 && onFootAnimation &&
         ((c.state && (c.state == 1 || !(c.flags & 1))) || (c.flags & 2))) {
         Weapon& sword = *m.current();
         // Native animation branch at 0x87e258 checks the previous sprite update, before advancing it again.
         if (g.player.enteredUpperFrame(8) || g.player.enteredUpperFrame(12))
-            TheSound().playerEvent(152,127,200); // native sword cue at 0x906058
+            TheSound().playerEvent(152,127,200); // cSword::FireSfx (0x906058)
         if (sword.delayedHit && --sword.delayedHit == 0)
             hitStuff(g, sword, 0x2000, Weapons_Info(3).damage, 3, 11);
     }

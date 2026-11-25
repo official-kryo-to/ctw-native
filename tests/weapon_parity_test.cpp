@@ -108,6 +108,10 @@ int main() {
     table.info[0].range = 4 * 4096;
     table.info[3].range = 4 * 4096;
     table.info[3].fireDelay = 24;
+    for (int type : {1, 2, 4}) {   // nightstick, bat and chainsaw: melee, sharing the sword's slot, never firing bullets
+        table.info[type].maxAmmo = -1; table.info[type].slot = 1; table.info[type].range = 4 * 4096;
+    }
+    table.info[1].damage = 12; table.info[2].damage = 15; table.info[4].damage = 20;
     for (int32_t& life : table.traceLife) life = 3;   // the loader rejects trace lifetimes outside 1..127
     {   // the sniper rifle: 40 units of range, 50 damage
         WeaponInfo& s = table.info[18];
@@ -432,6 +436,28 @@ int main() {
         check(g.peds.peds[0].body.health == 77 && g.peds.peds[1].body.health == 127,
               "a sniper shot takes the rifle's damage from the ped under the aim point only");
         s.active = false;
+    }
+
+    {   // cFistWeapon / cNiteStick / cBaseballBat / cChainsaw::HitStuff: each swing's own vehicle damage.
+        // The sword's three points are checked above; a car two units ahead sits under the "two units in front"
+        // contact point of cMeleeBasedWeapon::HitStuffHelper, which is independent of the weapon's range.
+        auto meleeCarDamage = [&](int type) {
+            scene(g);                              // leaves a ready sword in the melee slot
+            if (type == 0) g.playerWeapons.setUse(0, false);
+            else check(g.playerWeapons.give(type, 0, true), "a melee weapon can be equipped");
+            Vehicle car; VehicleInfo vi{};
+            const int32_t at[3] = {0, 2 * 4096, 0};
+            car.init(vi, 0, at, 0, 0);
+            car.hx = car.hy = car.hz = 4096;
+            g.cars.push_back(std::move(car));
+            const int before = g.cars[0].health();
+            Weapons_PlayerFrame(g, true, 0);       // fist, stick, bat and chainsaw contact on the firing tick
+            return before - g.cars[0].health();
+        };
+        check(meleeCarDamage(0) == 1, "an unarmed swing takes one vehicle health point");
+        check(meleeCarDamage(1) == 3, "a nightstick swing takes three vehicle health points");
+        check(meleeCarDamage(2) == 3, "a baseball bat swing takes three vehicle health points");
+        check(meleeCarDamage(4) == 20, "a chainsaw swing takes its weapon-table damage in vehicle health");
     }
 
     g.cars.clear(); g.peds.clear();
